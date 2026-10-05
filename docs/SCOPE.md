@@ -21,6 +21,15 @@ Ordem de construção:
 
 Regra de desempenho: nenhuma mudança piora mais de 2% a linha de base; uma mudança por vez.
 
+## estado em 05/10/2026 01:50
+
+1. feito (docs/BASELINE.md).
+2. parcial: infra e workflow prontos; primeiro build compilando (run 37263759580), não concluído.
+3. parcial: 40 patches do Helium ativos e aplicando; compilação não verificada.
+4. a 10: não iniciados (sidebar/grade parcialmente coberta pelos patches de layout do Helium, sem a grade de pinned própria).
+11. parcial: MV2 vem do ungoogled; uBlock embutido desativado (faltam fontes third_party/ublock); importador do Arc portado.
+12. parcial: build gera .tar.zst como artifact; sem release nem PKGBUILD.
+
 ## depois
 
 - v1.1: reescrita das páginas internas (histórico, configurações, segurança); dado frio do storage de sites, com reidratação na navegação, exceções de frio e cookies nunca frios.
