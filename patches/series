@@ -7,6 +7,9 @@ helium/core/keyboard-shortcuts.patch
 helium/core/memory-saving-by-default.patch
 helium/core/flags-setup.patch
 helium/core/add-low-power-framerate-flag.patch
+helium/core/add-component-l10n-support.patch
+helium/core/ublock-setup-sources.patch
+helium/core/ublock-install-as-component.patch
 helium/core/infinite-tab-freezing.patch
 helium/core/open-new-tabs-next-to-active-tab-option.patch
 helium/core/browser-window-context-menu.patch
