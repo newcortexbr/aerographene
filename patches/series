@@ -28,6 +28,7 @@ helium/ui/tabs.patch
 helium/ui/toolbar-button-prefs.patch
 helium/ui/remove-split-view-mini-toolbar.patch
 helium/ui/split-view.patch
+helium/ui/frame-radius-helper.patch
 helium/ui/multi-contents-view.patch
 helium/ui/rounded-frame-corners.patch
 helium/ui/fix-layout-separators.patch
