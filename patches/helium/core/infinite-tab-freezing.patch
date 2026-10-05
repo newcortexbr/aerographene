@@ -1,0 +1,17 @@
+# aerographene: patch portado sem alteração do conteúdo do diff.
+# Origem: https://github.com/imputnet/helium (tag 0.18.3, Chromium 154.0.8037.97)
+# Commit: 57a40ad82583d21787cff0500150539ce54c5960
+# Caminho original: patches/helium/core/infinite-tab-freezing.patch
+# Licença: GPL-3.0 (Helium); ver LICENSE do Helium.
+#
+--- a/components/performance_manager/features.cc
++++ b/components/performance_manager/features.cc
+@@ -212,7 +212,7 @@ BASE_FEATURE(kFreezingFollowsDiscardOptO
+ 
+ BASE_FEATURE(kRecordFreezingEligibilityUKM, base::FEATURE_ENABLED_BY_DEFAULT);
+ 
+-BASE_FEATURE(kInfiniteTabsFreezing, base::FEATURE_DISABLED_BY_DEFAULT);
++BASE_FEATURE(kInfiniteTabsFreezing, base::FEATURE_ENABLED_BY_DEFAULT);
+ 
+ BASE_FEATURE_PARAM(int,
+                    kInfiniteTabsFreezing_NumProtectedTabs,

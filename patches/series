@@ -1,0 +1,7 @@
+helium/core/services-prefs.patch
+helium/core/onboarding-page.patch
+helium/core/memory-saving-by-default.patch
+helium/core/flags-setup.patch
+helium/core/add-low-power-framerate-flag.patch
+helium/core/infinite-tab-freezing.patch
+helium/core/lazy-session-restore.patch

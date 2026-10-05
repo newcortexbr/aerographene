@@ -1,0 +1,17 @@
+# aerographene: patch portado sem alteração do conteúdo do diff.
+# Origem: https://github.com/imputnet/helium (tag 0.18.3, Chromium 154.0.8037.97)
+# Commit: 57a40ad82583d21787cff0500150539ce54c5960
+# Caminho original: patches/helium/core/memory-saving-by-default.patch
+# Licença: GPL-3.0 (Helium); ver LICENSE do Helium.
+#
+--- a/components/performance_manager/user_tuning/prefs.cc
++++ b/components/performance_manager/user_tuning/prefs.cc
+@@ -32,7 +32,7 @@ void RegisterLocalStatePrefs(PrefRegistr
+       kMemorySaverModeTimeBeforeDiscardInMinutes,
+       kDefaultMemorySaverModeTimeBeforeDiscardInMinutes);
+   registry->RegisterIntegerPref(
+-      kMemorySaverModeState, static_cast<int>(MemorySaverModeState::kDisabled));
++      kMemorySaverModeState, static_cast<int>(MemorySaverModeState::kEnabled));
+   registry->RegisterIntegerPref(
+       kMemorySaverModeAggressiveness,
+       static_cast<int>(MemorySaverModeAggressiveness::kMedium));
