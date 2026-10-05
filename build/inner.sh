@@ -107,8 +107,13 @@ sed -E 's/^(google_[a-z_]+)=.*/\1=<omitido>/' "${_out_dir}/args.gn.new"
 if ! cmp -s "${_out_dir}/args.gn.new" "${_out_dir}/args.gn"; then mv "${_out_dir}/args.gn.new" "${_out_dir}/args.gn"; else rm "${_out_dir}/args.gn.new"; fi
 
 echo "== toolchain"
-# setup_toolchain faz rm -rf esbuild/ (barra final segue o symlink de uma execução anterior e tenta apagar /usr/lib)
-rm -f "${_src_dir}/third_party/devtools-frontend/src/node_modules/esbuild"
+# setup_toolchain faz rm -rf esbuild/ (barra final segue o symlink de uma execução anterior e tenta apagar /usr/lib).
+# Move a entrada (diretório, symlink ou symlink quebrado) para um backup exclusivo, sem seguir o link e sem rm.
+_esb="${_src_dir}/third_party/devtools-frontend/src/node_modules/esbuild"
+if [ -e "$_esb" ] || [ -L "$_esb" ]; then
+    _esb_bak="$(mktemp -d "${_esb}.aero-bak.XXXXXX")"
+    mv -T -- "$_esb" "${_esb_bak}/esbuild"
+fi
 setup_toolchain
 
 echo "== helium-onboarding (deps.ini do Helium, sha256 fixado)"
