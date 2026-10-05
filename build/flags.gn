@@ -1,0 +1,18 @@
+# aerographene: flags próprias (ADR 0003). Aplicadas por cima de
+# ungoogled-chromium/flags.gn e portablelinux/flags.linux.gn; a última
+# definição de cada chave vence (ver build/inner.sh:merge_args).
+is_official_build=true
+is_debug=false
+is_component_build=false
+symbol_level=0
+blink_symbol_level=0
+v8_symbol_level=0
+use_thin_lto=true
+thin_lto_enable_optimizations=true
+use_icf=true
+# runner com ~14 GB de RAM: um link por vez (o link do chrome com ThinLTO é o pico).
+concurrent_links=1
+# chrome_pgo_phase/pgo_data_path são escritos por build/inner.sh (perfil oficial
+# baixado se disponível; senão chrome_pgo_phase=0).
+# -march=x86-64-v3: não existe arg GN para x86; aplicado em
+# build/config/compiler/BUILD.gn por build/inner.sh (ver docs/BUILD.md).
