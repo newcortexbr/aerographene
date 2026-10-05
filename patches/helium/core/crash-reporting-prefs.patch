@@ -1,8 +1,9 @@
-# aerographene: patch portado sem alteração do conteúdo do diff.
+# aerographene: hunk GetUploadUrl rebaseado (ver abaixo); resto sem alteração.
 # Origem: https://github.com/imputnet/helium (tag 0.18.3, Chromium 154.0.8037.97)
 # Commit: 57a40ad82583d21787cff0500150539ce54c5960
 # Caminho original: patches/helium/core/crash-reporting-prefs.patch
 # Licença: GPL-3.0 (Helium); ver LICENSE do Helium.
+# aerographene: hunk de GetUploadUrl rebaseado sobre disable-crash-reporter (ungoogled); upload padrão mantido desligado.
 #
 --- a/chrome/common/pref_names.h
 +++ b/chrome/common/pref_names.h
@@ -83,7 +84,7 @@
  #endif
  
  std::string CrashReporterClient::GetUploadUrl() {
--#if BUILDFLAG(GOOGLE_CHROME_BRANDING) && defined(OFFICIAL_BUILD)
+-#if 0
 -  return kDefaultUploadURL;
 +#if !BUILDFLAG(IS_WIN)
 +  const auto* command_line = base::CommandLine::ForCurrentProcess();
@@ -92,7 +93,7 @@
 +  }
 +#endif
 +
-+#if defined(OFFICIAL_BUILD)
++#if 0  // aerographene: sem upload padrão (URL do Helium desativada)
 +  return "https://crash.helium.computer/crash";
  #else
    return std::string();
