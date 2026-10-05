@@ -1,4 +1,7 @@
+brave/chrome-importer-files.patch
+brave/custom-importer.patch
 brave/tab-cycling-mru-impl.patch
+helium/core/add-arc-importer.patch
 helium/core/services-prefs.patch
 helium/core/override-chrome-protocol.patch
 helium/core/onboarding-page.patch
