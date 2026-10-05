@@ -22,7 +22,8 @@ patch_hash() {
 
 want_hash="$(patch_hash)"
 have_hash="$(cat "${_src_dir}/.aero-patches.hash" 2>/dev/null || true)"
-if [ -f "${_src_dir}/.downloaded.stamp" ] && [ -f "${_src_dir}/.aero-patches.hash" ] && [ "${want_hash}" != "${have_hash}" ]; then
+# sem hash = aplicação anterior interrompida (árvore parcialmente patcheada): recria também
+if [ -f "${_src_dir}/.downloaded.stamp" ] && { [ ! -f "${_src_dir}/.aero-patches.hash" ] || [ "${want_hash}" != "${have_hash}" ]; }; then
     echo "== série de patches mudou: recriando a árvore (preservando out/)"
     if [ -d "${_src_dir}/out" ]; then mv "${_src_dir}/out" "${_root}/build/out.keep"; fi
     rm -rf "${_src_dir}"
