@@ -1,4 +1,4 @@
-# aerographene: patch portado sem alteração do conteúdo do diff.
+# aerographene: hunk DoPostLayoutVisualAdjustments (browser_view_tabbed_layout_impl.cc) rebaseado em dois hunks sobre o 154.
 # Origem: https://github.com/imputnet/helium (tag 0.18.3, Chromium 154.0.8037.97)
 # Commit: 57a40ad82583d21787cff0500150539ce54c5960
 # Caminho original: patches/helium/ui/layout/vertical.patch
@@ -443,13 +443,17 @@
    }
  
    if (IsParentedTo(views().side_panel_content_transition_scrim,
-@@ -1588,9 +1501,17 @@ void BrowserViewTabbedLayoutImpl::DoPreL
- void BrowserViewTabbedLayoutImpl::DoPostLayoutVisualAdjustments(
-     const BrowserLayoutParams& params) {
+@@ -1535,6 +1535,8 @@ void BrowserViewTabbedLayoutImpl::DoPostLayoutVisualAdjustments(
+   CustomCornersBackground::Cutouts main_background_cutout_views;
+   CustomCornersBackground::Cutouts tab_strip_cutout_views;
    int side_panel_start = layout_data_->revised_params.visual_client_area.x();
 +  int side_panel_end =
 +      layout_data_->revised_params.visual_client_area.right();
  
+   // Set vertical tabstrip corners.
+   CustomCorners::ColorChoiceWithAlpha frame_color(CustomCorners::FrameTheme(),
+@@ -1541,5 +1543,11 @@ void BrowserViewTabbedLayoutImpl::DoPostLayoutVisualAdjustments(
+                                                   1.0f);
    if (layout_data_->tab_strip_type == TabStripType::kVertical) {
 -    side_panel_start = views().vertical_tab_strip_region_view->bounds().right();
 +    const gfx::Rect vertical_tab_strip_bounds =
@@ -459,9 +463,9 @@
 +    } else {
 +      side_panel_start = vertical_tab_strip_bounds.right();
 +    }
-   }
  
-   views().side_panel_content_transition_scrim->layer()->SetOpacity(
+     // Vertical tabstrip goes all the way to the top of the window if it is not
+     // collapsed or there are no caption buttons on the leading edge.
 @@ -1629,8 +1550,7 @@ void BrowserViewTabbedLayoutImpl::DoPost
      const int left_overlap =
          std::max(0, side_panel_start - views().side_panel->x());
