@@ -1,0 +1,135 @@
+aerographene: nomes de processo legíveis no Linux (SCOPE item 9).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: ps/top mostram `aerographene` (browser), `aerographene: <space>`
+(renderer), `aerographene: gpu`, `aerographene: rede`,
+`aerographene: utilitário <tipo>`, `aerographene: crash handler`.
+cmdline via setproctitle (já usado em base::SetProcessTitleFromCommandLine,
+chamado em content_main.cc e no fork do zygote); comm (15 bytes) via
+prctl(PR_SET_NAME) como `aerographene` ou `ag: <rótulo>`. O browser passa o
+nome do space ao renderer em --aerographene-space. Só exibição: sem fundir
+processos, sem mudar sandbox, sem RAM extra.
+
+--- a/base/process/set_process_title.cc
++++ b/base/process/set_process_title.cc
+@@ -42,6 +42,52 @@
+ 
+ namespace base {
+ 
++#if BUILDFLAG(IS_LINUX)
++namespace {
++
++// aerographene: readable process names. Returns the label shown after
++// "aerographene: " for the current process type ("" for the browser).
++// `short_label` is the variant used for the 15-byte comm name.
++std::string AerographeneProcessLabel(const base::CommandLine& cmd,
++                                     std::string* short_label) {
++  const std::string type = cmd.GetSwitchValueASCII("type");
++  std::string label;
++  if (type.empty()) {
++    label = "";
++    *short_label = "";
++  } else if (type == "renderer") {
++    label = cmd.GetSwitchValueNative("aerographene-space");
++    for (char& c : label) {
++      if (static_cast<unsigned char>(c) < 0x20 || c == 0x7f) {
++        c = '?';
++      }
++    }
++    if (label.empty()) {
++      label = "renderer";
++    }
++    *short_label = label;
++  } else if (type == "gpu-process") {
++    label = *short_label = "gpu";
++  } else if (type == "utility") {
++    std::string sub = cmd.GetSwitchValueASCII("utility-sub-type");
++    sub = sub.substr(0, sub.find('.'));
++    if (sub == "network") {
++      label = *short_label = "rede";
++    } else {
++      *short_label = sub.empty() ? "utilitário" : sub;
++      label = sub.empty() ? "utilitário" : "utilitário " + sub;
++    }
++  } else if (type == "crashpad-handler") {
++    label = *short_label = "crash handler";
++  } else {
++    label = *short_label = type;
++  }
++  return label;
++}
++
++}  // namespace
++#endif  // BUILDFLAG(IS_LINUX)
++
+ // TODO(jrg): Find out if setproctitle or equivalent is available on Android.
+ #if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_SOLARIS) && \
+     !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_FUCHSIA)
+@@ -95,6 +141,22 @@
+ 
+   const base::CommandLine* command_line =
+       base::CommandLine::ForCurrentProcess();
++#if BUILDFLAG(IS_LINUX)
++  // aerographene: replace the argv title and the comm name with a readable
++  // label. Only the displayed strings change; the processes are untouched.
++  {
++    std::string short_label;
++    const std::string label =
++        AerographeneProcessLabel(*command_line, &short_label);
++    std::string comm =
++        short_label.empty() ? "aerographene" : "ag: " + short_label;
++    base::TruncateUTF8ToByteSize(comm, 15, &comm);
++    prctl(PR_SET_NAME, comm.c_str());
++    setproctitle("-%s", label.empty() ? "aerographene"
++                                      : ("aerographene: " + label).c_str());
++    return;
++  }
++#endif  // BUILDFLAG(IS_LINUX)
+   for (size_t i = 1; i < command_line->argv().size(); ++i) {
+     if (!title.empty()) {
+       title += " ";
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -45,6 +45,7 @@
+ #include "base/strings/string_number_conversions.h"
+ #include "base/strings/string_split.h"
+ #include "base/strings/string_util.h"
++#include "base/strings/utf_string_conversions.h"
+ #include "base/strings/stringprintf.h"
+ #include "base/supports_user_data.h"
+ #include "base/task/sequenced_task_runner.h"
+@@ -159,6 +160,8 @@
+ #include "chrome/browser/privacy_sandbox/privacy_sandbox_settings_factory.h"
+ #include "chrome/browser/private_verification_tokens/private_verification_tokens_service_factory.h"
+ #include "chrome/browser/private_verification_tokens/private_verification_tokens_url_loader_throttle.h"
++#include "chrome/browser/profiles/profile_attributes_entry.h"
++#include "chrome/browser/profiles/profile_attributes_storage.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/profiles/profile_io_data.h"
+ #include "chrome/browser/profiles/profile_manager.h"
+@@ -2951,6 +2954,25 @@
+ 
+     MaybeCopyDisableWebRtcEncryptionSwitch(command_line, browser_command_line,
+                                            chrome::GetChannel());
++#if BUILDFLAG(IS_LINUX)
++    // aerographene: pass the space (profile) name so the renderer can show
++    // "aerographene: <space>" in ps/top. Display only; see patches/README.md.
++    if (process && g_browser_process->profile_manager()) {
++      Profile* space = Profile::FromBrowserContext(process->GetBrowserContext())
++                           ->GetOriginalProfile();
++      ProfileAttributesEntry* entry =
++          g_browser_process->profile_manager()
++              ->GetProfileAttributesStorage()
++              .GetProfileAttributesWithPath(space->GetPath());
++      if (entry) {
++        std::string name = base::UTF16ToUTF8(entry->GetLocalProfileName());
++        base::TruncateUTF8ToByteSize(name, 48, &name);
++        if (!name.empty()) {
++          command_line->AppendSwitchNative("aerographene-space", name);
++        }
++      }
++    }
++#endif  // BUILDFLAG(IS_LINUX)
+     if (process) {
+       Profile* profile =
+           Profile::FromBrowserContext(process->GetBrowserContext());

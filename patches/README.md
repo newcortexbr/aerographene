@@ -64,3 +64,15 @@ Estado: aplicação não verificada; será verificada no primeiro build (o Chrom
 
 - `helium/core/onboarding-page.patch` exige `components/helium_onboarding` (BUILD.gn, grdp, fontes). `build/inner.sh` baixa o release `202609160835` de imputnet/helium-onboarding (versão e sha256 de `deps.ini` do Helium) para essa pasta antes do `gn gen`.
 - Patches uBlock desativados em `series`: ver linha de comentário acima deles.
+
+## patches próprios do aerographene
+
+### `aerographene/process-names.patch` (GPL-3.0, SCOPE item 9)
+
+Nomes de processo legíveis no Linux. Toca `base/process/set_process_title.cc` e `chrome/browser/chrome_content_browser_client.cc` (este também tocado por 5 patches do ungoogled e por `helium/core/shift-right-click-context-menu.patch`; dry-run feito sobre a cópia já com eles).
+
+- cmdline (`ps aux`, `top -c`): `aerographene`, `aerographene: <space>`, `aerographene: gpu`, `aerographene: rede` (utility `network.*`), `aerographene: utilitário <tipo>` (tipo = prefixo do `--utility-sub-type`), `aerographene: crash handler`, demais tipos `aerographene: <type>`. Os argumentos originais deixam de aparecer no título (continuam no processo).
+- comm (`top`, `ps -e`, 15 bytes): `aerographene` no browser e `ag: <rótulo>` truncado em UTF-8 nos filhos.
+- decisão: o renderer não conhece o perfil; o browser acrescenta `--aerographene-space=<nome local do perfil>` (perfil original, inclusive para anônimo; até 48 bytes) em `ChromeContentBrowserClient::AppendExtraCommandLineSwitches`. O renderer só lê o switch para exibir; caracteres de controle viram `?`. Mais simples que IPC e não muda sandbox nem processo.
+- privacidade: o nome do space fica visível a qualquer usuário local via `ps`/`/proc/<pid>/cmdline` (já era o caso para os demais switches). Em máquina multiusuário, nomes de space revelam contexto; aceito para uso pessoal.
+- limites: o crash handler no Linux é binário separado (`chrome_crashpad_handler`) e não passa por `SetProcessTitleFromCommandLine`; o rótulo só vale se rodar via `--type=crashpad-handler`. Compilação e runtime não verificados.
