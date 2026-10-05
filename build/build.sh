@@ -34,7 +34,15 @@ fi
 
 # 2. imagem do builder: a do portablelinux + zstd
 if ! docker image inspect chromium-builder:trixie-slim >/dev/null 2>&1; then
-    (cd "${PL_DIR}/docker" && docker build -t chromium-builder:trixie-slim -f build.Dockerfile .)
+    if docker buildx version >/dev/null 2>&1; then
+        (cd "${PL_DIR}/docker" && DOCKER_BUILDKIT=1 docker build -t chromium-builder:trixie-slim -f build.Dockerfile .)
+    else
+        # sem BuildKit: copia o contexto e troca COPY --chmod/--chown por COPY + RUN (upstream intacto)
+        rm -rf "${WORK}/docker-ctx" && cp -r "${PL_DIR}/docker" "${WORK}/docker-ctx"
+        sed -i -E 's#^COPY --chmod=([0-9]+) --chown=([^ ]+) ([^ ]+) (.+)$#COPY \3 \4\nUSER root\nRUN chown -R \2 \4 \&\& chmod -R \1 \4\nUSER \2#' "${WORK}/docker-ctx/build.Dockerfile"
+        grep -q -- '--chmod' "${WORK}/docker-ctx/build.Dockerfile" && { echo "erro: --chmod restante no Dockerfile" >&2; exit 1; }
+        (cd "${WORK}/docker-ctx" && docker build -t chromium-builder:trixie-slim -f build.Dockerfile .)
+    fi
 fi
 if ! docker image inspect aerographene-builder:latest >/dev/null 2>&1; then
     docker build -t aerographene-builder:latest - <<'EOF'
