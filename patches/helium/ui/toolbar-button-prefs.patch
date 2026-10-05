@@ -1,4 +1,4 @@
-# aerographene: patch portado sem alteração do conteúdo do diff.
+# aerographene: hunk de customize_toolbar_handler.cc (ListActions) rebaseado; resto sem alteração.
 # Origem: https://github.com/imputnet/helium (tag 0.18.3, Chromium 154.0.8037.97)
 # Commit: 57a40ad82583d21787cff0500150539ce54c5960
 # Caminho original: patches/helium/ui/toolbar-button-prefs.patch
@@ -516,16 +516,26 @@
    const auto add_action =
        [&actions, this, &provider, scale_factor, bwi](
            actions::ActionId id,
-@@ -284,17 +429,16 @@ void CustomizeToolbarHandler::ListAction
+@@ -317,27 +317,26 @@ void CustomizeToolbarHandler::ListActions(
          actions.push_back(std::move(mojo_action));
        };
  
 -  add_action(kActionNewIncognitoWindow,
 -             side_panel::customize_chrome::mojom::CategoryId::kNavigation);
 -
+   add_action(kActionShowPasswordsBubbleOrPage,
+              side_panel::customize_chrome::mojom::CategoryId::kYourChrome);
+   add_action(kActionShowPaymentsBubbleOrPage,
+              side_panel::customize_chrome::mojom::CategoryId::kYourChrome);
+   add_action(kActionShowAddressesBubbleOrPage,
+              side_panel::customize_chrome::mojom::CategoryId::kYourChrome);
    add_action(kActionSidePanelShowBookmarks,
 -             side_panel::customize_chrome::mojom::CategoryId::kYourChrome);
 +             side_panel::customize_chrome::mojom::CategoryId::kTools);
+   add_action(kActionSidePanelShowReadingList,
+              side_panel::customize_chrome::mojom::CategoryId::kYourChrome);
+   add_action(kActionSidePanelShowTabsFromOtherDevices,
+              side_panel::customize_chrome::mojom::CategoryId::kYourChrome);
    add_action(kActionSidePanelShowHistoryCluster,
 -             side_panel::customize_chrome::mojom::CategoryId::kYourChrome);
 +             side_panel::customize_chrome::mojom::CategoryId::kTools);
