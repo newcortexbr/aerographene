@@ -59,3 +59,8 @@ Estado: aplicação não verificada; será verificada no primeiro build (o Chrom
 - O código do uBlock Origin em si vem de `deps.ini` (`[ublock_origin]`, `third_party/ublock`) e de scripts do Helium, fora de `patches/`; o build precisa baixá-lo.
 - `brave/fix-component-content-settings-store`, e o restante de `helium/ui` (compact, toolbar-actions, horizontal-tabs, etc.): sem dependência achada.
 - `brave/*` entram só como dependência: `tab-cycling-mru-impl` (UI) e `chrome-importer-files`/`custom-importer` (importador do Arc).
+
+## Recursos externos ao `patches/`
+
+- `helium/core/onboarding-page.patch` exige `components/helium_onboarding` (BUILD.gn, grdp, fontes). `build/inner.sh` baixa o release `202609160835` de imputnet/helium-onboarding (versão e sha256 de `deps.ini` do Helium) para essa pasta antes do `gn gen`.
+- Patches uBlock desativados em `series`: ver linha de comentário acima deles.

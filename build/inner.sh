@@ -111,6 +111,20 @@ echo "== toolchain"
 rm -f "${_src_dir}/third_party/devtools-frontend/src/node_modules/esbuild"
 setup_toolchain
 
+echo "== helium-onboarding (deps.ini do Helium, sha256 fixado)"
+ob_ver=202609160835
+ob_sha=35ce782dc9534b5bff59af7937f22c90179ca9610883acb2e0d698cc6f799366
+ob_dir="${_src_dir}/components/helium_onboarding"
+if [ ! -f "${ob_dir}/.aero-onboarding-${ob_ver}" ]; then
+    ob_tgz="${_root}/build/helium-onboarding-${ob_ver}.tar.gz"
+    [ -s "$ob_tgz" ] || curl -fL --retry 3 -o "$ob_tgz" \
+        "https://github.com/imputnet/helium-onboarding/releases/download/${ob_ver}/helium-onboarding-${ob_ver}.tar.gz"
+    echo "${ob_sha}  ${ob_tgz}" | sha256sum -c -
+    rm -rf "$ob_dir"; mkdir -p "$ob_dir"
+    tar -xzf "$ob_tgz" -C "$ob_dir"
+    touch "${ob_dir}/.aero-onboarding-${ob_ver}"
+fi
+
 echo "== gn gen"
 cd "${_src_dir}"
 [ -x out/Default/gn ] || ./tools/gn/bootstrap/bootstrap.py -o out/Default/gn --skip-generate-buildfiles
