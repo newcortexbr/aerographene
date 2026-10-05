@@ -1,0 +1,25 @@
+pkgbase = aerographene
+	pkgdesc = Navegador baseado em ungoogled-chromium 154.0.8037.97
+	pkgver = 1.0.0
+	pkgrel = 1
+	url = https://github.com/newcortexbr/aerographene
+	arch = x86_64
+	license = GPL3
+	depends = gtk3
+	depends = nss
+	depends = alsa-lib
+	depends = libxss
+	depends = libcups
+	depends = libxkbcommon
+	depends = mesa
+	noextract = aerographene-1.0.0-x86_64_linux.tar.zst
+	options = !strip
+	options = !debug
+	source = aerographene-1.0.0-x86_64_linux.tar.zst::https://github.com/newcortexbr/aerographene/releases/download/v1.0.0/aerographene-1.0.0-x86_64_linux.tar.zst
+	source = aerographene.desktop
+	source = LICENSE::https://raw.githubusercontent.com/newcortexbr/aerographene/v1.0.0/LICENSE
+	sha256sums = SKIP
+	sha256sums = SKIP
+	sha256sums = SKIP
+
+pkgname = aerographene

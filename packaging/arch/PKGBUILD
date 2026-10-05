@@ -1,0 +1,34 @@
+# Maintainer: newcortexbr
+pkgname=aerographene
+pkgver=1.0.0
+pkgrel=1
+_chromium=154.0.8037.97   # base do ungoogled-chromium; independente do pkgver
+pkgdesc="Navegador baseado em ungoogled-chromium ${_chromium}"
+arch=('x86_64')
+url="https://github.com/newcortexbr/aerographene"
+license=('GPL3')
+depends=('gtk3' 'nss' 'alsa-lib' 'libxss' 'libcups' 'libxkbcommon' 'mesa')
+options=('!strip' '!debug')
+# release.yml publica o tarball com este nome (renomeado do artifact do build)
+source=("${pkgname}-${pkgver}-x86_64_linux.tar.zst::${url}/releases/download/v${pkgver}/${pkgname}-${pkgver}-x86_64_linux.tar.zst"
+        "${pkgname}.desktop"
+        "LICENSE::https://raw.githubusercontent.com/newcortexbr/aerographene/v${pkgver}/LICENSE")
+# SKIP até existir release publicada (repo privado: baixar exige token); trocar por updpkgsums
+sha256sums=('SKIP' 'SKIP' 'SKIP')
+noextract=("${pkgname}-${pkgver}-x86_64_linux.tar.zst")
+
+prepare() {
+  mkdir -p app
+  # o tarball tem um diretório raiz aerographene-<tag>-<sha>-x86_64_linux
+  bsdtar -xf "${pkgname}-${pkgver}-x86_64_linux.tar.zst" -C app --strip-components=1
+}
+
+package() {
+  install -d "$pkgdir/opt/$pkgname" "$pkgdir/usr/bin"
+  cp -a app/. "$pkgdir/opt/$pkgname/"
+  ln -s /opt/$pkgname/aerographene "$pkgdir/usr/bin/aerographene"
+  install -Dm644 "$pkgname.desktop" "$pkgdir/usr/share/applications/$pkgname.desktop"
+  # ícone placeholder: product_logo_48.png do próprio pacote (branding fica para depois)
+  install -Dm644 app/product_logo_48.png "$pkgdir/usr/share/icons/hicolor/48x48/apps/$pkgname.png"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
