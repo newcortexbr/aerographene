@@ -1,0 +1,7 @@
+<!doctype html><meta charset="utf-8"><title>start</title><body>aerographene bench
+<script>
+// avisa o harness quando a página carregou e pintou dois frames.
+addEventListener('load', () => requestAnimationFrame(() => requestAnimationFrame(() => {
+  fetch('/ready' + location.search, {cache: 'no-store'});
+})));
+</script>

@@ -1,0 +1,21 @@
+<!doctype html><meta charset="utf-8"><title>tab</title>
+<style>.c{display:inline-block;width:40px;height:20px;margin:1px;border-radius:4px}</style>
+<body><div id=g></div>
+<script>
+// página sintética determinística: ~3000 nós de DOM, algum JS e estilo, sem rede externa.
+const g = document.getElementById('g');
+const data = [];
+for (let i = 0; i < 3000; i++) {
+  const d = document.createElement('div');
+  d.className = 'c';
+  d.style.background = `hsl(${(i * 37) % 360} 60% 50%)`;
+  d.textContent = i;
+  g.appendChild(d);
+  data.push({i, s: 'x'.repeat(64)});
+}
+window.__keep = data;
+const ready = () => fetch('/ready' + location.search, {cache: 'no-store'});
+// aba em segundo plano não roda rAF: avisa no load.
+addEventListener('load', () => document.hidden ? ready() :
+  requestAnimationFrame(() => requestAnimationFrame(ready)));
+</script>
