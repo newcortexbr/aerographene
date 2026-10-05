@@ -107,6 +107,8 @@ sed -E 's/^(google_[a-z_]+)=.*/\1=<omitido>/' "${_out_dir}/args.gn.new"
 if ! cmp -s "${_out_dir}/args.gn.new" "${_out_dir}/args.gn"; then mv "${_out_dir}/args.gn.new" "${_out_dir}/args.gn"; else rm "${_out_dir}/args.gn.new"; fi
 
 echo "== toolchain"
+# setup_toolchain faz rm -rf esbuild/ (barra final segue o symlink de uma execução anterior e tenta apagar /usr/lib)
+rm -f "${_src_dir}/third_party/devtools-frontend/src/node_modules/esbuild"
 setup_toolchain
 
 echo "== gn gen"
