@@ -31,3 +31,13 @@ Para forçar do zero: apagar `portablelinux/build/src`.
 - chaves Google (ADR 0006): lidas de secrets opcionais `GOOGLE_API_KEY`, `GOOGLE_DEFAULT_CLIENT_ID`, `GOOGLE_DEFAULT_CLIENT_SECRET`; ausentes, ficam os valores vazios do ungoogled. Não aparecem no log.
 - labels do runner: `[self-hosted, linux, intense]`, suposição. A API de runners da org exige permissão de admin, então os labels exatos não foram confirmados.
 - produto: o pacote se chama `aerographene-<tag>-<sha>-x86_64_linux.tar.zst` e tem um symlink `aerographene` → `chrome`. Branding (nome do binário, ícones, strings) fica para depois.
+
+## release e pacote
+
+Item 12 do `SCOPE.md`. A versão `vX.Y.Z` do aerographene é independente da do Chromium.
+
+1. rodar o workflow `build` e anotar o `run_id`.
+2. disparar `release` (`workflow_dispatch`) com `run_id` e `tag` (`vX.Y.Z`): baixa o artifact `aerographene-linux-x86_64`, renomeia para `aerographene-X.Y.Z-x86_64_linux.tar.zst`, gera `SHA256SUMS` e cria a release como draft. Publicar à mão depois de conferir.
+3. `packaging/arch/PKGBUILD` consome esse tarball (instala em `/opt/aerographene`, symlink `/usr/bin/aerographene`, GPL3). Com a release publicada: ajustar `pkgver`, rodar `updpkgsums` e `makepkg --printsrcinfo > .SRCINFO`. Hoje os sha256 são `SKIP`. O repo é privado, então baixar o asset exige token.
+
+Não testado: `makepkg` completo e `namcap` (não há release ainda).
