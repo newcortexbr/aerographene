@@ -1,0 +1,48 @@
+name: release
+
+# ADR 0004: só o dono dispara. Nunca adicionar pull_request/pull_request_target.
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "run_id do workflow build com o artifact"
+        required: true
+      tag:
+        description: "tag da release (vX.Y.Z)"
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: valida tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: '[[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]'
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: aerographene-linux-x86_64
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          path: dist
+
+      - name: renomeia
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -e
+          mv dist/*.tar.zst "dist/aerographene-${TAG#v}-x86_64_linux.tar.zst"
+          (cd dist && sha256sum *.tar.zst > SHA256SUMS)
+
+      - name: release (draft)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" \
+            --draft --title "aerographene $TAG" --target "$GITHUB_SHA"
