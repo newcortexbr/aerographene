@@ -1,0 +1,171 @@
+name: cache-sharing-check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Evita que o diagnóstico concorra com uma build no mesmo cache.
+concurrency:
+  group: build
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: cache probe ${{ matrix.probe }}
+    runs-on: [self-hosted, linux, intense]
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        probe: [1, 2, 3]
+    steps:
+      - name: exchange markers and compare incremental cache
+        env:
+          PROBE_ID: ${{ matrix.probe }}
+          WAIT_SECONDS: "120"
+        run: |
+          set -euo pipefail
+          umask 077
+
+          work="${AEROGRAPHENE_WORKDIR:-$HOME/aerographene-build}"
+          if [[ ! -d "$work" ]]; then
+            echo "workdir não existe neste runner: $work" >&2
+            exit 2
+          fi
+          work_real="$(realpath -e -- "$work")"
+          host_name="$(hostname -f 2>/dev/null || hostname)"
+          machine_id="$(cat /etc/machine-id 2>/dev/null || printf 'unavailable')"
+          if [[ "$machine_id" == unavailable ]]; then
+            machine_fingerprint=unavailable
+          else
+            machine_fingerprint="$(printf '%s' "$machine_id" | sha256sum | cut -c1-12)"
+          fi
+          uid="$(id -u)"
+
+          out_dir="$work_real/portablelinux/build/src/out/Default"
+          if [[ ! -d "$out_dir" ]]; then
+            echo "árvore incremental não existe neste runner: $out_dir" >&2
+            exit 2
+          fi
+          out_real="$(realpath -e -- "$out_dir")"
+          out_id="$(stat -Lc '%d:%i' -- "$out_real")"
+
+          # Pasta temporária isolada por run; não escreve dentro de out/Default.
+          probe_dir="$work_real/.aerographene-cache-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if mkdir -- "$probe_dir" 2>/dev/null; then
+            chmod 0733 -- "$probe_dir"
+          elif [[ ! -d "$probe_dir" || -L "$probe_dir" ]]; then
+            echo "não consegui criar/acessar o diretório temporário: $probe_dir" >&2
+            exit 2
+          fi
+
+          marker="$probe_dir/probe-$PROBE_ID"
+          ready_marker="$probe_dir/ready-$PROBE_ID"
+          deadline=$((SECONDS + WAIT_SECONDS))
+          while ! (set -o noclobber; printf 'probe=%s\nrunner=%s\nhost=%s\nmachine_fingerprint=%s\nuid=%s\nhome=%s\nwork=%s\nout=%s\nout_id=%s\n' \
+            "$PROBE_ID" "$RUNNER_NAME" "$host_name" "$machine_fingerprint" \
+            "$uid" "$HOME" "$work_real" "$out_real" "$out_id" > "$marker") 2>/dev/null; do
+            if [[ -e "$marker" || -L "$marker" ]]; then
+              echo "marcador já existe; recusando sobrescrever: $marker" >&2
+              exit 2
+            fi
+            if (( SECONDS >= deadline )); then
+              echo "timeout aguardando permissão de escrita no diretório de marcadores" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          chmod 0644 -- "$marker"
+
+          found=0
+          while (( SECONDS < deadline )); do
+            found=0
+            for id in 1 2 3; do
+              [[ -s "$probe_dir/probe-$id" ]] && ((found += 1))
+            done
+            (( found == 3 )) && break
+            sleep 2
+          done
+          if (( found != 3 )); then
+            echo "timeout: vi $found de 3 marcadores; cache comum não confirmado (pode faltar runner livre)" >&2
+            exit 1
+          fi
+
+          # Leia e capture os registros antes de sinalizar que este job terminou.
+          records="$(for id in 1 2 3; do cat "$probe_dir/probe-$id"; done)"
+          runner_count="$(printf '%s\n' "$records" | sed -n 's/^runner=//p' | sort -u | wc -l)"
+          runner_list="$(printf '%s\n' "$records" | sed -n 's/^runner=//p' | sort -u)"
+          expected_runners="$(printf '%s\n' \
+            newcortex-ubuntu-ci-wsl-intense-1 \
+            newcortex-ubuntu-ci-wsl-intense-2 \
+            newcortex-ubuntu-ci-wsl-intense-3 | sort -u)"
+          host_count="$(printf '%s\n' "$records" | sed -n 's/^machine_fingerprint=//p' | sort -u | wc -l)"
+          host_missing_count="$(printf '%s\n' "$records" | sed -n 's/^machine_fingerprint=//p' | sort -u | grep -cx unavailable || true)"
+          uid_count="$(printf '%s\n' "$records" | sed -n 's/^uid=//p' | sort -u | wc -l)"
+          work_count="$(printf '%s\n' "$records" | sed -n 's/^work=//p' | sort -u | wc -l)"
+          out_count="$(printf '%s\n' "$records" | sed -n 's/^out=//p' | sort -u | wc -l)"
+          out_id_count="$(printf '%s\n' "$records" | sed -n 's/^out_id=//p' | sort -u | wc -l)"
+
+          {
+            echo "### probe $PROBE_ID"
+            echo "- runner local: $RUNNER_NAME"
+            echo "- host local: $host_name (fingerprint abreviado: $machine_fingerprint)"
+            echo "- uid/home local: $uid/$HOME"
+            echo "- workdir real local: $work_real"
+            echo "- out/Default real local: $out_real"
+            echo "- device:inode local de out/Default: $out_id"
+            echo "- runners observados: $runner_count"
+            echo "- fingerprints de host observados: $host_count"
+            echo "- UIDs observados: $uid_count"
+            echo "- workdirs reais distintos: $work_count"
+            echo "- out/Default reais distintos: $out_count"
+            echo "- device:inode distintos: $out_id_count"
+            echo "- registros trocados:"
+            echo '```text'
+            printf '%s\n' "$records"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          result=0
+          if [[ "$runner_count" != 3 || "$runner_list" != "$expected_runners" || \
+                "$host_count" != 1 || "$host_missing_count" != 0 || \
+                "$uid_count" != 1 || "$work_count" != 1 || \
+                "$out_count" != 1 || "$out_id_count" != 1 ]]; then
+            echo "os três runners esperados não confirmaram o mesmo cache incremental, host e UID" >&2
+            result=1
+          fi
+
+          # Publica metadados lidos. Nenhum job volta a ler probe-* depois disso.
+          printf 'probe=%s\nready=1\n' "$PROBE_ID" > "$ready_marker"
+          chmod 0644 -- "$ready_marker"
+
+          # Só o probe 1 limpa, após os três terem terminado de ler os markers.
+          if [[ "$PROBE_ID" == 1 ]]; then
+            deadline=$((SECONDS + WAIT_SECONDS))
+            ready_count=0
+            while (( SECONDS < deadline )); do
+              ready_count=0
+              for id in 1 2 3; do
+                [[ -s "$probe_dir/ready-$id" ]] && ((ready_count += 1))
+              done
+              (( ready_count == 3 )) && break
+              sleep 2
+            done
+            if (( ready_count == 3 )); then
+              for id in 1 2 3; do
+                rm -f -- "$probe_dir/probe-$id" "$probe_dir/ready-$id"
+              done
+              rmdir -- "$probe_dir" 2>/dev/null || true
+            else
+              echo "timeout de limpeza; marcadores isolados preservados em $probe_dir" >&2
+              result=1
+            fi
+          fi
+
+          if (( result != 0 )); then
+            exit "$result"
+          fi
+          echo "os três runners conhecidos trocaram marcadores e apontam para o mesmo cache incremental"
