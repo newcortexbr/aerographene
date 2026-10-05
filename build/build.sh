@@ -40,6 +40,7 @@ if ! docker image inspect chromium-builder:trixie-slim >/dev/null 2>&1; then
         # sem BuildKit: copia o contexto e troca COPY --chmod/--chown por COPY + RUN (upstream intacto)
         rm -rf "${WORK}/docker-ctx" && cp -r "${PL_DIR}/docker" "${WORK}/docker-ctx"
         sed -i -E 's#^COPY --chmod=([0-9]+) --chown=([^ ]+) ([^ ]+) (.+)$#COPY \3 \4\nUSER root\nRUN chown -R \2 \4 \&\& chmod -R \1 \4\nUSER \2#' "${WORK}/docker-ctx/build.Dockerfile"
+        sed -i -E 's#^COPY --chmod=([0-9]+) ([^ ]+) (.+)$#COPY \2 \3\nUSER root\nRUN chmod -R \1 \3\nUSER builder#' "${WORK}/docker-ctx/build.Dockerfile"
         grep -q -- '--chmod' "${WORK}/docker-ctx/build.Dockerfile" && { echo "erro: --chmod restante no Dockerfile" >&2; exit 1; }
         (cd "${WORK}/docker-ctx" && docker build -t chromium-builder:trixie-slim -f build.Dockerfile .)
     fi
