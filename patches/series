@@ -41,6 +41,7 @@ helium/ui/layout/context-menu.patch
 helium/ui/layout/shortcuts.patch
 helium/ui/layout/centered-address-bar.patch
 helium/ui/layout/toolbar-layout.patch
+aerographene/toolbar-compact-width.patch
 helium/ui/layout/dynamic.patch
 helium/ui/layout/vertical.patch
 aerographene/process-names.patch

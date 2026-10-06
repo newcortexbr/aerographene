@@ -1,0 +1,21 @@
+aerographene: declara kPreferredCompactWidth usado por helium/ui/layout/toolbar-layout.
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: toolbar-layout.patch (Helium 0.18.3) usa kPreferredCompactWidth em
+ToolbarView::UpdateToolbarLayout(), mas a constante é definida em
+helium/ui/layout/compact.patch, que não foi portado. Sem ela, toolbar_view.cc
+não compila (run 37312463487). Valor idêntico ao do Helium (compact.patch,
+commit 57a40ad82583d21787cff0500150539ce54c5960). Se compact.patch for portado,
+remover este patch.
+Depende de: helium/ui/layout/toolbar-layout.patch.
+
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.cc
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+@@ -184,6 +184,7 @@ DEFINE_UI_CLASS_PROPERTY_KEY(bool, kActi
+ 
+ namespace {
+ 
++constexpr int kPreferredCompactWidth = 350;
+ constexpr int kToolbarFlexOrderOffset = 1000;
+ constexpr int kLocationBarFlexOrder = kToolbarFlexOrderOffset + 1;
+ constexpr int kToolbarActionsFlexOrder = kToolbarFlexOrderOffset + 2;
