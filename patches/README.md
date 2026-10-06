@@ -102,7 +102,3 @@ Em `BrowserWebContentsDelegate::AddNewContents`, pedido de aba nova com gesto do
 ### `aerographene/layout-base-padding.patch` (GPL-3.0)
 
 Declara `LayoutConstant::kHeliumBasePadding` (valor 3, variável CSS `--helium-base-padding`), usado por `frame-radius-helper` e `layout/dynamic`; definido só em `helium/ui/layout-constants.patch` (não portado, muda dezenas de tamanhos). Subconjunto idêntico ao Helium. Se o patch completo for portado, remover este.
-
-### `aerographene/cold-data-history-expiry.patch` (GPL-3.0, SCOPE item 10, fatia 1; desativado na série)
-
-Pref de perfil `aerographene.cold_data_days` (padrão 45, 1..3650), registrada em `HistoryServiceFactory::RegisterProfilePrefs`, substitui os 90 dias fixos de `HistoryBackend::kExpireDaysThreshold` na expiração local do histórico (visitas, URLs órfãs e favicons via `ExpireHistoryBackend`). Depende de `add-flag-to-disable-local-history-expiration.patch` do ungoogled; `--keep-old-history` continua desligando. Dry-run limpo em 4 arquivos. Comentado em `series` até decisão do dono: apaga em vez de comprimir/catalogar (diverge do glossário "dado frio", que segue pesquisável) e, com 45 dias, remove de forma irreversível o histórico entre 45 e 90 dias no primeiro início. Não cobre sessões, downloads, miniaturas, dados de sites, exceção de frio nem UI.

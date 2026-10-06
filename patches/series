@@ -50,5 +50,3 @@ aerographene/layout-base-padding.patch
 aerographene/process-names.patch
 aerographene/command-bar-type-icons.patch
 aerographene/peek.patch
-# desativado até decisão do dono: apaga histórico >45 dias (irreversível), diverge do glossário de dado frio
-# aerographene/cold-data-history-expiry.patch
