@@ -825,7 +825,7 @@
  }
  
  bool VerticalTabStripRegionView::IsFrameActive() const {
-@@ -807,10 +751,9 @@ bool VerticalTabStripRegionView::IsFrame
+@@ -807,10 +751,8 @@ bool VerticalTabStripRegionView::IsFrame
  }
  
  bool VerticalTabStripRegionView::IsCollapseButtonHovered() const {
@@ -833,9 +833,8 @@
 -    return top_button_container_->GetCollapseButton()->IsMouseHovered();
 -  }
 -  return false;
-+  const auto* button = browser_view()->GetViewByID(
-+      VIEW_ID_COLLAPSE_VERTICAL_TABS_BUTTON);
-+  return button && button->GetVisible() && button->IsMouseHovered();
++  // aerographene: botão de recolher vive na toolbar no Helium (não portado).
++  return false;
  }
  
  gfx::Rect VerticalTabStripRegionView::GetTabStripDraggableBounds() const {
