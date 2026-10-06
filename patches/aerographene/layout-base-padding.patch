@@ -1,0 +1,39 @@
+# aerographene: patch próprio (GPL-3.0). Subconjunto de helium/ui/layout-constants.patch
+# (Helium 57a40ad82583d21787cff0500150539ce54c5960): só declara LayoutConstant::kHeliumBasePadding
+# (valor 3 e variável CSS, idênticos ao Helium), usado por helium/ui/frame-radius-helper.patch e
+# helium/ui/layout/dynamic.patch. Os demais ajustes de tamanho do layout-constants.patch não foram portados.
+# Se layout-constants.patch for portado, remover este patch.
+--- a/chrome/browser/ui/layout_constants.cc
++++ b/chrome/browser/ui/layout_constants.cc
+@@ -20,6 +20,8 @@
+ int GetLayoutConstant(LayoutConstant constant) {
+   const bool touch_ui = ui::TouchUiController::Get()->touch_ui();
+   switch (constant) {
++    case LayoutConstant::kHeliumBasePadding:
++      return 3;
+     case LayoutConstant::kAppMenuProfileRowAvatarIconSize:
+       return 24;
+     case LayoutConstant::kAppMenuMaximumCharacterLength:
+--- a/chrome/browser/ui/layout_constants.h
++++ b/chrome/browser/ui/layout_constants.h
+@@ -10,6 +10,9 @@
+ #include "ui/gfx/geometry/size.h"
+ 
+ enum class LayoutConstant {
++  // The base padding used in Helium UI.
++  kHeliumBasePadding,
++
+   // The size of the avatar icon in the profile row of the app menu.
+   kAppMenuProfileRowAvatarIconSize,
+ 
+--- a/chrome/browser/ui/webui/webui_toolbar/webui_toolbar_layout_css_helper.cc
++++ b/chrome/browser/ui/webui/webui_toolbar/webui_toolbar_layout_css_helper.cc
+@@ -31,6 +31,8 @@
+ std::string_view LayoutConstantToCssVarName(LayoutConstant layout_constant) {
+   using enum LayoutConstant;
+   switch (layout_constant) {
++    case kHeliumBasePadding:
++      return "--helium-base-padding";
+     case kAppMenuProfileRowAvatarIconSize:
+       return "--app-menu-profile-row-avatar-icon-size";
+     case kAppMenuMaximumCharacterLength:

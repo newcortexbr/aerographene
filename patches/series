@@ -44,6 +44,9 @@ helium/ui/layout/toolbar-layout.patch
 aerographene/toolbar-compact-width.patch
 helium/ui/layout/dynamic.patch
 helium/ui/layout/vertical.patch
+aerographene/remove-vertical-tab-search-host.patch
+aerographene/remove-vertical-corner-refs.patch
+aerographene/layout-base-padding.patch
 aerographene/process-names.patch
 aerographene/command-bar-type-icons.patch
 aerographene/peek.patch

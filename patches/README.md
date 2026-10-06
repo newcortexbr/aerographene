@@ -91,6 +91,18 @@ Declara `kPreferredCompactWidth = 350` (valor do `helium/ui/layout/compact.patch
 Em `BrowserWebContentsDelegate::AddNewContents`, pedido de aba nova com gesto do usuário numa janela normal (`target=_blank`, inclusive com `noopener`, e `window.open` sem tamanho) abre como janela popup marcada (user data com chave `&features::kAerographenePeek`). `BrowserView::OnWidgetActivationChanged` fecha a popup marcada quando ela perde a ativação, salvo se um diálogo modal ou widget próprio ficou ativo. Promoção a aba por `Ctrl+Shift+Y` (novo atalho em `accelerator_table.cc` para o comando upstream `IDC_SHOW_AS_TAB`) ou pelo "Show as tab" do menu de sistema. Ctrl/meio-clique seguem abrindo aba. Feature `kAerographenePeek` (ligada), flag `chrome://flags/#aerographene-peek` em `helium_flag_entries.h`; depende de `flags-setup`, `add-low-power-framerate-flag`, `keyboard-shortcuts`, `layout/shortcuts`, `layout/vertical`, `override-chrome-protocol` e `multi-contents-drop-target`. Dry-run limpo em 6 arquivos. Falta: tamanho/sobreposição próprios, botão visível de promover, l10n; diálogos nativos (seletor de arquivos) fecham a popup. Compilação e runtime não verificados. Split view por arrastar já vem do upstream 154 (sem patch novo).
 
 
+### `aerographene/remove-vertical-tab-search-host.patch` (GPL-3.0)
+
+`BrowserView::UpdateTabSearchBubbleHost()` chamava `vertical_tab_strip_region_view_->GetTopContainer()`, removido por `helium/ui/layout/vertical.patch`; quebrou a build 37405529180 (browser_view.cc:4369). No Helium o trecho some em `helium/ui/tab-search-in-toolbar.patch`, que cria `TabSearchToolbarButtonController` e mexe em 16 arquivos (toolbar_view, pinned toolbar, combo button); não portado. Este patch espelha só o trecho de browser_view.cc: sem ramo vertical, usa o combo button horizontal se existir e, sem ele, zera o host (os chamadores já checam nulo). Efeito: sem busca de abas no modo vertical até portar o patch do Helium. Depende de `helium/ui/layout/vertical.patch`.
+
+### `aerographene/remove-vertical-corner-refs.patch` (GPL-3.0)
+
+`vertical.patch` remove `CustomFloatingCorner` e `vertical_tab_strip_{top,bottom}_corner` de `BrowserViewLayout::Views` e `BrowserView`, mas `browser_view_tabbed_layout_impl.cc` ainda os usava (o Helium remove em `helium/ui/remove-toolbar-corners.patch`, não portado, 263 linhas). Este patch tira só esses usos (locais do fade do organizer panel, cutouts, `SetAlpha`). Achado na varredura de órfãos. Depende de `helium/ui/layout/vertical.patch`.
+
+### `aerographene/layout-base-padding.patch` (GPL-3.0)
+
+Declara `LayoutConstant::kHeliumBasePadding` (valor 3, variável CSS `--helium-base-padding`), usado por `frame-radius-helper` e `layout/dynamic`; definido só em `helium/ui/layout-constants.patch` (não portado, muda dezenas de tamanhos). Subconjunto idêntico ao Helium. Se o patch completo for portado, remover este.
+
 ### `aerographene/cold-data-history-expiry.patch` (GPL-3.0, SCOPE item 10, fatia 1; desativado na série)
 
 Pref de perfil `aerographene.cold_data_days` (padrão 45, 1..3650), registrada em `HistoryServiceFactory::RegisterProfilePrefs`, substitui os 90 dias fixos de `HistoryBackend::kExpireDaysThreshold` na expiração local do histórico (visitas, URLs órfãs e favicons via `ExpireHistoryBackend`). Depende de `add-flag-to-disable-local-history-expiration.patch` do ungoogled; `--keep-old-history` continua desligando. Dry-run limpo em 4 arquivos. Comentado em `series` até decisão do dono: apaga em vez de comprimir/catalogar (diverge do glossário "dado frio", que segue pesquisável) e, com 45 dias, remove de forma irreversível o histórico entre 45 e 90 dias no primeiro início. Não cobre sessões, downloads, miniaturas, dados de sites, exceção de frio nem UI.
