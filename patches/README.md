@@ -21,8 +21,9 @@ Estado: aplicação não verificada; será verificada no primeiro build (o Chrom
 | `helium/core/flags-setup.patch` | Helium `patches/helium/core/flags-setup.patch` | GPL-3.0 | infra de flags do Helium (helium_flag_entries.h) | - | 2/3 arquivos também tocados por outros patches portados |
 | `helium/core/add-low-power-framerate-flag.patch` | Helium `patches/helium/core/add-low-power-framerate-flag.patch` | GPL-3.0 | flag para o limite de fps no modo economia de energia | `helium/core/flags-setup.patch` | 2/3 arquivos também tocados por outros patches portados |
 | `helium/core/add-component-l10n-support.patch` | Helium `patches/helium/core/add-component-l10n-support.patch` | GPL-3.0 | l10n para extensões componente (LocalizeExtension) | - | 0/7 arquivos também tocados por outros patches portados; toca extension_l10n_util.cc |
-| `helium/core/ublock-setup-sources.patch` | Helium `patches/helium/core/ublock-setup-sources.patch` | GPL-3.0 | estrutura third_party/ublock (BUILD.gn, grit) | - | 2/9 arquivos também tocados por outros patches portados; exige baixar o uBlock via deps.ini do Helium (fora de patches/)  **DESATIVADO**: falta third_party/ublock (manifest/assets vêm do deps.ini do Helium) |
-| `helium/core/ublock-install-as-component.patch` | Helium `patches/helium/core/ublock-install-as-component.patch` | GPL-3.0 | instala uBlock Origin como extensão componente | - | 0/5 arquivos também tocados por outros patches portados  **DESATIVADO**: falta third_party/ublock (manifest/assets vêm do deps.ini do Helium) |
+| `helium/core/ublock-setup-sources.patch` | Helium `patches/helium/core/ublock-setup-sources.patch` | GPL-3.0 | estrutura third_party/ublock (BUILD.gn, grit) | - | 2/9 arquivos também tocados por outros patches portados; uBlock Origin 1.75.0 baixado por `build/inner.sh` (deps.ini do Helium, sha256 fixado) antes da série |
+| `helium/core/ublock-install-as-component.patch` | Helium `patches/helium/core/ublock-install-as-component.patch` | GPL-3.0 | instala uBlock Origin como extensão componente | - | 0/5 arquivos também tocados por outros patches portados |
+| `helium/core/ublock-reconfigure-defaults.patch` | Helium `patches/helium/core/ublock-reconfigure-defaults.patch` | GPL-3.0 | tira do uBlock os privilégios de componente (chrome://, scripts em hosts bloqueados por política, features auto-concedidas); incógnito e fixado por padrão | `ublock-install-as-component` (extension_ids.h) | aplicado para não rodar código de terceiros com privilégio de componente |
 | `helium/core/infinite-tab-freezing.patch` | Helium `patches/helium/core/infinite-tab-freezing.patch` | GPL-3.0 | congelamento de abas sem limite de tempo | - | 0/1 arquivos também tocados por outros patches portados |
 | `helium/core/open-new-tabs-next-to-active-tab-option.patch` | Helium `patches/helium/core/open-new-tabs-next-to-active-tab-option.patch` | GPL-3.0 | opção de abrir abas ao lado da ativa | `helium/settings/setup-behavior-settings-page.patch`, `helium/core/keyboard-shortcuts.patch` | 7/7 arquivos também tocados por outros patches portados |
 | `helium/core/browser-window-context-menu.patch` | Helium `patches/helium/core/browser-window-context-menu.patch` | GPL-3.0 | menu de contexto da janela | - | 1/1 arquivos também tocados por outros patches portados |
@@ -56,7 +57,7 @@ Estado: aplicação não verificada; será verificada no primeiro build (o Chrom
 
 - `ungoogled-chromium/disable-ai.patch` e `ungoogled-chromium/extensions-manifestv2.patch`: já estão no ungoogled upstream (`patches/core/ungoogled-chromium/`); o Helium só os herda. Entram pela base.
 - `noise/*` e `zen-mode*`: fora do escopo (docs/SCOPE.md).
-- `ublock-reconfigure-defaults`, `ublock-helium-services`, `ublock-dns-uncloaking`, `ublock-show-in-settings`, `fixups-component-setup`: não são dependências de `ublock-install-as-component`; avaliar depois (fixups cuida da integração com a Chrome Web Store).
+- `ublock-helium-services` (listas via serviços Helium, depende de prefs/UI do helium_services), `ublock-dns-uncloaking` (API dns + mudanças em net/, opcional), `ublock-show-in-settings` (mostra o componente em chrome://extensions), `fixups-component-setup`: não necessários para instalar/rodar o uBlock; avaliar depois.
 - O código do uBlock Origin em si vem de `deps.ini` (`[ublock_origin]`, `third_party/ublock`) e de scripts do Helium, fora de `patches/`; o build precisa baixá-lo.
 - `brave/fix-component-content-settings-store`, e o restante de `helium/ui` (compact, toolbar-actions, horizontal-tabs, etc.): sem dependência achada.
 - `brave/*` entram só como dependência: `tab-cycling-mru-impl` (UI) e `chrome-importer-files`/`custom-importer` (importador do Arc).
@@ -64,7 +65,6 @@ Estado: aplicação não verificada; será verificada no primeiro build (o Chrom
 ## Recursos externos ao `patches/`
 
 - `helium/core/onboarding-page.patch` exige `components/helium_onboarding` (BUILD.gn, grdp, fontes). `build/inner.sh` baixa o release `202609160835` de imputnet/helium-onboarding (versão e sha256 de `deps.ini` do Helium) para essa pasta antes do `gn gen`.
-- Patches uBlock desativados em `series`: ver linha de comentário acima deles.
 
 ## patches próprios do aerographene
 
@@ -77,3 +77,20 @@ Nomes de processo legíveis no Linux. Toca `base/process/set_process_title.cc` e
 - decisão: o renderer não conhece o perfil; o browser acrescenta `--aerographene-space=<nome local do perfil>` (perfil original, inclusive para anônimo; até 48 bytes) em `ChromeContentBrowserClient::AppendExtraCommandLineSwitches`. O renderer só lê o switch para exibir; caracteres de controle viram `?`. Mais simples que IPC e não muda sandbox nem processo.
 - privacidade: o nome do space fica visível a qualquer usuário local via `ps`/`/proc/<pid>/cmdline` (já era o caso para os demais switches). Em máquina multiusuário, nomes de space revelam contexto; aceito para uso pessoal.
 - limites: o crash handler no Linux é binário separado (`chrome_crashpad_handler`) e não passa por `SetProcessTitleFromCommandLine`; o rótulo só vale se rodar via `--type=crashpad-handler`. Compilação e runtime não verificados.
+
+### `aerographene/toolbar-compact-width.patch` (GPL-3.0)
+
+Declara `kPreferredCompactWidth = 350` (valor do `helium/ui/layout/compact.patch`, não portado) em `toolbar_view.cc`; `helium/ui/layout/toolbar-layout.patch` usa a constante e o build quebrava sem ela (run 37312463487). Remover se `compact.patch` for portado.
+
+### `aerographene/command-bar-type-icons.patch` (GPL-3.0, SCOPE item 6)
+
+Ícone por tipo nas sugestões do omnibox: aba aberta usa `omnibox::kTabIcon`, histórico usa relógio, favorito estrela, busca lupa, URL globo; a lista deixa de buscar favicon (`OmniboxEditModel::GetMatchIcon`). Toca `components/omnibox/browser/autocomplete_match.cc` e `chrome/browser/ui/omnibox/omnibox_edit_model.cc`, nenhum tocado por outro patch; dry-run limpo sobre a tag 154.0.8037.97. Ícone do campo (fora da lista) continua com favicon. Compilação e runtime não verificados; perder o favicon na lista é escolha visual a aprovar.
+
+### `aerographene/peek.patch` (GPL-3.0, SCOPE item 7, versão mínima)
+
+Em `BrowserWebContentsDelegate::AddNewContents`, pedido de aba nova com gesto do usuário numa janela normal (`target=_blank`, inclusive com `noopener`, e `window.open` sem tamanho) abre como janela popup marcada (user data com chave `&features::kAerographenePeek`). `BrowserView::OnWidgetActivationChanged` fecha a popup marcada quando ela perde a ativação, salvo se um diálogo modal ou widget próprio ficou ativo. Promoção a aba por `Ctrl+Shift+Y` (novo atalho em `accelerator_table.cc` para o comando upstream `IDC_SHOW_AS_TAB`) ou pelo "Show as tab" do menu de sistema. Ctrl/meio-clique seguem abrindo aba. Feature `kAerographenePeek` (ligada), flag `chrome://flags/#aerographene-peek` em `helium_flag_entries.h`; depende de `flags-setup`, `add-low-power-framerate-flag`, `keyboard-shortcuts`, `layout/shortcuts`, `layout/vertical`, `override-chrome-protocol` e `multi-contents-drop-target`. Dry-run limpo em 6 arquivos. Falta: tamanho/sobreposição próprios, botão visível de promover, l10n; diálogos nativos (seletor de arquivos) fecham a popup. Compilação e runtime não verificados. Split view por arrastar já vem do upstream 154 (sem patch novo).
+
+
+### `aerographene/cold-data-history-expiry.patch` (GPL-3.0, SCOPE item 10, fatia 1; desativado na série)
+
+Pref de perfil `aerographene.cold_data_days` (padrão 45, 1..3650), registrada em `HistoryServiceFactory::RegisterProfilePrefs`, substitui os 90 dias fixos de `HistoryBackend::kExpireDaysThreshold` na expiração local do histórico (visitas, URLs órfãs e favicons via `ExpireHistoryBackend`). Depende de `add-flag-to-disable-local-history-expiration.patch` do ungoogled; `--keep-old-history` continua desligando. Dry-run limpo em 4 arquivos. Comentado em `series` até decisão do dono: apaga em vez de comprimir/catalogar (diverge do glossário "dado frio", que segue pesquisável) e, com 45 dias, remove de forma irreversível o histórico entre 45 e 90 dias no primeiro início. Não cobre sessões, downloads, miniaturas, dados de sites, exceção de frio nem UI.

@@ -11,10 +11,10 @@ helium/core/memory-saving-by-default.patch
 helium/core/flags-setup.patch
 helium/core/add-low-power-framerate-flag.patch
 helium/core/add-component-l10n-support.patch
-# desativado: uBlock exige third_party/ublock (fonte baixada via deps.ini do Helium, fora de patches/)
-# helium/core/ublock-setup-sources.patch
-# desativado: uBlock exige third_party/ublock (fonte baixada via deps.ini do Helium, fora de patches/)
-# helium/core/ublock-install-as-component.patch
+# uBlock: third_party/ublock baixado por build/inner.sh (deps.ini do Helium, sha256 fixado)
+helium/core/ublock-setup-sources.patch
+helium/core/ublock-install-as-component.patch
+helium/core/ublock-reconfigure-defaults.patch
 helium/core/infinite-tab-freezing.patch
 helium/core/open-new-tabs-next-to-active-tab-option.patch
 helium/core/browser-window-context-menu.patch
@@ -45,3 +45,7 @@ aerographene/toolbar-compact-width.patch
 helium/ui/layout/dynamic.patch
 helium/ui/layout/vertical.patch
 aerographene/process-names.patch
+aerographene/command-bar-type-icons.patch
+aerographene/peek.patch
+# desativado até decisão do dono: apaga histórico >45 dias (irreversível), diverge do glossário de dado frio
+# aerographene/cold-data-history-expiry.patch

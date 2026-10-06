@@ -39,6 +39,39 @@ if [ -n "${restore_out:-}" ]; then mkdir -p "${_src_dir}"; mv "${_root}/build/ou
 echo "== pruning + patches ungoogled + portablelinux"
 apply_patches
 
+echo "== uBlock Origin (deps.ini do Helium [ublock_origin], sha256 fixado)"
+# precisa existir antes dos patches: ublock-setup-sources altera manifest.json e assets/assets.json
+ub_ver=1.75.0
+ub_sha=49214674f7c6c474e60da647c05bd28463b1f7a55b2a2b0a53e9d297ef7bf3c6
+ub_dir="${_src_dir}/third_party/ublock"
+if [ ! -f "${_src_dir}/.aero-patches.hash" ] && [ ! -f "${_src_dir}/.aero-ublock-${ub_ver}" ]; then
+    ub_zip="${_root}/build/ublock-origin-${ub_ver}.zip"
+    [ -s "$ub_zip" ] || curl -fL --retry 3 -o "$ub_zip" \
+        "https://github.com/imputnet/uBlock/releases/download/${ub_ver}/uBlock0_${ub_ver}.chromium.zip"
+    echo "${ub_sha}  ${ub_zip}" | sha256sum -c -
+    rm -rf "$ub_dir"; mkdir -p "$ub_dir"
+    # strip_leading_dirs = uBlock0.chromium
+    python3 - "$ub_zip" "$ub_dir" <<'PY'
+import sys, zipfile, os
+zpath, dest = sys.argv[1], sys.argv[2]
+prefix = 'uBlock0.chromium/'
+with zipfile.ZipFile(zpath) as z:
+    for m in z.infolist():
+        assert m.filename.startswith(prefix), m.filename
+        rel = m.filename[len(prefix):]
+        if not rel or '..' in rel.split('/'):
+            continue
+        out = os.path.join(dest, rel)
+        if m.is_dir():
+            os.makedirs(out, exist_ok=True)
+            continue
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        with z.open(m) as s, open(out, 'wb') as d:
+            d.write(s.read())
+PY
+    touch "${_src_dir}/.aero-ublock-${ub_ver}"  # fora de ub_dir: generate_file_list empacota tudo lá
+fi
+
 echo "== patches aerographene (${AERO_PATCHES}/series)"
 if [ ! -f "${_src_dir}/.aero-patches.hash" ]; then
     if grep -qv '^\s*\(#.*\)\?$' "${AERO_PATCHES}/series" 2>/dev/null; then
