@@ -51,3 +51,7 @@ jobs:
           path: ${{ steps.art.outputs.path }}
           compression-level: 0
           retention-days: 14
+
+      # depois do upload: o artefato fica disponível mesmo se o smoke falhar
+      - name: smoke test
+        run: bash build/smoke.sh "${{ steps.art.outputs.path }}"
