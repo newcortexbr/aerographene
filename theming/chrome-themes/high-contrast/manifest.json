@@ -1,0 +1,75 @@
+{
+  "manifest_version": 3,
+  "name": "aerographene alto contraste",
+  "version": "0.1",
+  "description": "tema de teste: preto alto contraste",
+  "theme": {
+    "colors": {
+      "frame": [
+        0,
+        0,
+        0
+      ],
+      "frame_inactive": [
+        0,
+        0,
+        0
+      ],
+      "toolbar": [
+        0,
+        0,
+        0
+      ],
+      "tab_text": [
+        255,
+        255,
+        255
+      ],
+      "tab_background_text": [
+        200,
+        200,
+        200
+      ],
+      "bookmark_text": [
+        255,
+        255,
+        255
+      ],
+      "toolbar_text": [
+        255,
+        255,
+        255
+      ],
+      "toolbar_button_icon": [
+        255,
+        255,
+        255
+      ],
+      "omnibox_background": [
+        0,
+        0,
+        0
+      ],
+      "omnibox_text": [
+        255,
+        255,
+        255
+      ],
+      "ntp_background": [
+        0,
+        0,
+        0
+      ],
+      "ntp_text": [
+        255,
+        255,
+        255
+      ],
+      "ntp_link": [
+        255,
+        255,
+        0
+      ]
+    }
+  }
+}
