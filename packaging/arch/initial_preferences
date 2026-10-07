@@ -1,0 +1,8 @@
+{
+  "helium": {
+    "completed_onboarding": true,
+    "browser": {
+      "new_tab_next_to_active": true
+    }
+  }
+}
