@@ -4,6 +4,15 @@
 set -euo pipefail
 
 tarball="${1:?uso: smoke.sh <tarball .tar.zst>}"
+
+# host do runner não tem zstd: reexecuta dentro da imagem do builder
+if ! command -v unzstd >/dev/null 2>&1 && [ -z "${AERO_SMOKE_IN_DOCKER:-}" ]; then
+    tdir="$(cd "$(dirname "$tarball")" && pwd)"
+    sdir="$(cd "$(dirname "$0")" && pwd)"
+    exec docker run --rm -e AERO_SMOKE_IN_DOCKER=1 \
+        -v "${tdir}:/art:ro" -v "${sdir}:/smoke:ro" \
+        aerographene-builder:v2 bash /smoke/smoke.sh "/art/$(basename "$tarball")"
+fi
 tmp="$(mktemp -d)"
 trap 'rm -rf -- "$tmp"' EXIT
 
