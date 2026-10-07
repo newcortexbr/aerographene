@@ -4,6 +4,10 @@ name: runner-probe
 # Fora do grupo de concurrency `build` de propósito: precisa rodar durante uma build.
 on:
   workflow_dispatch:
+    inputs:
+      pool:
+        description: "intense ou vps"
+        default: "intense"
   push:
     branches: [fix/inner-esbuild-backup]
     paths: [.github/workflows/runner-probe.yml]
@@ -13,7 +17,7 @@ permissions:
 
 jobs:
   probe:
-    runs-on: [self-hosted, linux, intense]
+    runs-on: [self-hosted, linux, "${{ inputs.pool || 'intense' }}"]
     timeout-minutes: 5
     steps:
       - name: host
@@ -22,6 +26,9 @@ jobs:
           echo "== runner: ${RUNNER_NAME} | $(date -Is)"
           echo "== nproc: $(nproc) | load: $(cat /proc/loadavg)"
           echo "== memória"; free -h
+          echo "== disco"; df -h "$HOME" / | sort -u
+          echo "== cpu"; lscpu | grep -E 'Model name|^CPU\(s\)' || true
+          echo "== docker"; docker --version || echo "sem docker"
           echo "== vmstat 5 3 (si/so = swap)"; vmstat 5 3
           echo "== processos de compilação mais antigos"
           ps -eo pid,etime,pcpu,rss,stat,args --sort=-etime | grep -E '[c]lang|[l]ld|[n]inja|[r]ustc' | cut -c1-200 | head -20
