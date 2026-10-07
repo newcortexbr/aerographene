@@ -46,3 +46,10 @@ Atenção: o Chromium usa só a última ocorrência de `--enable-features`/`--di
 ## tema por manifest (teste rápido, sem rebuild)
 
 `theming/chrome-themes/pixelized/manifest.json` traduz as cores do `theming/design-language/pixelized.md` para um tema Chrome (MV3, só `theme`). Para testar: `chrome://extensions` → modo desenvolvedor → carregar sem compactação → a pasta. Cobre frame, toolbar, abas, omnibox e NTP; não cobre raio, padding, fonte, dither, ícones nem a rampa de estado. Não testado em navegador ainda; aprovação visual é do dono.
+
+## temas de teste do item 8 (sem rebuild)
+
+- `theming/chrome-themes/nebula/`: gradiente nebuloso azul-preto com estrelas (`images/ntp.jpg`, gerada por IA, 1672×941) no frame e na nova aba.
+- `theming/chrome-themes/high-contrast/`: preto alto contraste, destaque amarelo.
+- cada pasta tem `manifest.json` (tema Chrome; carregar sem compactação em `chrome://extensions`) e `theme.json` (tokens do patch `theme-tokens`, copiar para `~/.config/aerographene/theme.json`). O `theme.json` cobre também páginas internas; o manifest cobre a imagem.
+- não testados em navegador; aprovação visual é do dono.

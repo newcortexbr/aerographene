@@ -1,0 +1,83 @@
+{
+  "manifest_version": 3,
+  "name": "aerographene nebula",
+  "version": "0.1",
+  "description": "tema de teste: gradiente nebuloso azul-preto com estrelas",
+  "theme": {
+    "images": {
+      "theme_ntp_background": "images/ntp.jpg",
+      "theme_frame": "images/ntp.jpg"
+    },
+    "colors": {
+      "frame": [
+        5,
+        7,
+        13
+      ],
+      "frame_inactive": [
+        8,
+        12,
+        24
+      ],
+      "toolbar": [
+        11,
+        18,
+        38
+      ],
+      "tab_text": [
+        230,
+        236,
+        255
+      ],
+      "tab_background_text": [
+        140,
+        155,
+        190
+      ],
+      "bookmark_text": [
+        214,
+        222,
+        245
+      ],
+      "toolbar_text": [
+        230,
+        236,
+        255
+      ],
+      "toolbar_button_icon": [
+        214,
+        222,
+        245
+      ],
+      "omnibox_background": [
+        16,
+        26,
+        52
+      ],
+      "omnibox_text": [
+        230,
+        236,
+        255
+      ],
+      "ntp_background": [
+        5,
+        7,
+        13
+      ],
+      "ntp_text": [
+        230,
+        236,
+        255
+      ],
+      "ntp_link": [
+        150,
+        175,
+        255
+      ]
+    },
+    "properties": {
+      "ntp_background_alignment": "center",
+      "ntp_background_repeat": "no-repeat"
+    }
+  }
+}
