@@ -56,6 +56,7 @@ Estado: aplicação não verificada; será verificada no primeiro build (o Chrom
 ## não portados
 
 - `ungoogled-chromium/disable-ai.patch` e `ungoogled-chromium/extensions-manifestv2.patch`: já estão no ungoogled upstream (`patches/core/ungoogled-chromium/`); o Helium só os herda. Entram pela base.
+- disable-ai (SCOPE item 3): o Helium 0.18.3 não tem patch próprio de IA; usa `ungoogled-chromium/disable-ai.patch` (posição 22 da série do Helium) e `ungoogled-chromium/disable-ai-search-shortcuts.patch` (posição 95). Ambos são byte a byte idênticos (`cmp`) aos do ungoogled 154.0.8037.97-1 (`patches/core/ungoogled-chromium/disable-ai.patch`, linha 24 da série; `patches/extra/ungoogled-chromium/disable-ai-search-shortcuts.patch`, linha 108), que a build aplica antes da série do aerographene. Portar duplicaria a aplicação e quebraria o patch; nada entra em `series`. Efeito em runtime não verificado.
 - `noise/*` e `zen-mode*`: fora do escopo (docs/SCOPE.md).
 - `ublock-helium-services` (listas via serviços Helium, depende de prefs/UI do helium_services), `ublock-dns-uncloaking` (API dns + mudanças em net/, opcional), `ublock-show-in-settings` (mostra o componente em chrome://extensions), `fixups-component-setup`: não necessários para instalar/rodar o uBlock; avaliar depois.
 - O código do uBlock Origin em si vem de `deps.ini` (`[ublock_origin]`, `third_party/ublock`) e de scripts do Helium, fora de `patches/`; o build precisa baixá-lo.
