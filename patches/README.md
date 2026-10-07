@@ -102,3 +102,7 @@ Em `BrowserWebContentsDelegate::AddNewContents`, pedido de aba nova com gesto do
 ### `aerographene/layout-base-padding.patch` (GPL-3.0)
 
 Declara `LayoutConstant::kHeliumBasePadding` (valor 3, variável CSS `--helium-base-padding`), usado por `frame-radius-helper` e `layout/dynamic`; definido só em `helium/ui/layout-constants.patch` (não portado, muda dezenas de tamanhos). Subconjunto idêntico ao Helium. Se o patch completo for portado, remover este.
+
+### `aerographene/theme-tokens.patch` (GPL-3.0)
+
+Framework de tema sem rebuild: `chrome/browser/ui/color/aerographene_theme_tokens.{h,cc}` (novos, no `source_set("mixers")` do `BUILD.gn`) lê uma vez por processo `${XDG_CONFIG_HOME:-~/.config}/aerographene/theme.json` ou o caminho de `--aerographene-theme=<path>` (`{"tokens": {"nome": "#RRGGBB" ou "#RRGGBBAA"}}`) e `AddChromeColorMixers` (`chrome_color_mixers.cc`) adiciona no fim um mixer que sobrescreve os ColorIds dos tokens, depois de tema customizado e app controller. Arquivo ausente, inválido ou acima de 64 KiB: nada muda; token desconhecido ou cor inválida é ignorado. Feature `kAerographeneThemeTokens` (ligada; `--disable-features=AerographeneThemeTokens`). Leitura POSIX direta (sem `base::File`) para não disparar as asserções de bloqueio da UI thread sem mexer em `base/threading/thread_restrictions.h` (header global). Nenhum outro patch toca esses arquivos; aplicação com `patch --fuzz=0` e `-R --dry-run` sobre a tag 154.0.8037.97 limpa. Compilação e runtime não verificados. Tokens e exemplo em `docs/PACKAGING.md`.
