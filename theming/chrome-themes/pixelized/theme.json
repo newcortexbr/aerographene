@@ -1,0 +1,28 @@
+{
+  "tokens": {
+    "frame": "#0A0A0A",
+    "frame_inactive": "#111111",
+    "toolbar": "#111111",
+    "toolbar_text": "#F2F2F2",
+    "toolbar_icon": "#F2F2F2",
+    "tab_text": "#F2F2F2",
+    "tab_background_text": "#8C8C8C",
+    "tab_background_text_inactive": "#5A5A5A",
+    "tab_background": "#0A0A0A",
+    "omnibox": "#181818",
+    "omnibox_hover": "#222222",
+    "omnibox_border": "#FFFFFF24",
+    "omnibox_text": "#F2F2F2",
+    "omnibox_text_dim": "#8C8C8C",
+    "omnibox_results": "#111111",
+    "omnibox_results_hover": "#222222",
+    "focus_ring": "#F2F2F2",
+    "ntp": "#0A0A0A",
+    "ntp_text": "#F2F2F2",
+    "base": "#0A0A0A",
+    "surface": "#111111",
+    "text": "#F2F2F2",
+    "accent": "#F2F2F2",
+    "on_accent": "#0A0A0A"
+  }
+}

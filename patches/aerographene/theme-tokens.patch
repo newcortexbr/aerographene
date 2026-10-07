@@ -1,0 +1,292 @@
+aerographene: tokens de cor do tema lidos de JSON, sem rebuild.
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: lê uma vez por processo ${XDG_CONFIG_HOME:-~/.config}/aerographene/
+theme.json (ou --aerographene-theme=<path>), formato {"tokens": {"frame":
+"#0A0A0A", ...}}, e adiciona um ColorMixer no fim de AddChromeColorMixers que
+sobrescreve um conjunto curado de ColorIds. Arquivo ausente/inválido: nada
+muda. Feature kAerographeneThemeTokens (ligada por padrão; desligar com
+--disable-features=AerographeneThemeTokens). WebUI recebe as cores via
+chrome://theme/colors.css.
+
+
+--- /dev/null
++++ b/chrome/browser/ui/color/aerographene_theme_tokens.cc
+@@ -0,0 +1,212 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "chrome/browser/ui/color/aerographene_theme_tokens.h"
++
++#include <fcntl.h>
++#include <unistd.h>
++
++#include <memory>
++#include <optional>
++#include <string>
++#include <string_view>
++#include <utility>
++#include <vector>
++
++#include "base/command_line.h"
++#include "base/environment.h"
++#include "base/files/file_path.h"
++#include "base/json/json_reader.h"
++#include "base/no_destructor.h"
++#include "base/nix/xdg_util.h"
++#include "base/values.h"
++#include "chrome/browser/ui/color/chrome_color_id.h"
++#include "third_party/skia/include/core/SkColor.h"
++#include "ui/color/color_id.h"
++#include "ui/color/color_mixer.h"
++#include "ui/color/color_provider.h"
++#include "ui/color/color_provider_key.h"
++
++BASE_FEATURE(kAerographeneThemeTokens, base::FEATURE_ENABLED_BY_DEFAULT);
++
++namespace {
++
++constexpr char kThemeSwitch[] = "aerographene-theme";
++constexpr size_t kMaxFileSize = 64 * 1024;
++
++using TokenOverrides = std::vector<std::pair<ui::ColorId, SkColor>>;
++
++struct TokenSpec {
++  const char* name;
++  ui::ColorId ids[5];
++};
++
++// Curated token -> ColorId mapping. Unused slots are 0 (kUiColorsStart, never
++// a valid target here).
++const TokenSpec kTokens[] = {
++    {"frame", {ui::kColorFrameActive}},
++    {"frame_inactive", {ui::kColorFrameInactive}},
++    {"toolbar",
++     {kColorToolbar, kColorTabBackgroundActiveFrameActive,
++      kColorTabBackgroundActiveFrameInactive, kColorBookmarkBarBackground}},
++    {"toolbar_text", {kColorToolbarText, kColorBookmarkBarForeground}},
++    {"toolbar_icon", {kColorToolbarButtonIcon}},
++    {"tab_text",
++     {kColorTabForegroundActiveFrameActive,
++      kColorTabForegroundActiveFrameInactive}},
++    {"tab_background_text", {kColorTabForegroundInactiveFrameActive}},
++    {"tab_background_text_inactive",
++     {kColorTabForegroundInactiveFrameInactive}},
++    {"tab_background",
++     {kColorTabBackgroundInactiveFrameActive,
++      kColorTabBackgroundInactiveFrameInactive}},
++    {"omnibox", {kColorLocationBarBackground}},
++    {"omnibox_hover", {kColorLocationBarBackgroundHovered}},
++    {"omnibox_border", {kColorLocationBarBorder}},
++    {"omnibox_text", {kColorOmniboxText}},
++    {"omnibox_text_dim", {kColorOmniboxTextDimmed}},
++    {"omnibox_results", {kColorOmniboxResultsBackground}},
++    {"omnibox_results_hover", {kColorOmniboxResultsBackgroundHovered}},
++    {"focus_ring", {ui::kColorFocusableBorderFocused}},
++    {"ntp", {kColorNewTabPageBackground}},
++    {"ntp_text", {kColorNewTabPageText}},
++    // System tokens: also reach WebUI through chrome://theme/colors.css.
++    {"base", {ui::kColorSysBase}},
++    {"surface", {ui::kColorSysSurface}},
++    {"text", {ui::kColorSysOnSurface}},
++    {"accent", {ui::kColorSysPrimary}},
++    {"on_accent", {ui::kColorSysOnPrimary}},
++};
++
++int HexDigit(char c) {
++  if (c >= '0' && c <= '9') {
++    return c - '0';
++  }
++  if (c >= 'a' && c <= 'f') {
++    return c - 'a' + 10;
++  }
++  if (c >= 'A' && c <= 'F') {
++    return c - 'A' + 10;
++  }
++  return -1;
++}
++
++// Accepts #RRGGBB or #RRGGBBAA.
++std::optional<SkColor> ParseHexColor(std::string_view s) {
++  if ((s.size() != 7 && s.size() != 9) || s[0] != '#') {
++    return std::nullopt;
++  }
++  uint32_t v = 0;
++  for (size_t i = 1; i < s.size(); ++i) {
++    const int d = HexDigit(s[i]);
++    if (d < 0) {
++      return std::nullopt;
++    }
++    v = (v << 4) | static_cast<uint32_t>(d);
++  }
++  if (s.size() == 7) {
++    return SkColorSetA(v, 0xFF);
++  }
++  return SkColorSetARGB(v & 0xFF, (v >> 24) & 0xFF, (v >> 16) & 0xFF,
++                        (v >> 8) & 0xFF);
++}
++
++base::FilePath ThemeFilePath() {
++  const base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
++  if (cmd->HasSwitch(kThemeSwitch)) {
++    return cmd->GetSwitchValuePath(kThemeSwitch);
++  }
++  std::unique_ptr<base::Environment> env = base::Environment::Create();
++  return base::nix::GetXDGDirectory(env.get(), base::nix::kXdgConfigHomeEnvVar,
++                                    base::nix::kDotConfigDir)
++      .Append("aerographene")
++      .Append("theme.json");
++}
++
++// Plain POSIX read of a small file, once per process. Intentionally avoids
++// base::File so the UI thread blocking assertions do not fire; the file is
++// capped at kMaxFileSize.
++std::optional<std::string> ReadSmallFile(const base::FilePath& path) {
++  const int fd = open(path.value().c_str(), O_RDONLY | O_CLOEXEC);
++  if (fd < 0) {
++    return std::nullopt;
++  }
++  std::string data;
++  char buf[4096];
++  bool ok = true;
++  while (true) {
++    const ssize_t n = read(fd, buf, sizeof(buf));
++    if (n < 0) {
++      ok = false;
++      break;
++    }
++    if (n == 0) {
++      break;
++    }
++    data.append(buf, static_cast<size_t>(n));
++    if (data.size() > kMaxFileSize) {
++      ok = false;
++      break;
++    }
++  }
++  close(fd);
++  if (!ok) {
++    return std::nullopt;
++  }
++  return data;
++}
++
++TokenOverrides LoadOverrides() {
++  TokenOverrides result;
++  const std::optional<std::string> data = ReadSmallFile(ThemeFilePath());
++  if (!data) {
++    return result;
++  }
++  std::optional<base::DictValue> root =
++      base::JSONReader::ReadDict(*data, base::JSON_ALLOW_TRAILING_COMMAS);
++  if (!root) {
++    return result;
++  }
++  const base::DictValue* tokens = root->FindDict("tokens");
++  if (!tokens) {
++    return result;
++  }
++  for (const TokenSpec& spec : kTokens) {
++    const std::string* value = tokens->FindString(spec.name);
++    if (!value) {
++      continue;
++    }
++    const std::optional<SkColor> color = ParseHexColor(*value);
++    if (!color) {
++      continue;
++    }
++    for (ui::ColorId id : spec.ids) {
++      if (id != 0) {
++        result.emplace_back(id, *color);
++      }
++    }
++  }
++  return result;
++}
++
++const TokenOverrides& GetOverrides() {
++  static const base::NoDestructor<TokenOverrides> overrides(LoadOverrides());
++  return *overrides;
++}
++
++}  // namespace
++
++void AddAerographeneThemeTokensMixer(ui::ColorProvider* provider,
++                                     const ui::ColorProviderKey& key) {
++  if (!base::FeatureList::IsEnabled(kAerographeneThemeTokens)) {
++    return;
++  }
++  const TokenOverrides& overrides = GetOverrides();
++  if (overrides.empty()) {
++    return;
++  }
++  ui::ColorMixer& mixer = provider->AddMixer();
++  for (const auto& [id, color] : overrides) {
++    mixer[id] = {color};
++  }
++}
+
+--- /dev/null
++++ b/chrome/browser/ui/color/aerographene_theme_tokens.h
+@@ -0,0 +1,22 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#ifndef CHROME_BROWSER_UI_COLOR_AEROGRAPHENE_THEME_TOKENS_H_
++#define CHROME_BROWSER_UI_COLOR_AEROGRAPHENE_THEME_TOKENS_H_
++
++#include "base/feature_list.h"
++
++namespace ui {
++class ColorProvider;
++struct ColorProviderKey;
++}  // namespace ui
++
++// Reads ${XDG_CONFIG_HOME:-~/.config}/aerographene/theme.json (or the path in
++// --aerographene-theme=<path>) once per process and overrides a curated set
++// of ColorIds. Missing or invalid file: no-op.
++BASE_DECLARE_FEATURE(kAerographeneThemeTokens);
++
++void AddAerographeneThemeTokensMixer(ui::ColorProvider* provider,
++                                     const ui::ColorProviderKey& key);
++
++#endif  // CHROME_BROWSER_UI_COLOR_AEROGRAPHENE_THEME_TOKENS_H_
+
+--- a/chrome/browser/ui/color/BUILD.gn
++++ b/chrome/browser/ui/color/BUILD.gn
+@@ -18,6 +18,8 @@
+ 
+ source_set("mixers") {
+   sources = [
++    "aerographene_theme_tokens.cc",
++    "aerographene_theme_tokens.h",
+     "chrome_color_mixer.cc",
+     "chrome_color_mixer.h",
+     "chrome_color_mixers.cc",
+@@ -51,6 +53,7 @@
+ 
+   deps = [
+     ":color_headers",
++    "//base",
+     "//build:branding_buildflags",
+     "//chrome/app/theme:theme_resources",
+     "//chrome/browser/task_manager/common",
+
+--- a/chrome/browser/ui/color/chrome_color_mixers.cc
++++ b/chrome/browser/ui/color/chrome_color_mixers.cc
+@@ -10,6 +10,7 @@
+ #include "base/containers/fixed_flat_map.h"
+ #include "base/functional/bind.h"
+ #include "base/no_destructor.h"
++#include "chrome/browser/ui/color/aerographene_theme_tokens.h"
+ #include "chrome/browser/ui/color/chrome_color_id.h"
+ #include "chrome/browser/ui/color/chrome_color_mixer.h"
+ #include "chrome/browser/ui/color/material_chrome_color_mixer.h"
+@@ -81,4 +82,7 @@
+   if (key.app_controller) {
+     key.app_controller->AddColorMixers(provider, key);
+   }
++
++  // aerographene: user theme tokens (theme.json) override everything above.
++  AddAerographeneThemeTokensMixer(provider, key);
+ }

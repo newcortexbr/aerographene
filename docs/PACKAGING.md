@@ -46,3 +46,23 @@ Atenção: o Chromium usa só a última ocorrência de `--enable-features`/`--di
 ## tema por manifest (teste rápido, sem rebuild)
 
 `theming/chrome-themes/pixelized/manifest.json` traduz as cores do `theming/design-language/pixelized.md` para um tema Chrome (MV3, só `theme`). Para testar: `chrome://extensions` → modo desenvolvedor → carregar sem compactação → a pasta. Cobre frame, toolbar, abas, omnibox e NTP; não cobre raio, padding, fonte, dither, ícones nem a rampa de estado. Não testado em navegador ainda; aprovação visual é do dono.
+
+## tema por tokens (`theme-tokens.patch`, sem rebuild)
+
+O navegador lê no início `${XDG_CONFIG_HOME:-$HOME/.config}/aerographene/theme.json` (ou `--aerographene-theme=<path>`, que pode ir no `aerographene-flags.conf`). Mudou o arquivo, reinicie o navegador. Exemplo: `theming/chrome-themes/pixelized/theme.json`.
+
+```
+{"tokens": {"frame": "#0A0A0A", "toolbar": "#111111", "text": "#F2F2F2"}}
+```
+
+Cores `#RRGGBB` ou `#RRGGBBAA`. Tokens e ColorIds:
+
+- `frame`, `frame_inactive`: `kColorFrameActive`, `kColorFrameInactive`.
+- `toolbar`: `kColorToolbar`, fundo da aba ativa (frame ativo/inativo), `kColorBookmarkBarBackground`.
+- `toolbar_text`: `kColorToolbarText`, `kColorBookmarkBarForeground`; `toolbar_icon`: `kColorToolbarButtonIcon`.
+- `tab_text`: texto da aba ativa; `tab_background_text` e `tab_background_text_inactive`: texto da aba inativa com frame ativo/inativo; `tab_background`: fundo da aba inativa.
+- `omnibox`, `omnibox_hover`, `omnibox_border`: `kColorLocationBarBackground[Hovered]`, `kColorLocationBarBorder`; `omnibox_text`, `omnibox_text_dim`: `kColorOmniboxText[Dimmed]`; `omnibox_results`, `omnibox_results_hover`: `kColorOmniboxResultsBackground[Hovered]`.
+- `focus_ring`: `kColorFocusableBorderFocused`; `ntp`, `ntp_text`: `kColorNewTabPageBackground`, `kColorNewTabPageText`.
+- `base`, `surface`, `text`, `accent`, `on_accent`: `kColorSysBase`, `kColorSysSurface`, `kColorSysOnSurface`, `kColorSysPrimary`, `kColorSysOnPrimary`; cores derivadas desses tokens também mudam.
+
+Páginas internas (WebUI) usam `chrome://theme/colors.css`, gerado do ColorProvider, então também recebem os tokens. Desligar: `--disable-features=AerographeneThemeTokens`. Custo: uma leitura de arquivo pequeno (até 64 KiB) na primeira montagem de cores; medir contra a linha de base (regra de 2%). Não testado em navegador.
