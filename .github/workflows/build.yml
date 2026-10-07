@@ -7,6 +7,9 @@ on:
       jobs:
         description: "jobs do ninja: auto = nproc no container, ou número"
         default: "auto"
+      target:
+        description: "alvo do ninja: chrome = build completa + pacote; ou obj/<caminho>.o para validar um erro"
+        default: "chrome"
       pgo:
         description: "1 = perfil PGO oficial; 0 = sem PGO"
         default: "1"
@@ -35,6 +38,7 @@ jobs:
       - name: build
         env:
           JOBS: ${{ inputs.jobs || 'auto' }}
+          NINJA_TARGET: ${{ inputs.target || 'chrome' }}
           AEROGRAPHENE_PGO: ${{ inputs.pgo || '1' }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           GOOGLE_DEFAULT_CLIENT_ID: ${{ secrets.GOOGLE_DEFAULT_CLIENT_ID }}
@@ -42,10 +46,12 @@ jobs:
         run: bash build/build.sh
 
       - name: localizar artefato
+        if: ${{ (inputs.target || 'chrome') == 'chrome' }}
         id: art
         run: echo "path=$(ls -1 "${AEROGRAPHENE_WORKDIR:-$HOME/aerographene-build}"/dist/*.tar.zst | head -1)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
+        if: ${{ (inputs.target || 'chrome') == 'chrome' }}
         with:
           name: aerographene-linux-x86_64
           path: ${{ steps.art.outputs.path }}
@@ -54,4 +60,5 @@ jobs:
 
       # depois do upload: o artefato fica disponível mesmo se o smoke falhar
       - name: smoke test
+        if: ${{ (inputs.target || 'chrome') == 'chrome' }}
         run: bash build/smoke.sh "${{ steps.art.outputs.path }}"

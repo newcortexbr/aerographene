@@ -50,7 +50,7 @@
    // enable-ui-devtools is only available on for non Stable channels.
 --- /dev/null
 +++ b/chrome/browser/helium_flag_choices.h
-@@ -0,0 +1,15 @@
+@@ -0,0 +1,14 @@
 +// Copyright 2025 The Helium Authors
 +// You can use, redistribute, and/or modify this source code under
 +// the terms of the GPL-3.0 license that can be found in the LICENSE file.
@@ -61,7 +61,6 @@
 +#include "components/webui/flags/feature_entry.h"
 +
 +namespace helium {
-+using namespace ::helium;
 +
 +}  // namespace helium
 +

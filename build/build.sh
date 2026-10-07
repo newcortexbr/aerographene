@@ -62,6 +62,7 @@ docker run --rm -i \
     -u "$(id -u):$(id -g)" \
     -e HOME=/work/home \
     -e JOBS="${JOBS:-auto}" \
+    -e NINJA_TARGET="${NINJA_TARGET:-chrome}" \
     -e AEROGRAPHENE_CCACHE="${AEROGRAPHENE_CCACHE:-1}" \
     -e AEROGRAPHENE_CCACHE_SIZE="${AEROGRAPHENE_CCACHE_SIZE:-40G}" \
     -e AEROGRAPHENE_PGO="${AEROGRAPHENE_PGO:-1}" \

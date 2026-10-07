@@ -301,9 +301,14 @@ echo "== ninja -j ${JOBS} (nproc=$(nproc), MemAvailable=$(awk '/MemAvailable/{pr
   done ) &
 _memmon=$!
 export NINJA_STATUS="[%f/%t %es] "
-ninja -C out/Default -j "${JOBS}" chrome
+target="${NINJA_TARGET:-chrome}"
+ninja -C out/Default -j "${JOBS}" "${target}"
 kill "${_memmon}" 2>/dev/null || true
 
+if [ "${target}" != chrome ]; then
+    echo "== alvo parcial ${target} compilado; sem pacote"
+    exit 0
+fi
 echo "== pacote"
 name="aerographene-${UC_TAG}-${AERO_SHA:-local}-x86_64_linux"
 stage="/work/dist/${name}"
