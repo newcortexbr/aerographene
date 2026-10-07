@@ -1,0 +1,29 @@
+name: smoke
+
+# Smoke test avulso do artefato de um run de build já concluído.
+# Fora do grupo `build`: só lê o artefato e roda o navegador em headless.
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "id do run de build cujo artefato será testado"
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  smoke:
+    runs-on: [self-hosted, linux, intense]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: aerographene-linux-x86_64
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          path: smoke-art
+      - name: smoke test
+        run: bash build/smoke.sh "$(ls -1 smoke-art/*.tar.zst | head -1)"
