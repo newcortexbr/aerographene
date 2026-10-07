@@ -12,9 +12,11 @@ options=('!strip' '!debug')
 # release.yml publica o tarball com este nome (renomeado do artifact do build)
 source=("${pkgname}-${pkgver}-x86_64_linux.tar.zst::${url}/releases/download/v${pkgver}/${pkgname}-${pkgver}-x86_64_linux.tar.zst"
         "${pkgname}.desktop"
+        "${pkgname}-wrapper"
+        "initial_preferences"
         "LICENSE::https://raw.githubusercontent.com/newcortexbr/aerographene/v${pkgver}/LICENSE")
 # SKIP até existir release publicada (repo privado: baixar exige token); trocar por updpkgsums
-sha256sums=('SKIP' 'SKIP' 'SKIP')
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
 noextract=("${pkgname}-${pkgver}-x86_64_linux.tar.zst")
 
 prepare() {
@@ -26,7 +28,8 @@ prepare() {
 package() {
   install -d "$pkgdir/opt/$pkgname" "$pkgdir/usr/bin"
   cp -a app/. "$pkgdir/opt/$pkgname/"
-  ln -s /opt/$pkgname/aerographene "$pkgdir/usr/bin/aerographene"
+  install -Dm755 "$pkgname-wrapper" "$pkgdir/usr/bin/aerographene"
+  install -Dm644 initial_preferences "$pkgdir/opt/$pkgname/initial_preferences"
   install -Dm644 "$pkgname.desktop" "$pkgdir/usr/share/applications/$pkgname.desktop"
   # ícone placeholder: product_logo_48.png do próprio pacote (branding fica para depois)
   install -Dm644 app/product_logo_48.png "$pkgdir/usr/share/icons/hicolor/48x48/apps/$pkgname.png"

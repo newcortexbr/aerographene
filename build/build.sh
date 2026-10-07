@@ -1,7 +1,9 @@
 #!/bin/bash
 # aerographene: build no host (runner). Idempotente; cache em $AEROGRAPHENE_WORKDIR.
 # Requer no host: git, docker. Tudo o mais roda no container do portablelinux.
-# Env: AEROGRAPHENE_WORKDIR (padrão $HOME/aerographene-build), JOBS (padrão 4),
+# Env: AEROGRAPHENE_WORKDIR (padrão $HOME/aerographene-build), JOBS (padrão auto = nproc no container),
+#      AEROGRAPHENE_CCACHE (1 padrão, 0 desliga), AEROGRAPHENE_CCACHE_DIR (padrão $HOME/aerographene-ccache),
+#      AEROGRAPHENE_CCACHE_SIZE (padrão 40G),
 #      AEROGRAPHENE_PGO (1 padrão, 0 desliga), GOOGLE_API_KEY,
 #      GOOGLE_DEFAULT_CLIENT_ID, GOOGLE_DEFAULT_CLIENT_SECRET (opcionais).
 set -euo pipefail
@@ -11,7 +13,8 @@ AERO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 WORK="${AEROGRAPHENE_WORKDIR:-$HOME/aerographene-build}"
 PL_DIR="${WORK}/portablelinux"
-mkdir -p "${WORK}/home" "${WORK}/dist"
+CCACHE_HOST="${AEROGRAPHENE_CCACHE_DIR:-$HOME/aerographene-ccache}"
+mkdir -p "${WORK}/home" "${WORK}/dist" "${CCACHE_HOST}"
 
 for bin in git docker; do
     command -v "$bin" >/dev/null || { echo "erro: '$bin' não encontrado no host" >&2; exit 1; }
@@ -32,7 +35,7 @@ else
     fi
 fi
 
-# 2. imagem do builder: a do portablelinux + zstd
+# 2. imagem do builder: a do portablelinux + zstd, patch, ccache (mudar a tag :vN ao mudar a camada)
 if ! docker image inspect chromium-builder:trixie-slim >/dev/null 2>&1; then
     if docker buildx version >/dev/null 2>&1; then
         (cd "${PL_DIR}/docker" && DOCKER_BUILDKIT=1 docker build -t chromium-builder:trixie-slim -f build.Dockerfile .)
@@ -45,11 +48,11 @@ if ! docker image inspect chromium-builder:trixie-slim >/dev/null 2>&1; then
         (cd "${WORK}/docker-ctx" && docker build -t chromium-builder:trixie-slim -f build.Dockerfile .)
     fi
 fi
-if ! docker image inspect aerographene-builder:latest >/dev/null 2>&1; then
-    docker build -t aerographene-builder:latest - <<'EOF'
+if ! docker image inspect aerographene-builder:v2 >/dev/null 2>&1; then
+    docker build -t aerographene-builder:v2 - <<'EOF'
 FROM chromium-builder:trixie-slim
 USER root
-RUN apt-get -y update && apt-get -y install zstd patch && rm -rf /var/lib/apt/lists/*
+RUN apt-get -y update && apt-get -y install zstd patch ccache && rm -rf /var/lib/apt/lists/*
 USER builder
 EOF
 fi
@@ -58,12 +61,16 @@ fi
 docker run --rm -i \
     -u "$(id -u):$(id -g)" \
     -e HOME=/work/home \
-    -e JOBS="${JOBS:-4}" \
+    -e JOBS="${JOBS:-auto}" \
+    -e NINJA_TARGET="${NINJA_TARGET:-chrome}" \
+    -e AEROGRAPHENE_CCACHE="${AEROGRAPHENE_CCACHE:-1}" \
+    -e AEROGRAPHENE_CCACHE_SIZE="${AEROGRAPHENE_CCACHE_SIZE:-40G}" \
     -e AEROGRAPHENE_PGO="${AEROGRAPHENE_PGO:-1}" \
     -e GOOGLE_API_KEY -e GOOGLE_DEFAULT_CLIENT_ID -e GOOGLE_DEFAULT_CLIENT_SECRET \
     -e AERO_SHA="$(git -C "${AERO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo local)" \
     -v "${WORK}:/work" \
+    -v "${CCACHE_HOST}:/ccache" \
     -v "${AERO_ROOT}:/aero:ro" \
-    aerographene-builder:latest bash /aero/build/inner.sh
+    aerographene-builder:v2 bash /aero/build/inner.sh
 
 ls -l "${WORK}/dist"

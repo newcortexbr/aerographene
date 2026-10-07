@@ -1,0 +1,150 @@
+aerographene: peek para links target=_blank (SCOPE item 7).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: quando a página pede uma nova janela com gesto do usuário
+(link target=_blank ou window.open sem features), numa janela normal, a
+disposição NEW_FOREGROUND_TAB vira NEW_POPUP em
+BrowserWebContentsDelegate::AddNewContents. O conteúdo abre numa janela
+TYPE_POPUP (sem tabstrip, omnibox só leitura), sem criar aba, e recebe
+uma marca (user data com chave &features::kAerographenePeek). Popups com
+features já abriam assim e não recebem a marca.
+Fechar: BrowserView::OnWidgetActivationChanged fecha a popup marcada
+quando ela perde a ativação, salvo se um widget próprio (diálogo modal,
+bolha) ficou ativo; a checagem roda num PostTask.
+Promover: atalho Ctrl+Shift+Y (livre no upstream 154 e na série Helium)
+ligado ao comando upstream IDC_SHOW_AS_TAB, que só é habilitado fora de
+janelas normais; "Show as tab" do menu de sistema continua valendo.
+Ctrl/meio-clique e abas de apps não mudam.
+Gate: base::Feature kAerographenePeek (ligada por padrão), flag
+chrome://flags/#aerographene-peek em helium_flag_entries.h.
+Depende de: helium/core/flags-setup.patch e
+helium/core/add-low-power-framerate-flag.patch (contexto de
+helium_flag_entries.h); helium/core/keyboard-shortcuts.patch e
+helium/ui/layout/shortcuts.patch (accelerator_table.cc);
+helium/ui/layout/vertical.patch e anteriores (browser_view.cc);
+helium/core/override-chrome-protocol.patch e
+helium/ui/multi-contents-drop-target.patch tocam os mesmos arquivos antes.
+
+--- a/chrome/browser/helium_flag_entries.h
++++ b/chrome/browser/helium_flag_entries.h
+@@ -14,5 +14,10 @@
+      kOsDesktop, MULTI_VALUE_TYPE(helium::kEnergySaverFrameRateChoices)},
+     // core/network
+     // ui
++    {"aerographene-peek", "Peek",
++     "Opens target=_blank links in a light popup window instead of a new tab. "
++     "Closes when it loses focus; Ctrl+Shift+Y or \"Show as tab\" in the "
++     "window menu promotes it to a tab. aerographene flag.",
++     kOsDesktop, FEATURE_VALUE_TYPE(features::kAerographenePeek)},
+     // platform
+ #endif  // CHROME_BROWSER_HELIUM_FLAG_ENTRIES_H_
+--- a/chrome/browser/ui/accelerator_table.cc
++++ b/chrome/browser/ui/accelerator_table.cc
+@@ -247,6 +247,9 @@ const AcceleratorMapping kAcceleratorMap
+     {ui::VKEY_F, ui::EF_ALT_DOWN, IDC_SHOW_APP_MENU},
+     {ui::VKEY_O, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
+      IDC_SHOW_BOOKMARK_MANAGER},
++    // aerographene: peek. Promove a janela popup a aba (só habilitado fora de
++    // janelas normais, ver BrowserCommandController).
++    {ui::VKEY_Y, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, IDC_SHOW_AS_TAB},
+     {ui::VKEY_J, ui::EF_CONTROL_DOWN, IDC_SHOW_DOWNLOADS},
+     {ui::VKEY_H, ui::EF_CONTROL_DOWN, IDC_SHOW_HISTORY},
+ #if !BUILDFLAG(IS_CHROMEOS)
+--- a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
++++ b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
+@@ -46,6 +46,7 @@
+ #include "chrome/browser/ui/tab_modal_confirm_dialog.h"
+ #include "chrome/browser/ui/tabs/tab_strip_model.h"
+ #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
++#include "chrome/browser/ui/ui_features.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "chrome/browser/ui/views/frame/contents_web_view.h"
+ #include "chrome/browser/ui/views/status_bubble_views.h"
+@@ -689,6 +690,22 @@ content::WebContents* BrowserWebContents
+   }
+ #endif
+ 
++  // aerographene: peek. Uma nova janela pedida pela página com gesto do
++  // usuário (target=_blank, window.open sem features) abre como popup leve,
++  // sem criar aba. Ctrl/meio-clique chegam por OpenURLFromTab como
++  // NEW_BACKGROUND_TAB e continuam abrindo aba. Ctrl+Shift+Y ou "Show as
++  // tab" promovem; perder o foco fecha (BrowserView).
++  if (base::FeatureList::IsEnabled(features::kAerographenePeek) &&
++      !app_browser_controller_ && user_gesture &&
++      disposition == WindowOpenDisposition::NEW_FOREGROUND_TAB &&
++      browser_->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL) {
++    disposition = WindowOpenDisposition::NEW_POPUP;
++    // Marca o conteúdo para BrowserView fechar a popup ao perder o foco.
++    new_contents->SetUserData(
++        &features::kAerographenePeek,
++        std::make_unique<base::SupportsUserData::Data>());
++  }
++
+   // At this point the |new_contents| is beyond the popup blocker, but we use
+   // the same logic for determining if the popup tracker needs to be attached.
+   if (source && blocked_content::ConsiderForPopupBlocking(disposition)) {
+--- a/chrome/browser/ui/ui_features.cc
++++ b/chrome/browser/ui/ui_features.cc
+@@ -561,4 +561,6 @@ BASE_FEATURE(kOSCryptAsyncAvailabilityIn
+ BASE_FEATURE(kDeferLayoutDuringBrowserStartup,
+              base::FEATURE_DISABLED_BY_DEFAULT);
+ 
++BASE_FEATURE(kAerographenePeek, base::FEATURE_ENABLED_BY_DEFAULT);
++
+ }  // namespace features
+--- a/chrome/browser/ui/ui_features.h
++++ b/chrome/browser/ui/ui_features.h
+@@ -399,6 +399,12 @@ BASE_DECLARE_FEATURE(kToolbarGlicButtonR
+ BASE_DECLARE_FEATURE(kOSCryptAsyncAvailabilityInfoBar);
+ BASE_DECLARE_FEATURE(kDeferLayoutDuringBrowserStartup);
+ 
++// aerographene: peek. Links com target=_blank (e window.open sem features)
++// abertos por gesto do usuário numa janela normal vão para uma janela popup
++// leve em vez de uma aba nova. Fecha ao perder o foco; Ctrl+Shift+Y ou
++// "Show as tab" no menu da janela promovem a aba.
++BASE_DECLARE_FEATURE(kAerographenePeek);
++
+ }  // namespace features
+ 
+ #endif  // CHROME_BROWSER_UI_UI_FEATURES_H_
+--- a/chrome/browser/ui/views/frame/browser_view.cc
++++ b/chrome/browser/ui/views/frame/browser_view.cc
+@@ -4261,6 +4261,38 @@ void BrowserView::OnWidgetActivationChan
+   browser_->GetFeatures()
+       .extension_keybinding_registry()
+       ->OnHostActivationChanged(active);
++
++  // aerographene: peek. A popup aberta pelo peek (marcada em
++  // BrowserWebContentsDelegate::AddNewContents) fecha ao perder a ativação,
++  // salvo se o foco foi para um widget dela (diálogo, bolha, menu). A checagem
++  // é adiada para a ativação do novo widget já ter sido aplicada.
++  if (!active &&
++      browser_->GetType() == BrowserWindowInterface::Type::TYPE_POPUP &&
++      base::FeatureList::IsEnabled(features::kAerographenePeek) &&
++      GetActiveWebContents() &&
++      GetActiveWebContents()->GetUserData(&features::kAerographenePeek)) {
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE, base::BindOnce(
++                       [](base::WeakPtr<BrowserView> view) {
++                         if (!view || !view->GetWidget()) {
++                           return;
++                         }
++                         views::Widget* widget = view->GetWidget();
++                         if (widget->IsActive() ||
++                             WidgetHasChildModalDialog(widget)) {
++                           return;
++                         }
++                         for (views::Widget* owned :
++                              views::Widget::GetAllOwnedWidgets(
++                                  widget->GetNativeView())) {
++                           if (owned != widget && owned->IsActive()) {
++                             return;
++                           }
++                         }
++                         widget->Close();
++                       },
++                       weak_ptr_factory_.GetWeakPtr()));
++  }
+ }
+ 
+ void BrowserView::OnWidgetBoundsChanged(views::Widget* widget,

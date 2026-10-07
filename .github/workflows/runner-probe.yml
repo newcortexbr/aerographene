@@ -1,0 +1,33 @@
+name: runner-probe
+
+# Diagnóstico leve e somente leitura do host dos runners intense.
+# Fora do grupo de concurrency `build` de propósito: precisa rodar durante uma build.
+on:
+  workflow_dispatch:
+  push:
+    branches: [fix/inner-esbuild-backup]
+    paths: [.github/workflows/runner-probe.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: [self-hosted, linux, intense]
+    timeout-minutes: 5
+    steps:
+      - name: host
+        run: |
+          set -uo pipefail
+          echo "== runner: ${RUNNER_NAME} | $(date -Is)"
+          echo "== nproc: $(nproc) | load: $(cat /proc/loadavg)"
+          echo "== memória"; free -h
+          echo "== vmstat 5 3 (si/so = swap)"; vmstat 5 3
+          echo "== processos de compilação mais antigos"
+          ps -eo pid,etime,pcpu,rss,stat,args --sort=-etime | grep -E '[c]lang|[l]ld|[n]inja|[r]ustc' | cut -c1-200 | head -20
+          echo "== contagem: clang ativos = $(pgrep -c clang || true)"
+          echo "== containers"; docker ps --format '{{.ID}} {{.Image}} {{.Status}} {{.Names}}' || true
+          echo "== docker stats"; docker stats --no-stream --format '{{.Name}} cpu={{.CPUPerc}} mem={{.MemUsage}}' || true
+          echo "== últimas linhas da build em andamento"
+          for c in $(docker ps --filter ancestor=aerographene-builder:v2 -q); do docker logs --tail 8 "$c" 2>&1 | cut -c1-200; done || true
+          echo "== OOM recente"; (dmesg 2>/dev/null || journalctl -k -n 200 2>/dev/null) | grep -iE 'oom|killed process' | tail -5 || echo "sem acesso ou nada"

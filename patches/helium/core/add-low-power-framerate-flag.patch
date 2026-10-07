@@ -6,9 +6,8 @@
 #
 --- a/chrome/browser/helium_flag_choices.h
 +++ b/chrome/browser/helium_flag_choices.h
-@@ -11,6 +11,16 @@
+@@ -10,5 +10,15 @@
  namespace helium {
- using namespace ::helium;
  
 +constexpr const char kEnergySaverFrameRateCommandLine[] =
 +    "energy-saver-fps-limit";
