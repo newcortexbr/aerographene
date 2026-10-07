@@ -291,7 +291,15 @@ cd "${_src_dir}"
 if [ -z "${JOBS:-}" ] || [ "${JOBS}" = auto ]; then JOBS="$(nproc)"; fi
 case "${JOBS}" in ''|*[!0-9]*|0) echo "erro: JOBS inválido: ${JOBS}" >&2; exit 1;; esac
 echo "== ninja -j ${JOBS} (nproc=$(nproc), MemAvailable=$(awk '/MemAvailable/{printf "%.1f GB", $2/1048576}' /proc/meminfo))"
+# monitor de memória a cada 5 min (diagnóstico de OOM/swap em travamentos)
+( while sleep 300; do
+    awk '/MemAvailable|SwapFree|SwapTotal/{printf "%s %.1fG ", $1, $2/1048576} END{print ""}' /proc/meminfo |
+        sed "s/^/== mem $(date +%H:%M) /"
+  done ) &
+_memmon=$!
+export NINJA_STATUS="[%f/%t %es] "
 ninja -C out/Default -j "${JOBS}" chrome
+kill "${_memmon}" 2>/dev/null || true
 
 echo "== pacote"
 name="aerographene-${UC_TAG}-${AERO_SHA:-local}-x86_64_linux"
