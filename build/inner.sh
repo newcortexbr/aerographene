@@ -314,7 +314,8 @@ echo "== ninja -j ${JOBS} (nproc=$(nproc), MemAvailable=$(awk '/MemAvailable/{pr
 _memmon=$!
 export NINJA_STATUS="[%f/%t %es] "
 target="${NINJA_TARGET:-chrome}"
-ninja -C out/Default -j "${JOBS}" "${target}"
+read -r -a targets <<<"${target}"   # aceita vários alvos separados por espaço
+ninja -C out/Default -j "${JOBS}" "${targets[@]}"
 kill "${_memmon}" 2>/dev/null || true
 
 if [ "${target}" != chrome ]; then
