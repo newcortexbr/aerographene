@@ -36,3 +36,9 @@ Exemplos para isolar patches de desempenho:
 ```
 
 Atenção: o Chromium usa só a última ocorrência de `--enable-features`/`--disable-features`; junte tudo numa linha por flag.
+
+## o que o Chromium 154 já oferece (verificado em 154.0.8037.97)
+
+- policies: o build não-Chrome lê `/etc/chromium/policies` (`components/policy/core/common/policy_paths.cc:21`); nenhum patch da série muda esse caminho. Policies `recommended/` servem para defaults que alcançam perfis existentes; o pacote ainda não instala nenhuma.
+- `chrome://theme/colors.css?sets=ui,chrome` já existe (`chrome/browser/ui/webui/theme_source.cc:121`): páginas WebUI recebem as cores do ColorProvider como variáveis CSS. Um mixer de tokens de tema alimentaria essas páginas sem patch extra de CSS.
+- atalhos customizáveis: não há suporte no `accelerator_table` do 154 para Linux; continuam exigindo patch.
