@@ -40,6 +40,17 @@ full_recreate() {
     rm -f "${DOMSUB_CACHE}" "${MTIME_SNAP}"
 }
 
+# Inverso exato de fix_tool_downloading (portablelinux), que reescreve com sed arquivos já domain-substituídos:
+# o revert do ungoogled confere o CRC32 do estado pós-substituição e aborta se o sed já rodou.
+unfix_tool_downloading() {
+    local t="${_src_dir}/tools"
+    sed -i 's/commondatastorage\.googleapis\.com/commondatastorage.9oo91eapis.qjz9zk/g' \
+        "${_src_dir}/build/linux/sysroot_scripts/sysroots.json" "$t/clang/scripts/update.py" "$t/clang/scripts/build.py"
+    sed -i 's/chromium\.googlesource\.com/chromium.9oo91esource.qjz9zk/g' \
+        "$t/clang/scripts/build.py" "$t/rust/build_rust.py" "$t/rust/build_bindgen.py"
+    sed -i 's/chrome-infra-packages\.appspot\.com/chrome-infra-packages.8pp2p8t.qjz9zk/g' "$t/rust/build_rust.py"
+}
+
 # Reverte a série anterior (gravada em $AERO_STATE) em ordem inversa; ungoogled/portablelinux ficam.
 # Antes: mtime+sha dos arquivos afetados; no fim, restore_mtimes devolve o mtime de quem não mudou.
 # Retorna !=0 se não for possível (sem registro, sem cache de domsub, patch -R falhou): recriar.
@@ -70,6 +81,7 @@ PY
     rm -f "${_src_dir}/.aero-patches.hash"   # daqui em diante a árvore está parcial
     if [ -f "${_src_dir}/.domsub.stamp" ]; then
         echo "== revert da domain substitution"
+        unfix_tool_downloading   # após o snapshot de mtimes/sha; fix_tool_downloading reaplica depois
         "${_main_repo}/utils/domain_substitution.py" revert -c "${DOMSUB_CACHE}" "${_src_dir}" || return 1
         rm -f "${DOMSUB_CACHE}" "${_src_dir}/.domsub.stamp"
     fi
