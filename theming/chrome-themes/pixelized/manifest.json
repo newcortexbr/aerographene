@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "aerographene pixelized",
+  "version": "0.1",
+  "description": "tema monotone pixelized (teste via manifest; sem raio, padding, fonte nem ícones)",
+  "theme": {
+    "colors": {
+      "frame": [10, 10, 10],
+      "frame_inactive": [17, 17, 17],
+      "frame_incognito": [10, 10, 10],
+      "toolbar": [17, 17, 17],
+      "tab_text": [242, 242, 242],
+      "tab_background_text": [140, 140, 140],
+      "tab_background_text_inactive": [90, 90, 90],
+      "bookmark_text": [242, 242, 242],
+      "toolbar_text": [242, 242, 242],
+      "toolbar_button_icon": [242, 242, 242],
+      "omnibox_background": [24, 24, 24],
+      "omnibox_text": [242, 242, 242],
+      "ntp_background": [10, 10, 10],
+      "ntp_text": [242, 242, 242],
+      "ntp_link": [242, 242, 242],
+      "button_background": [34, 34, 34, 1.0]
+    },
+    "properties": { "ntp_background_alignment": "center" }
+  }
+}
