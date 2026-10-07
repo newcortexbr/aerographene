@@ -12,7 +12,7 @@ chrome://theme/colors.css.
 
 --- /dev/null
 +++ b/chrome/browser/ui/color/aerographene_theme_tokens.cc
-@@ -0,0 +1,212 @@
+@@ -0,0 +1,214 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -40,7 +40,9 @@ chrome://theme/colors.css.
 +#include "ui/color/color_id.h"
 +#include "ui/color/color_mixer.h"
 +#include "ui/color/color_provider.h"
++#include "ui/color/color_recipe.h"
 +#include "ui/color/color_provider_key.h"
++#include "ui/color/color_transform.h"
 +
 +BASE_FEATURE(kAerographeneThemeTokens, base::FEATURE_ENABLED_BY_DEFAULT);
 +
@@ -222,7 +224,7 @@ chrome://theme/colors.css.
 +  }
 +  ui::ColorMixer& mixer = provider->AddMixer();
 +  for (const auto& [id, color] : overrides) {
-+    mixer[id] = {color};
++    mixer[id] = ui::ColorTransform(color);
 +  }
 +}
 
