@@ -217,7 +217,10 @@ if [ "${AEROGRAPHENE_CCACHE:-1}" = 1 ] && command -v ccache >/dev/null; then
     ccache --set-config "max_size=${AEROGRAPHENE_CCACHE_SIZE:-40G}"
     ccache --set-config "base_dir=${_src_dir}"
     ccache --set-config hash_dir=false
-    ccache --set-config sloppiness=time_macros,include_file_mtime,include_file_ctime,pch_defines
+    # o 154 compila C++ com clang modules (-fmodules/-fmodule-file): sem `modules` + depend_mode
+    # o ccache marca ~90% das chamadas como não cacheáveis (run 37546797390)
+    ccache --set-config sloppiness=time_macros,include_file_mtime,include_file_ctime,pch_defines,modules
+    ccache --set-config depend_mode=true
     ccache --set-config "compiler_check=%compiler% -v"   # clang re-baixado muda mtime, não a versão
     ccache -z >/dev/null
     cc_line='cc_wrapper="ccache"'

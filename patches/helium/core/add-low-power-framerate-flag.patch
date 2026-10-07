@@ -6,7 +6,7 @@
 #
 --- a/chrome/browser/helium_flag_choices.h
 +++ b/chrome/browser/helium_flag_choices.h
-@@ -11,6 +11,16 @@
+@@ -10,6 +10,16 @@
  namespace helium {
  using namespace ::helium;
  
