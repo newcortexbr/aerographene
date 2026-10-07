@@ -73,3 +73,7 @@ Cores `#RRGGBB` ou `#RRGGBBAA`. Tokens e ColorIds:
 - `base`, `surface`, `text`, `accent`, `on_accent`: `kColorSysBase`, `kColorSysSurface`, `kColorSysOnSurface`, `kColorSysPrimary`, `kColorSysOnPrimary`; cores derivadas desses tokens também mudam.
 
 Páginas internas (WebUI) usam `chrome://theme/colors.css`, gerado do ColorProvider, então também recebem os tokens. Desligar: `--disable-features=AerographeneThemeTokens`. Custo: uma leitura de arquivo pequeno (até 64 KiB) na primeira montagem de cores; medir contra a linha de base (regra de 2%). Não testado em navegador.
+
+## nome e diretório de dados
+
+Com `aerographene/branding.patch`, `--version` mostra `aerographene 154.0.8037.97` e o perfil padrão fica em `${XDG_CONFIG_HOME:-$HOME/.config}/aerographene` (cache em `~/.cache/aerographene`), separado de um Chromium instalado; perfis antigos em `~/.config/chromium` não migram sozinhos (copiar ou usar `--user-data-dir`). O wrapper exporta `CHROME_DESKTOP=aerographene.desktop`. Policies continuam em `/etc/chromium/policies` e strings da UI ainda dizem "Chromium".

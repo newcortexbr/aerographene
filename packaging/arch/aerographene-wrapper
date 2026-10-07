@@ -18,4 +18,7 @@ read_flags() {
 read_flags /etc/aerographene-flags.conf
 read_flags "${XDG_CONFIG_HOME:-${HOME:-/nonexistent}/.config}/aerographene-flags.conf"
 
+# o Chromium usa CHROME_DESKTOP para achar o .desktop (ícone, associação na barra)
+export CHROME_DESKTOP=aerographene.desktop
+
 exec "${AEROGRAPHENE_BIN:-/opt/aerographene/aerographene}" ${flags[@]+"${flags[@]}"} "$@"

@@ -1,0 +1,43 @@
+aerographene: nome de produto e diretório de dados próprios.
+
+Origem: aerographene (original; abordagem do BRANDING como em
+helium/core/change-chromium-branding.patch do Helium 0.18.3). Licença: GPL-3.0.
+Propósito: `--version`, títulos e metadados usam "aerographene" em vez de
+"Chromium" (PRODUCT_FULLNAME etc. viram version.h/version_info); o perfil
+padrão vai para ${XDG_CONFIG_HOME:-~/.config}/aerographene (cache em
+~/.cache/aerographene), sem colidir com um Chromium instalado. Strings da UI
+em chromium_strings.grd continuam dizendo "Chromium" (fora do escopo).
+
+--- a/chrome/app/theme/chromium/BRANDING
++++ b/chrome/app/theme/chromium/BRANDING
+@@ -1,10 +1,10 @@
+-COMPANY_FULLNAME=The Chromium Authors
+-COMPANY_SHORTNAME=The Chromium Authors
+-PRODUCT_FULLNAME=Chromium
+-PRODUCT_SHORTNAME=Chromium
+-PRODUCT_INSTALLER_FULLNAME=Chromium Installer
+-PRODUCT_INSTALLER_SHORTNAME=Chromium Installer
+-COPYRIGHT=Copyright @LASTCHANGE_YEAR@ The Chromium Authors. All rights reserved.
+-MAC_BUNDLE_ID=org.chromium.Chromium
++COMPANY_FULLNAME=The aerographene Authors
++COMPANY_SHORTNAME=The aerographene Authors
++PRODUCT_FULLNAME=aerographene
++PRODUCT_SHORTNAME=aerographene
++PRODUCT_INSTALLER_FULLNAME=aerographene Installer
++PRODUCT_INSTALLER_SHORTNAME=aerographene Installer
++COPYRIGHT=Copyright @LASTCHANGE_YEAR@ The aerographene Authors. All rights reserved.
++MAC_BUNDLE_ID=org.aerographene.aerographene
+ MAC_CREATOR_CODE=Cr24
+ MAC_TEAM_ID=
+--- a/chrome/common/chrome_paths_linux.cc
++++ b/chrome/common/chrome_paths_linux.cc
+@@ -95,7 +95,8 @@
+ #elif BUILDFLAG(GOOGLE_CHROME_BRANDING)
+   std::string data_dir_basename = "google-chrome";
+ #else
+-  std::string data_dir_basename = "chromium";
++  // aerographene: own user-data dir, so it never clashes with Chromium.
++  std::string data_dir_basename = "aerographene";
+ #endif
+   *result = config_dir.Append(data_dir_basename + GetChannelSuffixForDataDir());
+   return true;
