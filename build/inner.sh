@@ -69,12 +69,14 @@ incremental_repatch() {
     python3 - "${_src_dir}" "${MTIME_SNAP}.list" "${MTIME_SNAP}" <<'PY' || return 1
 import sys, os, hashlib
 src, lst, out = sys.argv[1:]
-with open(lst) as f, open(out + '.part', 'w') as o:
+with open(lst) as f, open(out + '.part', 'w') as o, open(out + '.exec', 'w') as ex:
     for rel in f.read().split('\n'):
         p = os.path.join(src, rel)
         if rel and os.path.isfile(p) and not os.path.islink(p):
             h = hashlib.sha256(open(p, 'rb').read()).hexdigest()
             o.write(f"{os.stat(p).st_mtime_ns}\t{h}\t{rel}\n")
+            if os.access(p, os.X_OK):
+                ex.write(rel + "\n")
 os.replace(out + '.part', out)
 PY
     rm -f "${MTIME_SNAP}.list"
@@ -218,6 +220,11 @@ if [ ! -f "${_src_dir}/.domsub.stamp" ]; then
     "${_main_repo}/utils/domain_substitution.py" apply -r "${_main_repo}/domain_regex.list" \
         -f "${_main_repo}/domain_substitution.list" -c "${DOMSUB_CACHE}" "${_src_dir}"
     touch "${_src_dir}/.domsub.stamp"
+    # o revert da domsub regrava arquivos sem o bit de execução (ex.: tools/clang/scripts/update.py)
+    if [ -f "${MTIME_SNAP}.exec" ]; then
+        while read -r f; do [ -f "${_src_dir}/${f}" ] && chmod +x "${_src_dir}/${f}"; done < "${MTIME_SNAP}.exec"
+        rm -f "${MTIME_SNAP}.exec"
+    fi
 fi
 fix_tool_downloading
 restore_mtimes
@@ -275,6 +282,9 @@ sed -E 's/^(google_[a-z_]+)=.*/\1=<omitido>/' "${_out_dir}/args.gn.new"
 if ! cmp -s "${_out_dir}/args.gn.new" "${_out_dir}/args.gn"; then mv "${_out_dir}/args.gn.new" "${_out_dir}/args.gn"; else rm "${_out_dir}/args.gn.new"; fi
 
 echo "== toolchain"
+for f in tools/clang/scripts/update.py tools/clang/scripts/build.py tools/rust/build_rust.py tools/rust/build_bindgen.py; do
+    [ -f "${_src_dir}/${f}" ] && chmod +x "${_src_dir}/${f}"
+done
 # setup_toolchain faz rm -rf esbuild/ (barra final segue o symlink de uma execução anterior e tenta apagar /usr/lib).
 # Move a entrada (diretório, symlink ou symlink quebrado) para um backup exclusivo, sem seguir o link e sem rm.
 _esb="${_src_dir}/third_party/devtools-frontend/src/node_modules/esbuild"
