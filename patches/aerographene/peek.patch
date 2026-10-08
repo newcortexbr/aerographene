@@ -15,6 +15,9 @@ Promover: atalho Ctrl+Shift+Y (livre no upstream 154 e na série Helium)
 ligado ao comando upstream IDC_SHOW_AS_TAB, que só é habilitado fora de
 janelas normais; "Show as tab" do menu de sistema continua valendo.
 Ctrl/meio-clique e abas de apps não mudam.
+Tamanho: 70% x 85% da janela de origem, centrada nela (window_features
+vira cópia mutável em AddNewContents); em Wayland a posição depende do
+compositor.
 Gate: base::Feature kAerographenePeek (ligada por padrão), flag
 chrome://flags/#aerographene-peek em helium_flag_entries.h.
 Depende de: helium/core/flags-setup.patch e
@@ -60,7 +63,20 @@ helium/ui/multi-contents-drop-target.patch tocam os mesmos arquivos antes.
  #include "chrome/browser/ui/views/frame/browser_view.h"
  #include "chrome/browser/ui/views/frame/contents_web_view.h"
  #include "chrome/browser/ui/views/status_bubble_views.h"
-@@ -689,6 +690,22 @@ content::WebContents* BrowserWebContents
+@@ -664,9 +665,11 @@
+     std::unique_ptr<content::WebContents> new_contents,
+     const GURL& target_url,
+     WindowOpenDisposition disposition,
+-    const blink::mojom::WindowFeatures& window_features,
++    const blink::mojom::WindowFeatures& requested_window_features,
+     bool user_gesture,
+     bool* was_blocked) {
++  // aerographene: cópia mutável; o peek define o tamanho da popup.
++  blink::mojom::WindowFeatures window_features = requested_window_features;
+   FullscreenController* fullscreen_controller =
+       exclusive_access_manager_->fullscreen_controller();
+ #if BUILDFLAG(IS_MAC)
+@@ -689,6 +692,34 @@
    }
  #endif
  
@@ -78,6 +94,18 @@ helium/ui/multi-contents-drop-target.patch tocam os mesmos arquivos antes.
 +    new_contents->SetUserData(
 +        &features::kAerographenePeek,
 +        std::make_unique<base::SupportsUserData::Data>());
++    // Tamanho próprio: 70% x 85% da janela de origem, centrada nela. Sem
++    // isso a popup herdaria o tamanho padrão do WindowSizer. Em Wayland o
++    // compositor pode ignorar a posição; o tamanho vale.
++    const gfx::Rect parent = window_->GetBounds();
++    if (!parent.IsEmpty()) {
++      gfx::Rect peek(parent.width() * 7 / 10, parent.height() * 85 / 100);
++      peek.set_origin(parent.CenterPoint() -
++                      gfx::Vector2d(peek.width() / 2, peek.height() / 2));
++      window_features.bounds = peek;
++      window_features.has_x = window_features.has_y = true;
++      window_features.has_width = window_features.has_height = true;
++    }
 +  }
 +
    // At this point the |new_contents| is beyond the popup blocker, but we use
