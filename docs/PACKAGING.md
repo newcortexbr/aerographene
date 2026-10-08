@@ -77,3 +77,31 @@ Páginas internas (WebUI) usam `chrome://theme/colors.css`, gerado do ColorProvi
 ## nome e diretório de dados
 
 Com `aerographene/branding.patch`, `--version` mostra `aerographene 154.0.8037.97` e o perfil padrão fica em `${XDG_CONFIG_HOME:-$HOME/.config}/aerographene` (cache em `~/.cache/aerographene`), separado de um Chromium instalado; perfis antigos em `~/.config/chromium` não migram sozinhos (copiar ou usar `--user-data-dir`). O wrapper exporta `CHROME_DESKTOP=aerographene.desktop`. Policies continuam em `/etc/chromium/policies` e strings da UI ainda dizem "Chromium".
+
+## PKGBUILD (`packaging/arch/`)
+
+Fluxo de release (cada passo exige pedido explícito do dono: dispatch de workflow, tag, publicação):
+
+1. `build.yml` (dispatch) gera o artifact `aerographene-linux-x86_64`.
+2. `smoke.yml` valida o artifact.
+3. `release.yml` (inputs `run_id`, `tag` vX.Y.Z) cria release em draft com o tarball renomeado e `SHA256SUMS`.
+4. Com o tarball acessível: `updpkgsums` em `packaging/arch/` (troca os `SKIP`).
+5. Dono publica o draft; só então `makepkg`.
+
+Fontes: o `LICENSE` é cópia local da raiz (`packaging/arch/LICENSE`), pois makepkg resolve fontes relativas ao diretório do PKGBUILD e a URL raw do repo privado falharia sem token. Se o `LICENSE` da raiz mudar, recopie.
+
+depends (conferidos com `readelf -d aerographene` do pacote 46f2308, sem executar):
+- NEEDED diretos: nss (nspr/nss3/nssutil3/smime3), glib2 via gtk3, atk/at-spi2-core (atk, atk-bridge, atspi), dbus, cups, expat, libxcb, libxkbcommon, alsa-lib, mesa (gbm), libx11, libxext, libxcomposite, libxdamage, libxfixes, libxrandr, cairo, pango, systemd-libs (libudev). Foram listados explicitamente; `libxss` e `gtk3` ficam do original (gtk é carregado por dlopen, não aparece em NEEDED).
+- `xdg-utils`: inferência (abrir links/arquivos externos); não verificado no binário.
+- `ttf-liberation`: inferência (fontes padrão); `hicolor-icon-theme`: o ícone vai em `hicolor/`.
+- nomes de pacotes Arch não conferidos com `pacman`/namcap.
+
+Sandbox: o pacote extraído não contém `chrome_sandbox` (suid); o binário referencia `CHROME_DEVEL_SANDBOX`. O PKGBUILD não instala helper suid, então o sandbox depende de user namespaces não privilegiados do kernel. Não testado em execução.
+
+StartupWMClass: `aerographene` (nome do desktop file). NÃO verificado: o binário contém `CHROME_DESKTOP`, mas o app_id/WM_CLASS real só aparece com a janela aberta. Verificar: `xprop WM_CLASS` (X11), `swaymsg -t get_tree` ou `hyprctl clients` (Wayland); ajuste o valor se diferir.
+
+Pendências:
+- checksums todos `SKIP` (release inexistente; rodar `updpkgsums`).
+- ícone só 48x48 (`product_logo_48.png`, placeholder).
+- nenhuma tag existe no repositório.
+- `namcap` e `makepkg` não rodados.
