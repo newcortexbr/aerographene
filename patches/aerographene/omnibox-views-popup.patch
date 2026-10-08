@@ -1,0 +1,33 @@
+aerographene: omnibox com popup nativo (views) em vez de WebUI.
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: desempenho (SCOPE item 3). No 154 o popup WebUI do omnibox
+(chrome://omnibox-popup.top-chrome/) e o popup AIM (modo IA) são pré-carregados
+na abertura de cada janela: 1 renderer a mais e ~35 MiB de PSS. Desligados,
+LocationBarView volta ao OmniboxPopupViewViews (location_bar_view.cc, ramo
+"legacy popup view", ainda mantido no 154). O AIM não tem uso aqui (o
+ungoogled já desliga a IA). Medido no Comet Lake (bench/harness.py, 10 abas,
+10 repetições intercaladas, mesmo binário com --disable-features equivalente):
+first_ms 934 -> 813 ms, PSS 787 -> 752 MiB, processos 20 -> 19.
+Reverter: --enable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup.
+Risco: o popup views é o caminho legado; o upstream pode removê-lo em
+versões futuras.
+
+--- a/chrome/browser/ui/omnibox/omnibox_next_features.cc
++++ b/chrome/browser/ui/omnibox/omnibox_next_features.cc
+@@ -38,11 +38,13 @@
+ namespace internal {
+ 
+ // If enabled, shows the omnibox suggestions in the popup in WebUI.
+-BASE_FEATURE(kWebUIOmniboxPopup, ENABLED);
++// aerographene: desligado; popup nativo (views) evita um renderer na abertura.
++BASE_FEATURE(kWebUIOmniboxPopup, DISABLED);
+ 
+ // If enabled, Omnibox popup will transition to AI-Mode with the compose-box
+ // panel taking up the whole of the popup, covering the location bar completely.
+-BASE_FEATURE(kWebUIOmniboxAimPopup, ENABLED);
++// aerographene: desligado (sem IA; ver omnibox-views-popup.patch).
++BASE_FEATURE(kWebUIOmniboxAimPopup, DISABLED);
+ 
+ // If enabled, the Omnibox Popup will enable a different UI state when on a
+ // webpage.

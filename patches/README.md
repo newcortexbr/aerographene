@@ -110,3 +110,7 @@ Framework de tema sem rebuild: `chrome/browser/ui/color/aerographene_theme_token
 ### `aerographene/branding.patch` (GPL-3.0)
 
 Nome de produto `aerographene` em `chrome/app/theme/chromium/BRANDING` (`--version`, version_info) e diretório de dados `~/.config/aerographene` em `chrome/common/chrome_paths_linux.cc`. Abordagem do BRANDING igual a `helium/core/change-chromium-branding.patch` (Helium 0.18.3), sem a substituição de strings da UI. Nenhum patch do ungoogled 154.0.8037.97-1 nem da série toca esses arquivos; `patch -p1 --fuzz=0` e `-R --dry-run` feitos sobre os fontes 154.0.8037.97. Mudar BRANDING regenera `version.h` e invalida muitos objetos de `//chrome`.
+
+### `aerographene/omnibox-views-popup.patch` (GPL-3.0, SCOPE item 3)
+
+Desliga `omnibox::internal::kWebUIOmniboxPopup` e `kWebUIOmniboxAimPopup` em `chrome/browser/ui/omnibox/omnibox_next_features.cc`. Sem eles, `LocationBarView` cria o `OmniboxPopupViewViews` (popup nativo, ramo legado ainda presente no 154) e não pré-carrega `chrome://omnibox-popup.top-chrome/` nem o popup AIM. Medido em 08/10 no Comet Lake (NVMe), mesmo binário com `--disable-features` equivalente, 10 repetições intercaladas, 10 abas: `first_ms` 934 → 813 ms, PSS 787 → 752 MiB, 20 → 19 processos (`~/.cache/aero-bench/ab/flags-20261008-005420.jsonl`, fora do repo). Nenhum patch do ungoogled 154.0.8037.97-1 nem da série toca o arquivo; `patch --dry-run` limpo sobre a tag. Compilação e uso do popup views com `command-bar-type-icons` não verificados.

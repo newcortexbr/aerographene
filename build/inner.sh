@@ -342,6 +342,25 @@ for f in chrome chrome_100_percent.pak chrome_200_percent.pak chrome_crashpad_ha
          vk_swiftshader_icd.json xdg-mime xdg-settings; do
     [ -e "out/Default/$f" ] && cp -r "out/Default/$f" "$stage/"
 done
+# tabela de símbolos fora do pacote (~234 MB no chrome; o Helium distribui sem).
+# Não muda código executado: .symtab/.strtab não são carregadas em runtime.
+strip_tool=""
+for t in "${_src_dir}/third_party/llvm-build/Release+Asserts/bin/llvm-strip" \
+         "${_src_dir}/third_party/llvm-build/Release+Asserts/bin/llvm-objcopy" \
+         "$(command -v strip || true)"; do
+    [ -n "$t" ] && [ -x "$t" ] && { strip_tool="$t"; break; }
+done
+if [ -n "$strip_tool" ]; then
+    echo "== strip com $(basename "$strip_tool")"
+    for f in "$stage"/chrome "$stage"/chrome_crashpad_handler; do
+        [ -f "$f" ] && "$strip_tool" --strip-all "$f"
+    done
+    for f in "$stage"/*.so "$stage"/*.so.*; do
+        [ -f "$f" ] && "$strip_tool" --strip-unneeded "$f"
+    done
+else
+    echo "== aviso: nenhum strip disponível; pacote segue com símbolos"
+fi
 # binário principal com nome do produto; branding completo fica para depois
 ln -sf chrome "$stage/aerographene"
 rm -f /work/dist/*.tar.zst
