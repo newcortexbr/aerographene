@@ -29,7 +29,9 @@ Harness: `bench/harness.py`. Estado de energia: `power_profile=performance`, gov
 | zen | 4272,4 | 648,8 | 21 |
 | thorium | 6674,7 (instável: 1393–9266) | 636,1 | 19 |
 
-Referência do aerographene: ungoogled (a base). Meta: nada pior que +2% sobre a base; alvo: passar Thorium e Helium.
+Referência do aerographene (revisada em 08/10/2026 pelo dono, substitui "ungoogled é a base"): Helium. Meta: nada pior que +2% sobre o Helium medido na mesma rodada, com ordem intercalada; alvo: passar Helium e Thorium. O ungoogled segue como piso informativo, não como regra: a diferença do aero e do Helium contra ele (cerca de +70 ms e +90 a +105 MiB no pacote 46f2308, n=12) vem de algo herdado do Helium, provavelmente o uBlock como componente, e não é cobrada. Descobrir por que Helium e ungoogled abrem mais rápido é objetivo desejável, sem cobrança.
+
+Rodada de 08/10/2026 (aero 46f2308, n=12, máquina ociosa, ordem intercalada; `~/.cache/aero-bench/run-20261008/`, fora do git): aero 833 ms / 751 MiB / 19 procs; Helium 829 / 734 / 19; ungoogled 761 / 646 / 19.
 
 ## limites
 
