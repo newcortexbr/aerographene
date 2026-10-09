@@ -1,0 +1,124 @@
+aerographene: botão de alternar a sidebar (abas verticais) na toolbar.
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: mockups A-r06 pedem, à esquerda de voltar/avançar/recarregar, um
+botão que colapsa/expande a sidebar. ToolbarButton primeiro filho da toolbar,
+executa IDC_TOGGLE_VERTICAL_TABS_COLLAPSE (habilitado sempre no
+BrowserCommandController do 154). Visível só no layout vertical do Helium;
+acompanha a troca de layout via OnVerticalTabStripModeChanged (core.patch liga
+o modo à pref kHeliumLayout) e o colapso via RegisterOnCollapseChanged. Ícone e
+tooltip iguais aos de VerticalTabStripStateController::UpdateCollapseActionItem
+(views::kMenuOpenIcon/kMenuOpenOldIcon/kMenuCloseCustomIcon,
+IDS_EXPAND_VERTICAL_TABS/IDS_COLLAPSE_VERTICAL_TABS); nenhum ID novo.
+Depende de: helium/ui/layout/core.patch, helium/ui/layout/toolbar-layout.patch,
+aerographene/toolbar-compact-width.patch, aerographene/omnibox-centered.patch
+(aplica depois dele em toolbar_view.cc).
+
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.h
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.h
+@@ -302,6 +302,9 @@
+   // Returns whether the Helium layout is Compact.
+   bool IsCompactLayout() const;
+ 
++  // aerographene: syncs the sidebar toggle with layout and collapse state.
++  void UpdateSidebarToggle();
++
+   // AppMenuIconController::Delegate:
+   void UpdateTypeAndSeverity(
+       AppMenuIconController::TypeAndSeverity type_and_severity) override;
+@@ -406,6 +409,7 @@
+   // Controls. Most of these can be null, e.g. in popup windows. Only
+   // |location_bar_| is guaranteed to exist. These pointers are owned by the
+   // view hierarchy.
++  raw_ptr<ToolbarButton> sidebar_toggle_ = nullptr;
+   raw_ptr<ToolbarButton> back_ = nullptr;
+   raw_ptr<ToolbarButton> forward_ = nullptr;
+   raw_ptr<ReloadButton> reload_ = nullptr;
+@@ -509,6 +513,7 @@
+ 
+   // Subscription for when tab strip mode changes
+   base::CallbackListSubscription vertical_tab_subscription_;
++  base::CallbackListSubscription sidebar_collapse_subscription_;
+ 
+   bool should_display_vertical_tabs_ = false;
+   bool should_show_glic_button_ = false;
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.cc
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+@@ -13,6 +13,7 @@
+ #include "base/feature_list.h"
+ #include "base/functional/bind.h"
+ #include "base/functional/callback.h"
++#include "base/functional/callback_helpers.h"
+ #include "base/i18n/number_formatting.h"
+ #include "base/i18n/rtl.h"
+ #include "base/metrics/histogram_functions.h"
+@@ -165,6 +166,7 @@
+ #include "ui/views/layout/proposed_layout.h"
+ #include "ui/views/mouse_watcher.h"
+ #include "ui/views/mouse_watcher_view_host.h"
++#include "ui/views/vector_icons.h"
+ #include "ui/views/view.h"
+ #include "ui/views/view_class_properties.h"
+ #include "ui/views/view_utils.h"
+@@ -468,6 +470,10 @@
+ #endif
+ 
+   // Always add children in order from left to right, for accessibility.
++  sidebar_toggle_ = AddChildView(std::make_unique<ToolbarButton>(
++      base::BindRepeating(callback, browser_,
++                          IDC_TOGGLE_VERTICAL_TABS_COLLAPSE)));
++  sidebar_toggle_->SetVisible(false);
+   if (!features::IsWebUIBackForwardButtonEnabled()) {
+     back_ = AddChildView(std::make_unique<BackForwardButton>(
+         BackForwardButton::Direction::kBack,
+@@ -707,6 +713,11 @@
+                                 base::Unretained(this)));
+     should_display_vertical_tabs_ =
+         vertical_tab_strip_state_controller->ShouldDisplayVerticalTabs();
++    sidebar_collapse_subscription_ =
++        vertical_tab_strip_state_controller->RegisterOnCollapseChanged(
++            base::IgnoreArgs<tabs::VerticalTabStripCollapseState>(
++                base::BindRepeating(&ToolbarView::UpdateSidebarToggle,
++                                    base::Unretained(this))));
+   }
+   if (glic::GlicEnabling::IsProfileEligible(browser_view_->GetProfile())) {
+     UpdateGlicButtonVisibility();
+@@ -770,6 +781,7 @@
+       base::BindRepeating(&ToolbarView::OnLocationBarCenteredChanged,
+                           base::Unretained(this)));
+ 
++  UpdateSidebarToggle();
+   InitLayout();
+ 
+   auto flex_preferred =
+@@ -810,6 +822,7 @@
+ void ToolbarView::OnVerticalTabStripModeChanged(
+     tabs::VerticalTabStripStateController* controller) {
+   should_display_vertical_tabs_ = controller->ShouldDisplayVerticalTabs();
++  UpdateSidebarToggle();
+   UpdateGlicButtonVisibility();
+   UpdateGlicActorVisibility();
+   // Invalidate the layout cache so responsive buttons (forward, home, split,
+@@ -1869,6 +1882,22 @@
+   InvalidateLayout();
+ }
+ 
++void ToolbarView::UpdateSidebarToggle() {
++  auto* layout = HeliumLayoutStateController::From(browser_view_->browser());
++  auto* state = tabs::VerticalTabStripStateController::From(browser_);
++  sidebar_toggle_->SetVisible(layout && layout->IsVerticalLayout() && state);
++  if (!state) {
++    return;
++  }
++  const bool collapsed = state->IsCollapsed();
++  sidebar_toggle_->SetVectorIcon(
++      collapsed ? (features::IsRoundedIconsEnabled() ? views::kMenuOpenIcon
++                                                     : views::kMenuOpenOldIcon)
++                : views::kMenuCloseCustomIcon);
++  sidebar_toggle_->SetTooltipText(l10n_util::GetStringUTF16(
++      collapsed ? IDS_EXPAND_VERTICAL_TABS : IDS_COLLAPSE_VERTICAL_TABS));
++}
++
+ bool ToolbarView::IsCompactLayout() const {
+   auto* controller =
+       HeliumLayoutStateController::From(browser_view_->browser());
