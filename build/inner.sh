@@ -321,6 +321,9 @@ if [ ! -f "${ob_dir}/.aero-onboarding-${ob_ver}" ]; then
     touch "${ob_dir}/.aero-onboarding-${ob_ver}"
 fi
 
+echo "== ícones (branding/)"
+bash /aero/build/apply_branding_assets.sh "${_src_dir}" /aero/branding
+
 echo "== gn gen"
 cd "${_src_dir}"
 [ -x out/Default/gn ] || ./tools/gn/bootstrap/bootstrap.py -o out/Default/gn --skip-generate-buildfiles
@@ -354,6 +357,11 @@ for f in chrome chrome_100_percent.pak chrome_200_percent.pak chrome_crashpad_ha
          libvulkan.so.1 locales product_logo_48.png resources.pak v8_context_snapshot.bin \
          vk_swiftshader_icd.json xdg-mime xdg-settings; do
     [ -e "out/Default/$f" ] && cp -r "out/Default/$f" "$stage/"
+done
+# ícones hicolor do tema do app (PKGBUILD instala em /usr/share/icons/hicolor/<n>x<n>/apps/aerographene.png)
+for n in 16 24 32 48 64 128 256; do
+    mkdir -p "$stage/icons/hicolor/${n}x${n}/apps"
+    cp "/aero/branding/png/aerographene-icon-${n}.png" "$stage/icons/hicolor/${n}x${n}/apps/aerographene.png"
 done
 # tabela de símbolos fora do pacote (~234 MB no chrome; o Helium distribui sem).
 # Não muda código executado: .symtab/.strtab não são carregadas em runtime.
