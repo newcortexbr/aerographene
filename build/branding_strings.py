@@ -98,18 +98,38 @@ class Ids:
     def ids(self, blocks):
         """blocks: lista de (attrs, body) de <message>. Devolve ids na mesma ordem
         (None para use_name_for_id/sem clique)."""
-        parts = []
-        for i, (attrs, body) in enumerate(blocks):
-            # nome único; atributos que afetam o id (meaning, translateable não) ficam
-            a = re.sub(r'\bname="[^"]*"', "", attrs)
-            a = re.sub(r'\b(?:custom_type|validation_expr|generate_xtb|use_name_for_id)="[^"]*"', "", a)
-            parts.append('<message name="M%d"%s>%s</message>' % (i, a, body))
-        doc = (
-            '<?xml version="1.0" encoding="UTF-8"?>\n'
-            '<grit base_dir="." latest_public_release="0" current_release="1" source_lang_id="en">'
-            '<release seq="1"><messages>' + "\n".join(parts) + "</messages></release></grit>"
-        )
-        root = self.grd_reader.Parse(io.StringIO(doc), dir=self.tmp, skip_validation_checks=True)
+        drop = {"name", "custom_type", "validation_expr", "generate_xtb", "use_name_for_id"}
+
+        def build(i, attrs, body):
+            # tokeniza os atributos (sem regex solta) e reconstrói sem duplicatas
+            kept = {}
+            for k, v in re.findall(r"([\w:.-]+)\s*=\s*(\"[^\"]*\"|'[^']*')", attrs):
+                if k not in drop:
+                    kept[k] = v
+            a = "".join(" %s=%s" % (k, v) for k, v in kept.items())
+            return '<message name="M%d"%s>%s</message>' % (i, a, body)
+
+        def parse(idx):
+            parts = [build(i, *blocks[i]) for i in idx]
+            doc = (
+                '<?xml version="1.0" encoding="UTF-8"?>\n'
+                '<grit base_dir="." latest_public_release="0" current_release="1" source_lang_id="en">'
+                '<release seq="1"><messages>' + "\n".join(parts) + "</messages></release></grit>"
+            )
+            return self.grd_reader.Parse(io.StringIO(doc), dir=self.tmp, skip_validation_checks=True)
+
+        try:
+            root = parse(range(len(blocks)))
+        except Exception:
+            # isola a mensagem problemática: ids dela ficam None (não reescreve xtb)
+            ok = []
+            for i in range(len(blocks)):
+                try:
+                    parse([i])
+                    ok.append(i)
+                except Exception as e:  # noqa: BLE001
+                    print("aviso: mensagem ignorada (%s): %s" % (type(e).__name__, blocks[i][0][:80].replace("\n", " ")))
+            root = parse(ok)
         res = [None] * len(blocks)
         for node in root.Preorder():
             if node.name == "message":
