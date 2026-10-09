@@ -82,6 +82,10 @@ Nomes de processo legíveis no Linux. Toca `base/process/set_process_title.cc` e
 
 Declara `kPreferredCompactWidth = 350` (valor do `helium/ui/layout/compact.patch`, não portado) em `toolbar_view.cc`; `helium/ui/layout/toolbar-layout.patch` usa a constante e o build quebrava sem ela (run 37312463487). Remover se `compact.patch` for portado.
 
+### `aerographene/omnibox-centered.patch` (GPL-3.0)
+
+Recoloca o flex do omnibox (`kScaleToMinimum`/`kUnbounded`, ordem `kLocationBarFlexOrder`) em `ToolbarView::UpdateToolbarLayout()` fora do layout compacto, pois `toolbar-layout.patch` o remove e o `toolbar-overflow.patch` do Helium (que o recoloca) não foi portado. Liga `helium.browser.centered_location_bar` por padrão e troca a redução por porcentagem por largura fixa `min(alvo, fatia)`: 640 px no layout vertical, 560 px nos demais (clássico, dynamic), centralizada na largura do pai e presa à fatia do FlexLayout. Toca `toolbar_view.cc` e `browser_ui_prefs.cc`. Compilação e aparência não verificadas.
+
 ### `aerographene/command-bar-type-icons.patch` (GPL-3.0, SCOPE item 6)
 
 Ícone por tipo nas sugestões do omnibox: aba aberta usa `omnibox::kTabIcon`, histórico usa relógio, favorito estrela, busca lupa, URL globo; a lista deixa de buscar favicon (`OmniboxEditModel::GetMatchIcon`). Toca `components/omnibox/browser/autocomplete_match.cc` e `chrome/browser/ui/omnibox/omnibox_edit_model.cc`, nenhum tocado por outro patch; dry-run limpo sobre a tag 154.0.8037.97. Ícone do campo (fora da lista) continua com favicon. Compilação e runtime não verificados; perder o favicon na lista é escolha visual a aprovar.
