@@ -1,0 +1,866 @@
+aerographene: modelo de pinned apoiado no BookmarkModel (F4a, só serviço).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: SCOPE item 4. KeyedService por perfil (= space) aerographene::
+PinnedModel que guarda os pinned como BookmarkNodes numa pasta da barra de
+favoritos local marcada por meta info `aerographene.pinned=1` (criada depois de
+BookmarkModelLoaded; adota a existente, inclusive vinda do Sync). Meta info:
+`aerographene.span` (int >= 1, ausente = 1), `aerographene.label` (UTF-8),
+`aerographene.folder=1` (pasta com gaveta, um nível). Chave estável do pinned =
+BookmarkNode::uuid(). API: GetPinned/Find, AddPinned/AddFolder/Remove/Move,
+SetSpan/SetLabel e Observer próprio (OnPinnedModelLoaded/OnPinnedChanged)
+alimentado por BookmarkModelObserver. Sem UI, sem prefs, sem tocar o
+TabStripModel; ninguém consome o serviço ainda. Fatias seguintes: observer do
+TabStripModel e desligar o restore de pinned do Chromium.
+Arquivos: chrome/browser/ui/tabs/aerographene/pinned_model{,_factory}.{h,cc} e
+pinned_model_unittest.cc (novos), alvos `tabs`, `impl` e `unit_tests` de
+chrome/browser/ui/tabs/BUILD.gn (unit_tests já entra em chrome/test/BUILD.gn),
+registro em chrome_browser_main_extra_parts_profiles.cc (padrão atual do 154,
+ao lado de PinnedTabServiceFactory). BUILD.gn: o hunk de
+helium/ui/layout/core.patch no mesmo arquivo tem hunks distintos;
+aplica com ou sem ele (só muda o offset).
+
+--- a/chrome/browser/profiles/chrome_browser_main_extra_parts_profiles.cc
++++ b/chrome/browser/profiles/chrome_browser_main_extra_parts_profiles.cc
+@@ -270,6 +270,7 @@
+ #include "chrome/browser/ui/safety_hub/revoked_permissions_os_notification_display_manager_factory.h"
+ #include "chrome/browser/ui/safety_hub/revoked_permissions_service_factory.h"
+ #include "chrome/browser/ui/signin/dice_migration_service_factory.h"
++#include "chrome/browser/ui/tabs/aerographene/pinned_model_factory.h"
+ #include "chrome/browser/ui/tabs/pinned_tab_service_factory.h"
+ #include "chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model_factory.h"
+ #include "chrome/browser/ui/toolbar/toolbar_actions_model_factory.h"
+@@ -1325,6 +1326,7 @@
+   PersonalContextFirstRunServiceFactory::GetInstance();
+   PersonalContextServiceFactory::GetInstance();
+ #if !BUILDFLAG(IS_ANDROID)
++  aerographene::PinnedModelFactory::GetInstance();
+   PinnedTabServiceFactory::GetInstance();
+   PinnedToolbarActionsModelFactory::GetInstance();
+ #endif
+--- /dev/null
++++ b/chrome/browser/ui/tabs/aerographene/pinned_model.cc
+@@ -0,0 +1,347 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "chrome/browser/ui/tabs/aerographene/pinned_model.h"
++
++#include <algorithm>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/location.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/task/sequenced_task_runner.h"
++#include "components/bookmarks/browser/bookmark_node.h"
++
++namespace aerographene {
++
++namespace {
++
++using bookmarks::BookmarkModel;
++using bookmarks::BookmarkNode;
++
++// Title of the space folder on the bookmark bar.
++constexpr char16_t kSpaceFolderTitle[] = u"aerographene";
++
++bool HasFlag(const BookmarkNode* node, const char* key) {
++  std::string value;
++  return node->GetMetaInfo(key, &value) && value == "1";
++}
++
++bool IsDrawer(const BookmarkNode* node) {
++  return node->is_folder() && HasFlag(node, kPinnedFolderMetaKey);
++}
++
++int ReadSpan(const BookmarkNode* node) {
++  std::string value;
++  int span = 1;
++  if (node->GetMetaInfo(kPinnedSpanMetaKey, &value) &&
++      base::StringToInt(value, &span) && span >= 1) {
++    return span;
++  }
++  return 1;
++}
++
++PinnedItem MakeItem(const BookmarkNode* node, bool with_children) {
++  PinnedItem item;
++  item.uuid = node->uuid();
++  item.url = node->url();
++  item.title = node->GetTitle();
++  node->GetMetaInfo(kPinnedLabelMetaKey, &item.label);
++  item.span = ReadSpan(node);
++  item.is_folder = IsDrawer(node);
++  if (with_children && item.is_folder) {
++    for (const auto& child : node->children()) {
++      if (child->is_url()) {
++        item.children.push_back(MakeItem(child.get(), false));
++      }
++    }
++  }
++  return item;
++}
++
++}  // namespace
++
++PinnedItem::PinnedItem() = default;
++PinnedItem::PinnedItem(const PinnedItem&) = default;
++PinnedItem& PinnedItem::operator=(const PinnedItem&) = default;
++PinnedItem::PinnedItem(PinnedItem&&) = default;
++PinnedItem& PinnedItem::operator=(PinnedItem&&) = default;
++PinnedItem::~PinnedItem() = default;
++
++PinnedModel::PinnedModel(BookmarkModel* bookmark_model)
++    : model_(bookmark_model) {
++  model_observation_.Observe(model_);
++  if (model_->loaded()) {
++    Initialize();
++  }
++}
++
++PinnedModel::~PinnedModel() = default;
++
++void PinnedModel::AddObserver(Observer* observer) {
++  observers_.AddObserver(observer);
++}
++
++void PinnedModel::RemoveObserver(Observer* observer) {
++  observers_.RemoveObserver(observer);
++}
++
++std::vector<PinnedItem> PinnedModel::GetPinned() const {
++  std::vector<PinnedItem> items;
++  if (!root_) {
++    return items;
++  }
++  for (const auto& child : root_->children()) {
++    if (child->is_url() || IsDrawer(child.get())) {
++      items.push_back(MakeItem(child.get(), true));
++    }
++  }
++  return items;
++}
++
++std::optional<PinnedItem> PinnedModel::Find(const base::Uuid& uuid) const {
++  const BookmarkNode* node = Resolve(uuid);
++  if (!node) {
++    return std::nullopt;
++  }
++  return MakeItem(node, true);
++}
++
++std::optional<base::Uuid> PinnedModel::AddPinned(const GURL& url,
++                                                 const std::u16string& title,
++                                                 const base::Uuid& parent,
++                                                 size_t index) {
++  const BookmarkNode* parent_node = ResolveParent(parent);
++  if (!parent_node || !url.is_valid()) {
++    return std::nullopt;
++  }
++  index = std::min(index, parent_node->children().size());
++  const BookmarkNode* node = model_->AddNewURL(parent_node, index, title, url);
++  return node ? std::optional<base::Uuid>(node->uuid()) : std::nullopt;
++}
++
++std::optional<base::Uuid> PinnedModel::AddFolder(const std::u16string& title,
++                                                 size_t index) {
++  if (!root_) {
++    return std::nullopt;
++  }
++  index = std::min(index, root_->children().size());
++  BookmarkNode::MetaInfoMap meta = {{kPinnedFolderMetaKey, "1"}};
++  const BookmarkNode* node = model_->AddFolder(root_, index, title, &meta);
++  return node ? std::optional<base::Uuid>(node->uuid()) : std::nullopt;
++}
++
++bool PinnedModel::Remove(const base::Uuid& uuid) {
++  const BookmarkNode* node = Resolve(uuid);
++  if (!node) {
++    return false;
++  }
++  model_->Remove(node, bookmarks::metrics::BookmarkEditSource::kOther,
++                 FROM_HERE);
++  return true;
++}
++
++bool PinnedModel::Move(const base::Uuid& uuid,
++                       const base::Uuid& new_parent,
++                       size_t index) {
++  const BookmarkNode* node = Resolve(uuid);
++  const BookmarkNode* parent_node = ResolveParent(new_parent);
++  if (!node || !parent_node || node == parent_node ||
++      (node->is_folder() && parent_node != root_)) {
++    return false;
++  }
++  index = std::min(index, parent_node->children().size());
++  model_->Move(node, parent_node, index);
++  return true;
++}
++
++bool PinnedModel::SetSpan(const base::Uuid& uuid, int span) {
++  const BookmarkNode* node = Resolve(uuid);
++  if (!node || span < 1) {
++    return false;
++  }
++  if (span == 1) {
++    model_->DeleteNodeMetaInfo(node, kPinnedSpanMetaKey);
++  } else {
++    model_->SetNodeMetaInfo(node, kPinnedSpanMetaKey,
++                            base::NumberToString(span));
++  }
++  return true;
++}
++
++bool PinnedModel::SetLabel(const base::Uuid& uuid, const std::string& label) {
++  const BookmarkNode* node = Resolve(uuid);
++  if (!node) {
++    return false;
++  }
++  if (label.empty()) {
++    model_->DeleteNodeMetaInfo(node, kPinnedLabelMetaKey);
++  } else {
++    model_->SetNodeMetaInfo(node, kPinnedLabelMetaKey, label);
++  }
++  return true;
++}
++
++void PinnedModel::Shutdown() {
++  model_observation_.Reset();
++  weak_factory_.InvalidateWeakPtrs();
++  root_ = nullptr;
++  model_ = nullptr;
++}
++
++void PinnedModel::BookmarkModelLoaded(bool ids_reassigned) {
++  Initialize();
++}
++
++void PinnedModel::BookmarkModelBeingDeleted() {
++  model_observation_.Reset();
++  root_ = nullptr;
++  model_ = nullptr;
++}
++
++void PinnedModel::BookmarkNodeMoved(const BookmarkNode* old_parent,
++                                    size_t old_index,
++                                    const BookmarkNode* new_parent,
++                                    size_t new_index) {
++  if (IsUnderRoot(old_parent) || IsUnderRoot(new_parent)) {
++    NotifyChanged();
++  }
++}
++
++void PinnedModel::BookmarkNodeAdded(const BookmarkNode* parent,
++                                    size_t index,
++                                    bool added_by_user) {
++  if (!root_ && model_->loaded()) {
++    // A marked folder may arrive through Sync; adopt it, never create here.
++    root_ = FindRoot();
++  }
++  if (IsUnderRoot(parent)) {
++    NotifyChanged();
++  }
++}
++
++void PinnedModel::BookmarkNodeRemoved(
++    const BookmarkNode* parent,
++    size_t old_index,
++    const BookmarkNode* node,
++    const std::set<GURL>& no_longer_bookmarked,
++    const base::Location& location) {
++  if (node == root_) {
++    OnRootGone();
++  } else if (IsUnderRoot(parent)) {
++    NotifyChanged();
++  }
++}
++
++void PinnedModel::BookmarkNodeChanged(const BookmarkNode* node) {
++  if (IsUnderRoot(node)) {
++    NotifyChanged();
++  }
++}
++
++void PinnedModel::BookmarkMetaInfoChanged(const BookmarkNode* node) {
++  if (IsUnderRoot(node)) {
++    NotifyChanged();
++  }
++}
++
++void PinnedModel::BookmarkNodeFaviconChanged(const BookmarkNode* node) {}
++
++void PinnedModel::BookmarkNodeChildrenReordered(const BookmarkNode* node) {
++  if (IsUnderRoot(node)) {
++    NotifyChanged();
++  }
++}
++
++void PinnedModel::BookmarkAllUserNodesRemoved(
++    const std::set<GURL>& removed_urls,
++    const base::Location& location) {
++  OnRootGone();
++}
++
++void PinnedModel::Initialize() {
++  if (root_) {
++    return;
++  }
++  EnsureRoot();
++  for (Observer& observer : observers_) {
++    observer.OnPinnedModelLoaded();
++  }
++}
++
++void PinnedModel::EnsureRoot() {
++  if (root_ || !model_ || !model_->loaded()) {
++    return;
++  }
++  root_ = FindRoot();
++  if (!root_) {
++    const BookmarkNode* bar = model_->bookmark_bar_node();
++    BookmarkNode::MetaInfoMap meta = {{kPinnedMetaKey, "1"}};
++    root_ = model_->AddFolder(bar, bar->children().size(), kSpaceFolderTitle,
++                              &meta);
++  }
++}
++
++const BookmarkNode* PinnedModel::FindRoot() const {
++  for (const auto& child : model_->bookmark_bar_node()->children()) {
++    if (child->is_folder() && HasFlag(child.get(), kPinnedMetaKey)) {
++      return child.get();
++    }
++  }
++  return nullptr;
++}
++
++void PinnedModel::OnRootGone() {
++  root_ = model_ ? FindRoot() : nullptr;
++  if (!root_ && model_) {
++    // Recreate outside the observer notification.
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE, base::BindOnce(
++                       [](base::WeakPtr<PinnedModel> self) {
++                         if (self) {
++                           self->EnsureRoot();
++                           self->NotifyChanged();
++                         }
++                       },
++                       weak_factory_.GetWeakPtr()));
++  }
++  NotifyChanged();
++}
++
++bool PinnedModel::IsUnderRoot(const BookmarkNode* node) const {
++  return root_ && node && node->HasAncestor(root_);
++}
++
++const BookmarkNode* PinnedModel::Resolve(const base::Uuid& uuid) const {
++  if (!root_ || !uuid.is_valid()) {
++    return nullptr;
++  }
++  const BookmarkNode* node = model_->GetNodeByUuid(
++      uuid, BookmarkModel::NodeTypeForUuidLookup::kLocalOrSyncableNodes);
++  if (!node || node == root_ || !node->HasAncestor(root_)) {
++    return nullptr;
++  }
++  // At most one drawer level.
++  return (node->parent() == root_ || node->parent()->parent() == root_)
++             ? node
++             : nullptr;
++}
++
++const BookmarkNode* PinnedModel::ResolveParent(const base::Uuid& uuid) const {
++  if (!root_) {
++    return nullptr;
++  }
++  if (!uuid.is_valid()) {
++    return root_;
++  }
++  const BookmarkNode* node = Resolve(uuid);
++  return (node && node->parent() == root_ && IsDrawer(node)) ? node : nullptr;
++}
++
++void PinnedModel::NotifyChanged() {
++  for (Observer& observer : observers_) {
++    observer.OnPinnedChanged();
++  }
++}
++
++}  // namespace aerographene
+--- /dev/null
++++ b/chrome/browser/ui/tabs/aerographene/pinned_model_factory.cc
+@@ -0,0 +1,56 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "chrome/browser/ui/tabs/aerographene/pinned_model_factory.h"
++
++#include "chrome/browser/bookmarks/bookmark_model_factory.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/tabs/aerographene/pinned_model.h"
++#include "components/bookmarks/browser/bookmark_model.h"
++
++namespace aerographene {
++
++// static
++PinnedModel* PinnedModelFactory::GetForProfile(Profile* profile) {
++  return static_cast<PinnedModel*>(
++      GetInstance()->GetServiceForBrowserContext(profile, true));
++}
++
++// static
++PinnedModelFactory* PinnedModelFactory::GetInstance() {
++  static base::NoDestructor<PinnedModelFactory> instance;
++  return instance.get();
++}
++
++PinnedModelFactory::PinnedModelFactory()
++    : ProfileKeyedServiceFactory(
++          "AerographenePinnedModel",
++          ProfileSelections::Builder()
++              .WithRegular(ProfileSelection::kOriginalOnly)
++              .Build()) {
++  DependsOn(BookmarkModelFactory::GetInstance());
++}
++
++PinnedModelFactory::~PinnedModelFactory() = default;
++
++std::unique_ptr<KeyedService>
++PinnedModelFactory::BuildServiceInstanceForBrowserContext(
++    content::BrowserContext* context) const {
++  bookmarks::BookmarkModel* bookmark_model =
++      BookmarkModelFactory::GetForBrowserContext(
++          Profile::FromBrowserContext(context));
++  if (!bookmark_model) {
++    return nullptr;
++  }
++  return std::make_unique<PinnedModel>(bookmark_model);
++}
++
++bool PinnedModelFactory::ServiceIsCreatedWithBrowserContext() const {
++  return true;
++}
++
++bool PinnedModelFactory::ServiceIsNULLWhileTesting() const {
++  return true;
++}
++
++}  // namespace aerographene
+--- /dev/null
++++ b/chrome/browser/ui/tabs/aerographene/pinned_model_factory.h
+@@ -0,0 +1,39 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#ifndef CHROME_BROWSER_UI_TABS_AEROGRAPHENE_PINNED_MODEL_FACTORY_H_
++#define CHROME_BROWSER_UI_TABS_AEROGRAPHENE_PINNED_MODEL_FACTORY_H_
++
++#include "base/no_destructor.h"
++#include "chrome/browser/profiles/profile_keyed_service_factory.h"
++
++class Profile;
++
++namespace aerographene {
++
++class PinnedModel;
++
++class PinnedModelFactory : public ProfileKeyedServiceFactory {
++ public:
++  // Returns the PinnedModel of the space (profile), or null for profiles
++  // without one (incognito, guest, system).
++  static PinnedModel* GetForProfile(Profile* profile);
++
++  static PinnedModelFactory* GetInstance();
++
++ private:
++  friend base::NoDestructor<PinnedModelFactory>;
++
++  PinnedModelFactory();
++  ~PinnedModelFactory() override;
++
++  // BrowserContextKeyedServiceFactory:
++  std::unique_ptr<KeyedService> BuildServiceInstanceForBrowserContext(
++      content::BrowserContext* context) const override;
++  bool ServiceIsCreatedWithBrowserContext() const override;
++  bool ServiceIsNULLWhileTesting() const override;
++};
++
++}  // namespace aerographene
++
++#endif  // CHROME_BROWSER_UI_TABS_AEROGRAPHENE_PINNED_MODEL_FACTORY_H_
+--- /dev/null
++++ b/chrome/browser/ui/tabs/aerographene/pinned_model.h
+@@ -0,0 +1,151 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#ifndef CHROME_BROWSER_UI_TABS_AEROGRAPHENE_PINNED_MODEL_H_
++#define CHROME_BROWSER_UI_TABS_AEROGRAPHENE_PINNED_MODEL_H_
++
++#include <optional>
++#include <set>
++#include <string>
++#include <vector>
++
++#include "base/location.h"
++#include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
++#include "base/observer_list.h"
++#include "base/scoped_observation.h"
++#include "base/uuid.h"
++#include "components/bookmarks/browser/bookmark_model.h"
++#include "components/bookmarks/browser/bookmark_model_observer.h"
++#include "components/keyed_service/core/keyed_service.h"
++#include "url/gurl.h"
++
++namespace aerographene {
++
++// Meta info keys stored on BookmarkNodes (synced with the bookmarks).
++// "1" on the space folder.
++inline constexpr char kPinnedMetaKey[] = "aerographene.pinned";
++// Integer >= 1; absent means 1.
++inline constexpr char kPinnedSpanMetaKey[] = "aerographene.span";
++// UTF-8 label.
++inline constexpr char kPinnedLabelMetaKey[] = "aerographene.label";
++// "1" on a drawer folder.
++inline constexpr char kPinnedFolderMetaKey[] = "aerographene.folder";
++
++// Read-only snapshot of one pinned entry. `uuid` is the stable key
++// (BookmarkNode::uuid()); never use numeric bookmark ids.
++struct PinnedItem {
++  PinnedItem();
++  PinnedItem(const PinnedItem&);
++  PinnedItem& operator=(const PinnedItem&);
++  PinnedItem(PinnedItem&&);
++  PinnedItem& operator=(PinnedItem&&);
++  ~PinnedItem();
++
++  base::Uuid uuid;
++  GURL url;  // Empty for drawer folders.
++  std::u16string title;
++  std::string label;  // Empty if unset.
++  int span = 1;       // Horizontal grid cells, >= 1.
++  bool is_folder = false;  // Drawer folder (aerographene.folder=1).
++  std::vector<PinnedItem> children;  // Only filled for folders.
++};
++
++// Per-profile (= per space) pinned model backed by the BookmarkModel. All
++// pinned entries live under one folder of the local bookmark bar marked with
++// `kPinnedMetaKey`; folders (drawers) hold URLs one level deep. The folder is
++// created once the BookmarkModel has loaded.
++class PinnedModel : public KeyedService,
++                    public bookmarks::BookmarkModelObserver {
++ public:
++  class Observer : public base::CheckedObserver {
++   public:
++    // The space folder is ready; the API below is usable.
++    virtual void OnPinnedModelLoaded() {}
++    // Anything under the space folder changed (add, remove, move, title, URL,
++    // span, label, order), including changes coming from Sync.
++    virtual void OnPinnedChanged() = 0;
++  };
++
++  explicit PinnedModel(bookmarks::BookmarkModel* bookmark_model);
++  PinnedModel(const PinnedModel&) = delete;
++  PinnedModel& operator=(const PinnedModel&) = delete;
++  ~PinnedModel() override;
++
++  void AddObserver(Observer* observer);
++  void RemoveObserver(Observer* observer);
++
++  // True once the space folder exists. Mutators fail and getters return empty
++  // values before that.
++  bool IsLoaded() const { return root_ != nullptr; }
++
++  // Top-level entries in order; folders include their children.
++  std::vector<PinnedItem> GetPinned() const;
++  std::optional<PinnedItem> Find(const base::Uuid& uuid) const;
++
++  // `parent` invalid = top level; otherwise it must be a drawer folder. `index`
++  // is clamped to the end. Return the new entry's uuid or nullopt on failure.
++  std::optional<base::Uuid> AddPinned(const GURL& url,
++                                      const std::u16string& title,
++                                      const base::Uuid& parent,
++                                      size_t index);
++  std::optional<base::Uuid> AddFolder(const std::u16string& title,
++                                      size_t index);
++  bool Remove(const base::Uuid& uuid);
++  // Insert-before semantics of BookmarkModel::Move. Folders cannot be nested.
++  bool Move(const base::Uuid& uuid, const base::Uuid& new_parent, size_t index);
++
++  // span >= 1 (1 removes the key); label empty removes the key.
++  bool SetSpan(const base::Uuid& uuid, int span);
++  bool SetLabel(const base::Uuid& uuid, const std::string& label);
++
++  // KeyedService:
++  void Shutdown() override;
++
++  // bookmarks::BookmarkModelObserver:
++  void BookmarkModelLoaded(bool ids_reassigned) override;
++  void BookmarkModelBeingDeleted() override;
++  void BookmarkNodeMoved(const bookmarks::BookmarkNode* old_parent,
++                         size_t old_index,
++                         const bookmarks::BookmarkNode* new_parent,
++                         size_t new_index) override;
++  void BookmarkNodeAdded(const bookmarks::BookmarkNode* parent,
++                         size_t index,
++                         bool added_by_user) override;
++  void BookmarkNodeRemoved(const bookmarks::BookmarkNode* parent,
++                           size_t old_index,
++                           const bookmarks::BookmarkNode* node,
++                           const std::set<GURL>& no_longer_bookmarked,
++                           const base::Location& location) override;
++  void BookmarkNodeChanged(const bookmarks::BookmarkNode* node) override;
++  void BookmarkMetaInfoChanged(const bookmarks::BookmarkNode* node) override;
++  void BookmarkNodeFaviconChanged(const bookmarks::BookmarkNode* node) override;
++  void BookmarkNodeChildrenReordered(
++      const bookmarks::BookmarkNode* node) override;
++  void BookmarkAllUserNodesRemoved(const std::set<GURL>& removed_urls,
++                                   const base::Location& location) override;
++
++ private:
++  void Initialize();
++  void EnsureRoot();
++  const bookmarks::BookmarkNode* FindRoot() const;
++  void OnRootGone();
++  bool IsUnderRoot(const bookmarks::BookmarkNode* node) const;
++  // Node for `uuid` strictly under the space folder, or null.
++  const bookmarks::BookmarkNode* Resolve(const base::Uuid& uuid) const;
++  // Space folder (invalid `uuid`) or a drawer folder; null otherwise.
++  const bookmarks::BookmarkNode* ResolveParent(const base::Uuid& uuid) const;
++  void NotifyChanged();
++
++  raw_ptr<bookmarks::BookmarkModel> model_;
++  raw_ptr<const bookmarks::BookmarkNode> root_ = nullptr;
++  base::ObserverList<Observer> observers_;
++  base::ScopedObservation<bookmarks::BookmarkModel,
++                          bookmarks::BookmarkModelObserver>
++      model_observation_{this};
++  base::WeakPtrFactory<PinnedModel> weak_factory_{this};
++};
++
++}  // namespace aerographene
++
++#endif  // CHROME_BROWSER_UI_TABS_AEROGRAPHENE_PINNED_MODEL_H_
+--- /dev/null
++++ b/chrome/browser/ui/tabs/aerographene/pinned_model_unittest.cc
+@@ -0,0 +1,173 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "chrome/browser/ui/tabs/aerographene/pinned_model.h"
++
++#include <memory>
++
++#include "base/test/task_environment.h"
++#include "components/bookmarks/browser/bookmark_model.h"
++#include "components/bookmarks/browser/bookmark_node.h"
++#include "components/bookmarks/test/test_bookmark_client.h"
++#include "testing/gtest/include/gtest/gtest.h"
++#include "url/gurl.h"
++
++namespace aerographene {
++
++namespace {
++
++using bookmarks::BookmarkModel;
++using bookmarks::BookmarkNode;
++
++class CountingObserver : public PinnedModel::Observer {
++ public:
++  void OnPinnedModelLoaded() override { ++loaded; }
++  void OnPinnedChanged() override { ++changed; }
++  int loaded = 0;
++  int changed = 0;
++};
++
++class PinnedModelTest : public testing::Test {
++ protected:
++  PinnedModelTest()
++      : bookmarks_(bookmarks::TestBookmarkClient::CreateModel()),
++        model_(std::make_unique<PinnedModel>(bookmarks_.get())) {}
++
++  const BookmarkNode* SpaceFolder() {
++    const BookmarkNode* found = nullptr;
++    for (const auto& child : bookmarks_->bookmark_bar_node()->children()) {
++      std::string value;
++      if (child->GetMetaInfo(kPinnedMetaKey, &value) && value == "1") {
++        EXPECT_FALSE(found) << "duplicate space folder";
++        found = child.get();
++      }
++    }
++    return found;
++  }
++
++  base::test::SingleThreadTaskEnvironment task_environment_;
++  std::unique_ptr<BookmarkModel> bookmarks_;
++  std::unique_ptr<PinnedModel> model_;
++};
++
++TEST_F(PinnedModelTest, CreatesSpaceFolderOnBookmarkBarOnce) {
++  ASSERT_TRUE(model_->IsLoaded());
++  ASSERT_TRUE(SpaceFolder());
++  EXPECT_TRUE(model_->GetPinned().empty());
++
++  // "Reload": a new service over the same bookmarks reuses the folder.
++  model_->Shutdown();
++  model_ = std::make_unique<PinnedModel>(bookmarks_.get());
++  EXPECT_TRUE(model_->IsLoaded());
++  EXPECT_TRUE(SpaceFolder());
++}
++
++TEST_F(PinnedModelTest, WaitsForBookmarkModelToLoad) {
++  auto unloaded = std::make_unique<BookmarkModel>(
++      std::make_unique<bookmarks::TestBookmarkClient>());
++  PinnedModel model(unloaded.get());
++  CountingObserver observer;
++  model.AddObserver(&observer);
++  EXPECT_FALSE(model.IsLoaded());
++  EXPECT_FALSE(model.AddFolder(u"x", 0));
++
++  unloaded->LoadEmptyForTest();
++  EXPECT_TRUE(model.IsLoaded());
++  EXPECT_EQ(1, observer.loaded);
++  model.RemoveObserver(&observer);
++}
++
++TEST_F(PinnedModelTest, AddListSpanLabelPersistAcrossReload) {
++  auto id = model_->AddPinned(GURL("https://a.test/"), u"A", base::Uuid(), 0);
++  ASSERT_TRUE(id);
++  EXPECT_TRUE(model_->SetSpan(*id, 3));
++  EXPECT_TRUE(model_->SetLabel(*id, "label a"));
++  EXPECT_FALSE(model_->SetSpan(*id, 0));
++
++  model_->Shutdown();
++  model_ = std::make_unique<PinnedModel>(bookmarks_.get());
++  auto items = model_->GetPinned();
++  ASSERT_EQ(1u, items.size());
++  EXPECT_EQ(*id, items[0].uuid);
++  EXPECT_EQ(GURL("https://a.test/"), items[0].url);
++  EXPECT_EQ(u"A", items[0].title);
++  EXPECT_EQ(3, items[0].span);
++  EXPECT_EQ("label a", items[0].label);
++  EXPECT_FALSE(items[0].is_folder);
++
++  EXPECT_TRUE(model_->SetSpan(*id, 1));
++  EXPECT_TRUE(model_->SetLabel(*id, ""));
++  auto found = model_->Find(*id);
++  ASSERT_TRUE(found);
++  EXPECT_EQ(1, found->span);
++  EXPECT_TRUE(found->label.empty());
++}
++
++TEST_F(PinnedModelTest, FoldersMoveAndRemove) {
++  auto a = model_->AddPinned(GURL("https://a.test/"), u"A", base::Uuid(), 0);
++  auto folder = model_->AddFolder(u"F", 1);
++  ASSERT_TRUE(a);
++  ASSERT_TRUE(folder);
++  auto b = model_->AddPinned(GURL("https://b.test/"), u"B", *folder, 0);
++  ASSERT_TRUE(b);
++  // A URL cannot be a parent; folders do not nest.
++  EXPECT_FALSE(model_->AddPinned(GURL("https://c.test/"), u"C", *a, 0));
++  EXPECT_FALSE(model_->Move(*folder, *folder, 0));
++
++  auto items = model_->GetPinned();
++  ASSERT_EQ(2u, items.size());
++  EXPECT_TRUE(items[1].is_folder);
++  ASSERT_EQ(1u, items[1].children.size());
++  EXPECT_EQ(*b, items[1].children[0].uuid);
++
++  // Move out of the drawer to the front, then A into the drawer.
++  EXPECT_TRUE(model_->Move(*b, base::Uuid(), 0));
++  EXPECT_TRUE(model_->Move(*a, *folder, 0));
++  items = model_->GetPinned();
++  ASSERT_EQ(2u, items.size());
++  EXPECT_EQ(*b, items[0].uuid);
++  ASSERT_EQ(1u, items[1].children.size());
++  EXPECT_EQ(*a, items[1].children[0].uuid);
++
++  EXPECT_TRUE(model_->Remove(*folder));
++  EXPECT_FALSE(model_->Find(*a));
++  EXPECT_FALSE(model_->Remove(*folder));
++  EXPECT_EQ(1u, model_->GetPinned().size());
++}
++
++TEST_F(PinnedModelTest, IgnoresNodesOutsideSpaceFolder) {
++  const BookmarkNode* outside = bookmarks_->AddNewURL(
++      bookmarks_->bookmark_bar_node(), 0, u"O", GURL("https://o.test/"));
++  EXPECT_FALSE(model_->Remove(outside->uuid()));
++  EXPECT_FALSE(model_->SetSpan(outside->uuid(), 2));
++  EXPECT_TRUE(model_->GetPinned().empty());
++}
++
++TEST_F(PinnedModelTest, NotifiesOnChanges) {
++  CountingObserver observer;
++  model_->AddObserver(&observer);
++  auto a = model_->AddPinned(GURL("https://a.test/"), u"A", base::Uuid(), 0);
++  ASSERT_TRUE(a);
++  int after_add = observer.changed;
++  EXPECT_GT(after_add, 0);
++  model_->SetSpan(*a, 2);
++  EXPECT_GT(observer.changed, after_add);
++  int before_outside = observer.changed;
++  bookmarks_->AddNewURL(bookmarks_->other_node(), 0, u"O",
++                        GURL("https://o.test/"));
++  EXPECT_EQ(before_outside, observer.changed);
++  model_->RemoveObserver(&observer);
++}
++
++TEST_F(PinnedModelTest, RecreatesSpaceFolderIfRemoved) {
++  bookmarks_->Remove(SpaceFolder(),
++                     bookmarks::metrics::BookmarkEditSource::kOther, FROM_HERE);
++  EXPECT_FALSE(model_->IsLoaded());
++  task_environment_.RunUntilIdle();
++  EXPECT_TRUE(model_->IsLoaded());
++  EXPECT_TRUE(SpaceFolder());
++}
++
++}  // namespace
++
++}  // namespace aerographene
+--- a/chrome/browser/ui/tabs/BUILD.gn
++++ b/chrome/browser/ui/tabs/BUILD.gn
+@@ -411,6 +411,8 @@
+ 
+   source_set("tabs") {
+     sources = [
++      "aerographene/pinned_model.h",
++      "aerographene/pinned_model_factory.h",
+       "features.h",
+       "horizontal_tab_strip_metrics.h",
+       "hover_tab_selector.h",
+@@ -455,6 +457,7 @@
+       "//chrome/browser/ui/omnibox",
+       "//chrome/browser/ui/startup:startup_tab",
+       "//chrome/browser/ui/views/permissions/chip",
++      "//components/bookmarks/browser",
+       "//components/collaboration/public",
+       "//components/keyed_service/core",
+       "//components/optimization_guide/content/browser:page_context_eligibility",
+@@ -484,6 +487,8 @@
+     ]
+ 
+     sources = [
++      "aerographene/pinned_model.cc",
++      "aerographene/pinned_model_factory.cc",
+       "horizontal_tab_strip_metrics.cc",
+       "hover_tab_selector.cc",
+       "pinned_tab_codec.cc",
+@@ -848,6 +853,7 @@
+   source_set("unit_tests") {
+     testonly = true
+     sources = [
++      "aerographene/pinned_model_unittest.cc",
+       "inactive_window_mouse_event_controller_unittest.cc",
+       "split_view_iph_controller_unittest.cc",
+       "tab_collection_storage_unittest.cc",
+@@ -907,6 +913,8 @@
+       "//chrome/common:non_code_constants",
+       "//chrome/test:test_support",
+       "//chrome/test/user_education:impl",
++      "//components/bookmarks/browser",
++      "//components/bookmarks/test",
+       "//components/commerce/core:account_checker_test_support",
+       "//components/commerce/core:feature_list",
+       "//components/commerce/core:shopping_service",

@@ -1,0 +1,854 @@
+aerographene: pinned tabs espelhados no modelo de pinned (F4b).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: SCOPE item 4. Liga o TabStripModel ao aerographene::PinnedModel
+(F4a), que passa a ser a fonte da verdade dos pinned do space (perfil).
+Espelho: aerographene::PinnedTabMirror (novo, pinned_tab_mirror.{h,cc}), dono
+= PinnedModel (criado pela factory via StartTabMirror, destruído no Shutdown),
+observa as janelas normais do perfil (BrowserCollectionObserver +
+TabStripModelObserver, como o PinnedTabService). Mapa aba viva -> nó em
+memória: std::map<tabs::TabHandle, base::Uuid> (handle estável da aba, também
+entre janelas; uuid = BookmarkNode::uuid()); entre reinícios a aba é
+reassociada por URL.
+Ciclo: fixar/aba pinned inserida (session restore, startup, arraste) reusa nó
+com a mesma URL não associado a outra aba (abertos primeiro) ou cria um no fim
+da pasta; marca `aerographene.open=1` (meta info nova) e alinha a ordem com os
+vizinhos pinned da faixa (só move se a ordem relativa estiver errada; nós
+fechados entre eles ficam no lugar; nós dentro de gaveta não se movem).
+Desafixar remove o nó. Mover reordena. URL commitada nova atualiza o nó
+(SetURL). Fechar pela usuária mantém o nó e apaga `open` (pinned fechado; o
+placeholder é a F5). Fechar a janela inteira (closing_all) ou sair
+(AddClosingAllBrowsersCallback) mantém `open`. Nó apagado fora (gerenciador
+de favoritos, Sync): a aba continua pinned sem nó; nada é recriado até fixar
+de novo ou navegar.
+Startup: StartupTabProviderImpl::GetPinnedTabs lê os nós com open=1 (inclui
+filhos de gaveta) em vez de PinnedTabCodec::ReadPinnedTabs. Uma fonte por
+startup: se o modelo não carregou ou está vazio (primeira execução depois da
+atualização), cai no pref kPinnedTabs (comportamento atual), e as abas
+abertas por ele são associadas aos nós. O PinnedTabService continua gravando
+kPinnedTabs só como esse fallback. Com "continuar de onde parou" o
+GetPinnedTabsForState do upstream já devolve vazio e o SessionRestore reabre
+as pinned; elas são associadas por URL (sem nó duplicado). O lazy restore do
+Helium (AddDeferredPinnedStartupTab) não muda: a URL vem de GetVisibleURL
+até carregar.
+Span: PinnedTabContainerView lê/grava `aerographene.span` do nó da aba
+(GetSpanForTab/SetSpanForTab); o mapa em memória da F1/F2 fica como fallback
+(modelo não carregado, aba sem nó, split). O container observa o PinnedModel
+do perfil da primeira aba filha e reaplica SetPinnedSpan + relayout em
+OnPinnedChanged.
+Riscos: URL do nó diferente da aba restaurada (ex.: SetURL perdido) cria nó
+novo, e o antigo segue open=1; `open` e URL sincronizam como meta info
+(escritas a cada navegação de pinned); desafixar apaga rótulo/span do nó.
+Depende de aerographene/pinned-model.patch, pinned-grid-span.patch e
+pinned-span-drag.patch.
+
+--- a/chrome/browser/ui/startup/startup_tab_provider.cc
++++ b/chrome/browser/ui/startup/startup_tab_provider.cc
+@@ -33,6 +33,8 @@
+ #include "chrome/browser/ui/startup/startup_browser_creator.h"
+ #include "chrome/browser/ui/startup/startup_types.h"
+ #include "chrome/browser/ui/startup/url_util.h"
++#include "chrome/browser/ui/tabs/aerographene/pinned_model.h"
++#include "chrome/browser/ui/tabs/aerographene/pinned_model_factory.h"
+ #include "chrome/browser/ui/tabs/pinned_tab_codec.h"
+ #include "chrome/browser/ui/tabs/tab_strip_model.h"
+ #include "chrome/browser/ui/webui/settings/reset_settings_handler.h"
+@@ -125,10 +127,33 @@
+ StartupTabs StartupTabProviderImpl::GetPinnedTabs(
+     const base::CommandLine& command_line,
+     Profile* profile) const {
++  // aerographene: the pinned model is the source of truth. Reopen its entries
++  // marked open; the kPinnedTabs pref is only a fallback while the model is
++  // not loaded yet or still empty (first run after the upgrade), so pinned
++  // tabs are never dropped and only one source is used per startup.
++  StartupTabs pinned_tabs;
++  aerographene::PinnedModel* pinned_model =
++      aerographene::PinnedModelFactory::GetForProfile(profile);
++  bool model_has_entries = false;
++  if (pinned_model && pinned_model->IsLoaded()) {
++    for (const aerographene::PinnedItem& item : pinned_model->GetPinned()) {
++      model_has_entries |= !item.is_folder || !item.children.empty();
++      if (!item.is_folder && item.open && item.url.is_valid()) {
++        pinned_tabs.emplace_back(item.url, StartupTab::Type::kPinned);
++      }
++      for (const aerographene::PinnedItem& child : item.children) {
++        if (child.open && child.url.is_valid()) {
++          pinned_tabs.emplace_back(child.url, StartupTab::Type::kPinned);
++        }
++      }
++    }
++  }
++  if (!model_has_entries) {
++    pinned_tabs = PinnedTabCodec::ReadPinnedTabs(profile);
++  }
+   return GetPinnedTabsForState(
+       StartupBrowserCreator::GetSessionStartupPref(command_line, profile),
+-      PinnedTabCodec::ReadPinnedTabs(profile),
+-      ProfileHasOtherTabbedBrowser(profile));
++      pinned_tabs, ProfileHasOtherTabbedBrowser(profile));
+ }
+ 
+ StartupTabs StartupTabProviderImpl::GetPreferencesTabs(
+--- a/chrome/browser/ui/tabs/BUILD.gn
++++ b/chrome/browser/ui/tabs/BUILD.gn
+@@ -412,6 +412,7 @@
+     sources = [
+       "aerographene/pinned_model.h",
+       "aerographene/pinned_model_factory.h",
++      "aerographene/pinned_tab_mirror.h",
+       "features.h",
+       "horizontal_tab_strip_metrics.h",
+       "hover_tab_selector.h",
+@@ -488,6 +489,7 @@
+     sources = [
+       "aerographene/pinned_model.cc",
+       "aerographene/pinned_model_factory.cc",
++      "aerographene/pinned_tab_mirror.cc",
+       "horizontal_tab_strip_metrics.cc",
+       "hover_tab_selector.cc",
+       "pinned_tab_codec.cc",
+--- a/chrome/browser/ui/tabs/aerographene/pinned_model.cc
++++ b/chrome/browser/ui/tabs/aerographene/pinned_model.cc
+@@ -10,6 +10,7 @@
+ #include "base/location.h"
+ #include "base/strings/string_number_conversions.h"
+ #include "base/task/sequenced_task_runner.h"
++#include "chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.h"
+ #include "components/bookmarks/browser/bookmark_node.h"
+ 
+ namespace aerographene {
+@@ -49,6 +50,7 @@
+   node->GetMetaInfo(kPinnedLabelMetaKey, &item.label);
+   item.span = ReadSpan(node);
+   item.is_folder = IsDrawer(node);
++  item.open = node->is_url() && HasFlag(node, kPinnedOpenMetaKey);
+   if (with_children && item.is_folder) {
+     for (const auto& child : node->children()) {
+       if (child->is_url()) {
+@@ -182,7 +184,42 @@
+   return true;
+ }
+ 
++bool PinnedModel::SetURL(const base::Uuid& uuid, const GURL& url) {
++  const BookmarkNode* node = Resolve(uuid);
++  if (!node || !node->is_url() || !url.is_valid()) {
++    return false;
++  }
++  if (node->url() != url) {
++    model_->SetURL(node, url, bookmarks::metrics::BookmarkEditSource::kOther);
++  }
++  return true;
++}
++
++bool PinnedModel::SetOpen(const base::Uuid& uuid, bool open) {
++  const BookmarkNode* node = Resolve(uuid);
++  if (!node || !node->is_url()) {
++    return false;
++  }
++  if (open == HasFlag(node, kPinnedOpenMetaKey)) {
++    return true;
++  }
++  if (open) {
++    model_->SetNodeMetaInfo(node, kPinnedOpenMetaKey, "1");
++  } else {
++    model_->DeleteNodeMetaInfo(node, kPinnedOpenMetaKey);
++  }
++  return true;
++}
++
++void PinnedModel::StartTabMirror(Profile* profile) {
++  if (!tab_mirror_ && model_) {
++    tab_mirror_ = std::make_unique<PinnedTabMirror>(profile, this);
++  }
++}
++
+ void PinnedModel::Shutdown() {
++  // The mirror observes this model; drop it first.
++  tab_mirror_.reset();
+   model_observation_.Reset();
+   weak_factory_.InvalidateWeakPtrs();
+   root_ = nullptr;
+--- a/chrome/browser/ui/tabs/aerographene/pinned_model.h
++++ b/chrome/browser/ui/tabs/aerographene/pinned_model.h
+@@ -4,6 +4,7 @@
+ #ifndef CHROME_BROWSER_UI_TABS_AEROGRAPHENE_PINNED_MODEL_H_
+ #define CHROME_BROWSER_UI_TABS_AEROGRAPHENE_PINNED_MODEL_H_
+ 
++#include <memory>
+ #include <optional>
+ #include <set>
+ #include <string>
+@@ -20,6 +21,8 @@
+ #include "components/keyed_service/core/keyed_service.h"
+ #include "url/gurl.h"
+ 
++class Profile;
++
+ namespace aerographene {
+ 
+ // Meta info keys stored on BookmarkNodes (synced with the bookmarks).
+@@ -31,6 +34,12 @@
+ inline constexpr char kPinnedLabelMetaKey[] = "aerographene.label";
+ // "1" on a drawer folder.
+ inline constexpr char kPinnedFolderMetaKey[] = "aerographene.folder";
++// "1" while the entry had a live pinned tab that was not closed by the user
++// (kept through window close and quit); absent once the user closes the tab.
++// Read at startup to reopen the entry.
++inline constexpr char kPinnedOpenMetaKey[] = "aerographene.open";
++
++class PinnedTabMirror;
+ 
+ // Read-only snapshot of one pinned entry. `uuid` is the stable key
+ // (BookmarkNode::uuid()); never use numeric bookmark ids.
+@@ -48,6 +57,7 @@
+   std::string label;  // Empty if unset.
+   int span = 1;       // Horizontal grid cells, >= 1.
+   bool is_folder = false;  // Drawer folder (aerographene.folder=1).
++  bool open = false;       // aerographene.open=1.
+   std::vector<PinnedItem> children;  // Only filled for folders.
+ };
+ 
+@@ -98,6 +108,17 @@
+   // span >= 1 (1 removes the key); label empty removes the key.
+   bool SetSpan(const base::Uuid& uuid, int span);
+   bool SetLabel(const base::Uuid& uuid, const std::string& label);
++  // URL entries only.
++  bool SetURL(const base::Uuid& uuid, const GURL& url);
++  bool SetOpen(const base::Uuid& uuid, bool open);
++
++  // Starts mirroring the pinned tabs of `profile`'s normal windows into this
++  // model (see PinnedTabMirror). Called once by the factory.
++  void StartTabMirror(Profile* profile);
++  // Null until StartTabMirror() and after Shutdown().
++  PinnedTabMirror* tab_mirror() { return tab_mirror_.get(); }
++  // Notifies OnPinnedChanged() without a bookmark change (tab mapping only).
++  void NotifyTabMappingChanged() { NotifyChanged(); }
+ 
+   // KeyedService:
+   void Shutdown() override;
+@@ -138,6 +159,7 @@
+   void NotifyChanged();
+ 
+   raw_ptr<bookmarks::BookmarkModel> model_;
++  std::unique_ptr<PinnedTabMirror> tab_mirror_;
+   raw_ptr<const bookmarks::BookmarkNode> root_ = nullptr;
+   base::ObserverList<Observer> observers_;
+   base::ScopedObservation<bookmarks::BookmarkModel,
+--- a/chrome/browser/ui/tabs/aerographene/pinned_model_factory.cc
++++ b/chrome/browser/ui/tabs/aerographene/pinned_model_factory.cc
+@@ -42,7 +42,9 @@
+   if (!bookmark_model) {
+     return nullptr;
+   }
+-  return std::make_unique<PinnedModel>(bookmark_model);
++  auto model = std::make_unique<PinnedModel>(bookmark_model);
++  model->StartTabMirror(Profile::FromBrowserContext(context));
++  return model;
+ }
+ 
+ bool PinnedModelFactory::ServiceIsCreatedWithBrowserContext() const {
+--- /dev/null
++++ b/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc
+@@ -0,0 +1,327 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.h"
++
++#include <set>
++#include <vector>
++
++#include "base/auto_reset.h"
++#include "base/functional/bind.h"
++#include "chrome/browser/lifetime/application_lifetime_desktop.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
++#include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "content/public/browser/web_contents.h"
++#include "url/gurl.h"
++
++namespace aerographene {
++
++namespace {
++
++GURL GetTabURL(const tabs::TabInterface* tab) {
++  content::WebContents* contents = tab ? tab->GetContents() : nullptr;
++  if (!contents) {
++    return GURL();
++  }
++  GURL url = contents->GetLastCommittedURL();
++  if (url.is_empty()) {
++    // Restored tabs that have not loaded yet (lazy restore).
++    url = contents->GetVisibleURL();
++  }
++  return url;
++}
++
++TabStripModel* GetTabStrip(tabs::TabInterface* tab) {
++  BrowserWindowInterface* browser = tab->GetBrowserWindowInterface();
++  return browser ? browser->GetTabStripModel() : nullptr;
++}
++
++// Index of `uuid` among the top-level entries, or -1.
++int TopLevelIndex(const std::vector<PinnedItem>& items, const base::Uuid& uuid) {
++  for (size_t i = 0; i < items.size(); ++i) {
++    if (items[i].uuid == uuid) {
++      return static_cast<int>(i);
++    }
++  }
++  return -1;
++}
++
++}  // namespace
++
++PinnedTabMirror::PinnedTabMirror(Profile* profile, PinnedModel* model)
++    : profile_(profile), model_(model) {
++  closing_all_browsers_subscription_ = chrome::AddClosingAllBrowsersCallback(
++      base::BindRepeating(&PinnedTabMirror::OnClosingAllBrowsersChanged,
++                          base::Unretained(this)));
++  model_observation_.Observe(model_);
++  ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
++      [this](BrowserWindowInterface* browser) {
++        OnBrowserCreated(browser);
++        return true;
++      });
++  browser_collection_observation_.Observe(
++      GlobalBrowserCollection::GetInstance());
++  AssociateAllPinnedTabs();
++}
++
++PinnedTabMirror::~PinnedTabMirror() = default;
++
++std::optional<base::Uuid> PinnedTabMirror::GetEntryForTab(
++    const tabs::TabInterface* tab) const {
++  if (!tab) {
++    return std::nullopt;
++  }
++  const auto it = tab_nodes_.find(tab->GetHandle());
++  if (it == tab_nodes_.end() || !model_->Find(it->second)) {
++    return std::nullopt;
++  }
++  return it->second;
++}
++
++std::optional<int> PinnedTabMirror::GetSpanForTab(
++    const tabs::TabInterface* tab) const {
++  const std::optional<base::Uuid> uuid = GetEntryForTab(tab);
++  if (!uuid) {
++    return std::nullopt;
++  }
++  const std::optional<PinnedItem> item = model_->Find(*uuid);
++  return item ? std::optional<int>(item->span) : std::nullopt;
++}
++
++bool PinnedTabMirror::SetSpanForTab(const tabs::TabInterface* tab, int span) {
++  const std::optional<base::Uuid> uuid = GetEntryForTab(tab);
++  return uuid && model_->SetSpan(*uuid, span);
++}
++
++void PinnedTabMirror::OnBrowserCreated(BrowserWindowInterface* browser) {
++  if (browser->GetProfile() != profile_ ||
++      browser->GetType() != BrowserWindowInterface::TYPE_NORMAL) {
++    return;
++  }
++  // Auto-unregistered by the TabStripModelObserver destructor.
++  browser->GetTabStripModel()->AddObserver(this);
++}
++
++void PinnedTabMirror::OnTabStripModelChanged(
++    TabStripModel* tab_strip_model,
++    const TabStripModelChange& change,
++    const TabStripSelectionChange& selection) {
++  switch (change.type()) {
++    case TabStripModelChange::kInserted:
++      for (const auto& inserted : change.GetInsert()->contents) {
++        if (inserted.tab && inserted.tab->IsPinned()) {
++          Associate(inserted.tab);
++        }
++      }
++      break;
++    case TabStripModelChange::kRemoved:
++      for (const auto& removed : change.GetRemove()->contents) {
++        if (!removed.tab ||
++            (removed.remove_reason != TabRemovedReason::kDeleted &&
++             removed.remove_reason !=
++                 TabRemovedReason::kDeletedAndExpandSidePanel)) {
++          // Moving to another window keeps the mapping.
++          continue;
++        }
++        const auto it = tab_nodes_.find(removed.tab->GetHandle());
++        if (it == tab_nodes_.end()) {
++          continue;
++        }
++        const base::Uuid uuid = it->second;
++        tab_nodes_.erase(it);
++        // Closing the window or quitting keeps the entry open for the next
++        // startup; a close by the user makes it a closed pinned.
++        if (!closing_all_browsers_ && !tab_strip_model->closing_all()) {
++          base::AutoReset<bool> writing(&writing_, true);
++          model_->SetOpen(uuid, false);
++        }
++      }
++      break;
++    case TabStripModelChange::kMoved: {
++      tabs::TabInterface* tab = change.GetMove()->tab;
++      if (tab && tab->IsPinned()) {
++        AlignOrder(tab);
++      }
++      break;
++    }
++    default:
++      break;
++  }
++}
++
++void PinnedTabMirror::OnTabChangedAt(tabs::TabInterface* tab,
++                                     TabChangeType change_type) {
++  if (change_type != TabChangeType::kAll || !tab || !tab->IsPinned() ||
++      !model_->IsLoaded()) {
++    return;
++  }
++  const std::optional<base::Uuid> uuid = GetEntryForTab(tab);
++  if (!uuid) {
++    Associate(tab);
++    return;
++  }
++  const GURL url = GetTabURL(tab);
++  const std::optional<PinnedItem> item = model_->Find(*uuid);
++  if (item && url.is_valid() && item->url != url) {
++    base::AutoReset<bool> writing(&writing_, true);
++    model_->SetURL(*uuid, url);
++  }
++}
++
++void PinnedTabMirror::OnTabPinnedStateChanged(tabs::TabInterface* tab,
++                                              int index) {
++  if (!tab || !model_->IsLoaded()) {
++    return;
++  }
++  if (tab->IsPinned()) {
++    Associate(tab);
++    return;
++  }
++  const auto it = tab_nodes_.find(tab->GetHandle());
++  if (it == tab_nodes_.end()) {
++    return;
++  }
++  const base::Uuid uuid = it->second;
++  tab_nodes_.erase(it);
++  base::AutoReset<bool> writing(&writing_, true);
++  model_->Remove(uuid);
++}
++
++void PinnedTabMirror::OnPinnedModelLoaded() {
++  AssociateAllPinnedTabs();
++}
++
++void PinnedTabMirror::OnPinnedChanged() {
++  if (writing_) {
++    return;
++  }
++  // Drop mappings whose entry is gone (removed in the bookmark manager or by
++  // Sync). The tabs stay pinned; nothing is recreated here.
++  std::erase_if(tab_nodes_, [this](const auto& entry) {
++    return !model_->Find(entry.second);
++  });
++}
++
++void PinnedTabMirror::OnClosingAllBrowsersChanged(bool closing) {
++  closing_all_browsers_ = closing;
++}
++
++void PinnedTabMirror::AssociateAllPinnedTabs() {
++  if (!model_->IsLoaded()) {
++    return;
++  }
++  ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
++      [this](BrowserWindowInterface* browser) {
++        if (browser->GetProfile() != profile_ ||
++            browser->GetType() != BrowserWindowInterface::TYPE_NORMAL) {
++          return true;
++        }
++        TabStripModel* strip = browser->GetTabStripModel();
++        const int pinned_count = strip->IndexOfFirstNonPinnedTab();
++        for (int i = 0; i < pinned_count; ++i) {
++          Associate(strip->GetTabAtIndex(i));
++        }
++        return true;
++      });
++}
++
++void PinnedTabMirror::Associate(tabs::TabInterface* tab) {
++  if (!tab || !tab->IsPinned() || !model_->IsLoaded()) {
++    return;
++  }
++  if (GetEntryForTab(tab)) {
++    // Already mapped (e.g. moved in from another window).
++    AlignOrder(tab);
++    return;
++  }
++  const GURL url = GetTabURL(tab);
++  if (!url.is_valid()) {
++    // Retried from OnTabChangedAt() once the tab has a URL.
++    return;
++  }
++
++  std::set<base::Uuid> taken;
++  for (const auto& [handle, uuid] : tab_nodes_) {
++    taken.insert(uuid);
++  }
++  std::optional<base::Uuid> match;
++  bool match_open = false;
++  auto consider = [&](const PinnedItem& item) {
++    if (item.is_folder || item.url != url || taken.contains(item.uuid)) {
++      return;
++    }
++    if (!match || (item.open && !match_open)) {
++      match = item.uuid;
++      match_open = item.open;
++    }
++  };
++  for (const PinnedItem& item : model_->GetPinned()) {
++    consider(item);
++    for (const PinnedItem& child : item.children) {
++      consider(child);
++    }
++  }
++
++  base::AutoReset<bool> writing(&writing_, true);
++  if (!match) {
++    content::WebContents* contents = tab->GetContents();
++    match = model_->AddPinned(url, contents ? contents->GetTitle() : u"",
++                              base::Uuid(), static_cast<size_t>(-1));
++    if (!match) {
++      return;
++    }
++  }
++  tab_nodes_[tab->GetHandle()] = *match;
++  model_->SetOpen(*match, true);
++  AlignOrder(tab);
++  // Let views re-read spans of the newly mapped tab.
++  model_->NotifyTabMappingChanged();
++}
++
++void PinnedTabMirror::AlignOrder(tabs::TabInterface* tab) {
++  const std::optional<base::Uuid> uuid = GetEntryForTab(tab);
++  TabStripModel* strip = GetTabStrip(tab);
++  if (!uuid || !strip) {
++    return;
++  }
++  const int index = strip->GetIndexOfTab(tab);
++  const int pinned_count = strip->IndexOfFirstNonPinnedTab();
++  if (index < 0 || index >= pinned_count) {
++    return;
++  }
++  const std::vector<PinnedItem> items = model_->GetPinned();
++  const int self = TopLevelIndex(items, *uuid);
++  if (self < 0) {
++    // Entries inside a drawer keep their place.
++    return;
++  }
++  // Nearest mapped top-level neighbours in the tab strip.
++  auto neighbour = [&](int step) {
++    for (int i = index + step; i >= 0 && i < pinned_count; i += step) {
++      if (const std::optional<base::Uuid> other =
++              GetEntryForTab(strip->GetTabAtIndex(i))) {
++        const int pos = TopLevelIndex(items, *other);
++        if (pos >= 0) {
++          return pos;
++        }
++      }
++    }
++    return -1;
++  };
++  const int prev = neighbour(-1);
++  const int next = neighbour(+1);
++  // Move only when the relative order is wrong, so closed entries between
++  // live ones keep their place. BookmarkModel::Move uses insert-before
++  // indices counted before the removal.
++  base::AutoReset<bool> writing(&writing_, true);
++  if (prev >= 0 && prev > self) {
++    model_->Move(*uuid, base::Uuid(), prev + 1);
++  } else if (next >= 0 && next < self) {
++    model_->Move(*uuid, base::Uuid(), next);
++  }
++}
++
++}  // namespace aerographene
+--- /dev/null
++++ b/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.h
+@@ -0,0 +1,104 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#ifndef CHROME_BROWSER_UI_TABS_AEROGRAPHENE_PINNED_TAB_MIRROR_H_
++#define CHROME_BROWSER_UI_TABS_AEROGRAPHENE_PINNED_TAB_MIRROR_H_
++
++#include <map>
++#include <optional>
++
++#include "base/callback_list.h"
++#include "base/memory/raw_ptr.h"
++#include "base/scoped_observation.h"
++#include "base/uuid.h"
++#include "chrome/browser/ui/browser_window/public/browser_collection_observer.h"
++#include "chrome/browser/ui/tabs/aerographene/pinned_model.h"
++#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
++#include "components/tabs/public/tab_interface.h"
++
++class BrowserWindowInterface;
++class GlobalBrowserCollection;
++class Profile;
++
++namespace aerographene {
++
++// Mirrors the pinned tabs of one profile's normal windows into its
++// PinnedModel. Owned by the PinnedModel.
++//
++// Mapping: live tab -> entry is `tab_nodes_`, keyed by tabs::TabHandle (stable
++// for the life of the tab, survives moves between windows) and holding the
++// entry's BookmarkNode uuid. It is in memory only; across restarts a pinned
++// tab is matched back to its entry by URL (see Associate()).
++//
++// Cycle:
++//  - pin (or a pinned tab inserted: session restore, startup, drag): reuse an
++//    entry with the same URL not mapped to another live tab (open ones first),
++//    else add a new top-level entry; mark it open; align its order with the
++//    tab strip.
++//  - unpin: remove the entry (pinned and bookmark are the same element).
++//  - move: align the entry order with the neighbouring pinned tabs.
++//  - committed URL change: update the entry URL.
++//  - close by the user: keep the entry, clear `open` (closed pinned).
++//  - close of the whole window or quit: keep the entry and `open`, so the
++//    next startup reopens it.
++//  - entry removed elsewhere (bookmark manager, Sync): the tab stays pinned
++//    and unmapped; nothing is recreated until the tab is pinned again or
++//    navigates.
++class PinnedTabMirror : public BrowserCollectionObserver,
++                        public TabStripModelObserver,
++                        public PinnedModel::Observer {
++ public:
++  PinnedTabMirror(Profile* profile, PinnedModel* model);
++  PinnedTabMirror(const PinnedTabMirror&) = delete;
++  PinnedTabMirror& operator=(const PinnedTabMirror&) = delete;
++  ~PinnedTabMirror() override;
++
++  // Entry mapped to `tab`, if any and still present in the model.
++  std::optional<base::Uuid> GetEntryForTab(const tabs::TabInterface* tab) const;
++  // Persisted span of the entry mapped to `tab`; nullopt if unmapped.
++  std::optional<int> GetSpanForTab(const tabs::TabInterface* tab) const;
++  // Persists `span` on the entry mapped to `tab`. False if unmapped.
++  bool SetSpanForTab(const tabs::TabInterface* tab, int span);
++
++  // BrowserCollectionObserver:
++  void OnBrowserCreated(BrowserWindowInterface* browser) override;
++
++  // TabStripModelObserver:
++  void OnTabStripModelChanged(
++      TabStripModel* tab_strip_model,
++      const TabStripModelChange& change,
++      const TabStripSelectionChange& selection) override;
++  void OnTabChangedAt(tabs::TabInterface* tab,
++                      TabChangeType change_type) override;
++  void OnTabPinnedStateChanged(tabs::TabInterface* tab, int index) override;
++
++  // PinnedModel::Observer:
++  void OnPinnedModelLoaded() override;
++  void OnPinnedChanged() override;
++
++ private:
++  void OnClosingAllBrowsersChanged(bool closing);
++  void AssociateAllPinnedTabs();
++  // Maps a pinned `tab` to an entry (reusing or adding one) and aligns order.
++  void Associate(tabs::TabInterface* tab);
++  // Moves the entry of `tab` so that it keeps the relative order of the
++  // pinned tabs around it in its tab strip. Top-level entries only.
++  void AlignOrder(tabs::TabInterface* tab);
++
++  raw_ptr<Profile> profile_;
++  raw_ptr<PinnedModel> model_;
++  std::map<tabs::TabHandle, base::Uuid> tab_nodes_;
++  bool closing_all_browsers_ = false;
++  // Guards against re-entrant OnPinnedChanged() from our own writes.
++  bool writing_ = false;
++
++  base::ScopedObservation<GlobalBrowserCollection, BrowserCollectionObserver>
++      browser_collection_observation_{this};
++  base::ScopedObservation<PinnedModel, PinnedModel::Observer>
++      model_observation_{this};
++  base::CallbackListSubscription closing_all_browsers_subscription_;
++};
++
++}  // namespace aerographene
++
++#endif  // CHROME_BROWSER_UI_TABS_AEROGRAPHENE_PINNED_TAB_MIRROR_H_
+--- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
++++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
+@@ -8,7 +8,10 @@
+ #include <iterator>
+ 
+ #include "base/i18n/rtl.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/layout_constants.h"
++#include "chrome/browser/ui/tabs/aerographene/pinned_model_factory.h"
++#include "chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.h"
+ #include "chrome/browser/ui/tabs/features.h"
+ #include "chrome/browser/ui/tabs/tab_style.h"
+ #include "chrome/browser/ui/views/tabs/common/dragged_tabs_container.h"
+@@ -36,6 +39,25 @@
+ // Width of the strip along the right edge of a pinned tab that starts a span
+ // resize instead of a tab click or drag.
+ constexpr int kSpanResizeZoneWidth = 6;
++
++const tabs::TabInterface* GetPinnedTab(const views::View* child) {
++  const TabView* tab_view = views::AsViewClass<TabView>(child);
++  return tab_view ? tab_view->GetTabInterface() : nullptr;
++}
++
++aerographene::PinnedModel* GetPinnedModel(const tabs::TabInterface* tab) {
++  const BrowserWindowInterface* browser =
++      tab ? tab->GetBrowserWindowInterface() : nullptr;
++  return browser ? aerographene::PinnedModelFactory::GetForProfile(
++                       const_cast<Profile*>(browser->GetProfile()))
++                 : nullptr;
++}
++
++aerographene::PinnedTabMirror* GetPinnedTabMirror(
++    const tabs::TabInterface* tab) {
++  aerographene::PinnedModel* model = GetPinnedModel(tab);
++  return model ? model->tab_mirror() : nullptr;
++}
+ }  // namespace
+ 
+ PinnedTabContainerView::PinnedTabContainerView(
+@@ -535,6 +557,11 @@
+   } else {
+     tab_spans_[node->GetHandle()] = span;
+   }
++  if (const tabs::TabInterface* tab = GetPinnedTab(child)) {
++    if (aerographene::PinnedTabMirror* mirror = GetPinnedTabMirror(tab)) {
++      mirror->SetSpanForTab(tab, std::max(span, 1));
++    }
++  }
+   if (auto* tab_view = views::AsViewClass<TabView>(child)) {
+     tab_view->SetPinnedSpan(std::max(span, 1));
+   }
+@@ -546,6 +573,13 @@
+   if (!node) {
+     return 1;
+   }
++  if (const tabs::TabInterface* tab = GetPinnedTab(child)) {
++    if (const aerographene::PinnedTabMirror* mirror = GetPinnedTabMirror(tab)) {
++      if (const std::optional<int> span = mirror->GetSpanForTab(tab)) {
++        return *span;
++      }
++    }
++  }
+   const auto it = tab_spans_.find(node->GetHandle());
+   return it == tab_spans_.end() ? 1 : it->second;
+ }
+@@ -655,6 +689,18 @@
+ void PinnedTabContainerView::ViewHierarchyChanged(
+     const views::ViewHierarchyChangedDetails& details) {
+   views::View::ViewHierarchyChanged(details);
++  if (details.is_add && details.parent == this) {
++    const tabs::TabInterface* tab = GetPinnedTab(details.child);
++    if (!pinned_model_observation_.IsObserving()) {
++      if (aerographene::PinnedModel* model = GetPinnedModel(tab)) {
++        pinned_model_observation_.Observe(model);
++      }
++    }
++    if (auto* tab_view = views::AsViewClass<TabView>(details.child)) {
++      tab_view->SetPinnedSpan(GetTabSpan(details.child));
++    }
++    return;
++  }
+   if (details.is_add || details.parent != this) {
+     return;
+   }
+@@ -673,5 +719,22 @@
+   }
+ }
+ 
++void PinnedTabContainerView::OnPinnedModelLoaded() {
++  RefreshPersistedSpans();
++}
++
++void PinnedTabContainerView::OnPinnedChanged() {
++  RefreshPersistedSpans();
++}
++
++void PinnedTabContainerView::RefreshPersistedSpans() {
++  for (views::View* child : children()) {
++    if (auto* tab_view = views::AsViewClass<TabView>(child)) {
++      tab_view->SetPinnedSpan(GetTabSpan(child));
++    }
++  }
++  InvalidateLayout();
++}
++
+ BEGIN_METADATA(PinnedTabContainerView)
+ END_METADATA
+--- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h
++++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h
+@@ -9,6 +9,8 @@
+ #include <optional>
+ 
+ #include "base/callback_list.h"
++#include "base/scoped_observation.h"
++#include "chrome/browser/ui/tabs/aerographene/pinned_model.h"
+ #include "chrome/browser/ui/views/frame/browser_root_view.h"
+ #include "chrome/browser/ui/views/tabs/common/dragged_tabs_container.h"
+ #include "chrome/browser/ui/views/tabs/common/tab_collection_animating_layout_manager.h"
+@@ -28,7 +30,8 @@
+       public views::LayoutDelegate,
+       public views::ViewTargeterDelegate,
+       public DraggedTabsContainer,
+-      public TabCollectionAnimatingLayoutManager::Delegate {
++      public TabCollectionAnimatingLayoutManager::Delegate,
++      public aerographene::PinnedModel::Observer {
+   METADATA_HEADER(PinnedTabContainerView, views::View)
+ 
+  public:
+@@ -65,13 +68,20 @@
+       const gfx::Point& loc_in_container);
+ 
+   // Number of horizontal grid cells `child` occupies in the vertical layout
+-  // (>= 1, default 1). Kept in memory only; entries are keyed by the handle of
+-  // the child's collection node (stable for the life of the tab) and dropped
+-  // when the child leaves the container. A span of 1 erases the entry. The
+-  // user changes it by dragging the right edge of a pinned tab.
++  // (>= 1, default 1). For a tab mirrored in the space's pinned model the span
++  // is read from and written to its entry (aerographene.span), so it survives
++  // closing the tab and restarting. Otherwise (model not loaded, tab not
++  // mapped, split) it is kept in memory, keyed by the handle of the child's
++  // collection node and dropped when the child leaves the container. A span
++  // of 1 erases the entry. The user changes it by dragging the right edge of
++  // a pinned tab.
+   void SetTabSpan(views::View* child, int span);
+   int GetTabSpan(const views::View* child) const;
+ 
++  // aerographene::PinnedModel::Observer:
++  void OnPinnedModelLoaded() override;
++  void OnPinnedChanged() override;
++
+  private:
+   // DraggedTabsContainer:
+   views::ScrollView* GetScrollViewForContainer() const override;
+@@ -126,6 +136,14 @@
+   int resize_pitch_ = 1;
+   int resize_max_span_ = 1;
+ 
++  // Re-reads persisted spans into the TabViews and relayouts.
++  void RefreshPersistedSpans();
++
++  // Started with the first tab child; spans come from its profile's model.
++  base::ScopedObservation<aerographene::PinnedModel,
++                          aerographene::PinnedModel::Observer>
++      pinned_model_observation_{this};
++
+   base::CallbackListSubscription node_destroyed_subscription_;
+   base::CallbackListSubscription collapsed_state_changed_subscription_;
+ };
