@@ -57,3 +57,4 @@ aerographene/pinned-grid-span.patch
 aerographene/pinned-span-drag.patch
 aerographene/pinned-model.patch
 aerographene/pinned-model-tabstrip.patch
+helium/linux/use-default-theme.patch
