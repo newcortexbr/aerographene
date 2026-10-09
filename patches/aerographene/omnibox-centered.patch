@@ -1,0 +1,116 @@
+aerographene: omnibox centralizado e largo por padrão (640/560 px).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: helium/ui/layout/toolbar-layout.patch (Helium 57a40ad) remove o flex
+do omnibox de ToolbarView::InitLayout; no Helium quem o recoloca é
+toolbar-overflow.patch (não portado). Sem flex o omnibox fica no tamanho
+preferido e colado à esquerda. Este patch: (1) recoloca
+FlexSpecification(kScaleToMinimum, kUnbounded).WithOrder(kLocationBarFlexOrder)
+em UpdateToolbarLayout() fora do layout compacto (no compacto limpa a regra,
+como antes); (2) liga kHeliumCenteredLocationBar por padrão; (3) troca a
+redução por porcentagem por largura fixa = min(alvo, fatia), alvo 640 px no
+layout vertical (HeliumLayoutStateController::IsVerticalLayout) e 560 px nos
+demais, centralizada na largura do pai e presa dentro da fatia do FlexLayout.
+Depende de: helium/ui/layout/centered-address-bar.patch,
+helium/ui/layout/toolbar-layout.patch, aerographene/toolbar-compact-width.patch.
+
+--- a/chrome/browser/ui/browser_ui_prefs.cc
++++ b/chrome/browser/ui/browser_ui_prefs.cc
+@@ -131,7 +131,7 @@
+ 
+   registry->RegisterBooleanPref(prefs::kHeliumRoundedFrame, true);
+ 
+-  registry->RegisterBooleanPref(prefs::kHeliumCenteredLocationBar, false);
++  registry->RegisterBooleanPref(prefs::kHeliumCenteredLocationBar, true);
+ 
+   registry->RegisterBooleanPref(prefs::kHomePageIsNewTabPage, true,
+                                 pref_registration_flags);
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.cc
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+@@ -262,27 +262,10 @@
+                                   : kBrowserAppMenuRefreshCollapsedMargin));
+ }
+ 
+-constexpr int kCenteredLocationBarMaxWidth = 700;
+-
+-struct CenteredLocationBarStep {
+-  int min_toolbar_width;
+-  int toolbar_width_reduction_percent;
+-};
+-
+-constexpr CenteredLocationBarStep kCenteredLocationBarSteps[] = {
+-    {1000, 12},
+-    {800, 10},
+-    {600, 5},
+-};
+-
+-int CenteredLocationBarWidthReduction(int toolbar_width) {
+-  for (const auto& step : kCenteredLocationBarSteps) {
+-    if (toolbar_width >= step.min_toolbar_width) {
+-      return toolbar_width * step.toolbar_width_reduction_percent / 100;
+-    }
+-  }
+-  return 0;
+-}
++// aerographene: fixed centered omnibox width per layout (mockups): 640 px in
++// the vertical (sidebar) layout, 560 px otherwise. Narrower slots shrink it.
++constexpr int kCenteredLocationBarVerticalWidth = 640;
++constexpr int kCenteredLocationBarClassicWidth = 560;
+ 
+ class CenteredLocationBarLayout : public views::FlexLayout {
+  public:
+@@ -1870,8 +1853,14 @@
+           GetLayoutConstant(LayoutConstant::kLocationBarHeight)));
+       location_bar_view_->SetProperty(
+           views::kMarginsKey, gfx::Insets::TLBR(0, location_bar_margin, 0, 0));
++      location_bar_view_->ClearProperty(views::kFlexBehaviorKey);
+     } else {
+       location_bar_view_->SetPreferredSize(std::nullopt);
++      location_bar_view_->SetProperty(
++          views::kFlexBehaviorKey,
++          views::FlexSpecification(views::MinimumFlexSizeRule::kScaleToMinimum,
++                                   views::MaximumFlexSizeRule::kUnbounded)
++              .WithOrder(kLocationBarFlexOrder));
+       location_bar_view_->SetProperty(views::kMarginsKey,
+                                       gfx::Insets::VH(0, location_bar_margin));
+     }
+@@ -2178,28 +2167,19 @@
+     return bounds;
+   }
+ 
+-  const int width_reduction = CenteredLocationBarWidthReduction(toolbar_width);
+-  if (width_reduction == 0) {
+-    return bounds;
+-  }
++  auto* controller =
++      HeliumLayoutStateController::From(browser_view_->browser());
++  const int target_width = controller && controller->IsVerticalLayout()
++                               ? kCenteredLocationBarVerticalWidth
++                               : kCenteredLocationBarClassicWidth;
++  const int centered_width = std::min(target_width, bounds.width());
+ 
+-  const int centered_width =
+-      std::clamp(bounds.width() - width_reduction,
+-                 location_bar_view_->GetMinimumSize().width(),
+-                 kCenteredLocationBarMaxWidth);
+-
+-  // Center against the full width of the toolbar's parent. If that position
+-  // does not fit in the slot assigned by layout, fall back to centering within
+-  // the slot instead.
++  // Center against the full width of the toolbar's parent, kept inside the
++  // slot assigned by layout so the omnibox never overlaps other buttons.
+   int centered_x = bounds.x() + (bounds.width() - centered_width) / 2;
+-  if (parent() && centered_width <= bounds.width()) {
+-    const int ideal_centered_x = (parent()->width() - centered_width) / 2 - x();
+-    const int min_centered_x = bounds.x();
+-    const int max_centered_x = bounds.right() - centered_width;
+-    if (ideal_centered_x >= min_centered_x &&
+-        ideal_centered_x <= max_centered_x) {
+-      centered_x = ideal_centered_x;
+-    }
++  if (parent()) {
++    centered_x = std::clamp((parent()->width() - centered_width) / 2 - x(),
++                            bounds.x(), bounds.right() - centered_width);
+   }
+ 
+   bounds.set_x(centered_x);
