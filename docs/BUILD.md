@@ -33,14 +33,35 @@ Para forçar do zero: apagar `portablelinux/build/src`.
 - RAM (~14 GB): `concurrent_links` não pode ser definido com ThinLTO (assert do GN), o Chromium calcula pela RAM. O link do `chrome` com ThinLTO é o pico de memória; se estourar, a saída seria swap no WSL2 ou limitar `--thinlto-jobs`.
 - chaves Google (ADR 0006): lidas de secrets opcionais `GOOGLE_API_KEY`, `GOOGLE_DEFAULT_CLIENT_ID`, `GOOGLE_DEFAULT_CLIENT_SECRET`; ausentes, ficam os valores vazios do ungoogled. Não aparecem no log.
 - labels do runner: `[self-hosted, linux, intense]`, suposição. A API de runners da org exige permissão de admin, então os labels exatos não foram confirmados.
-- produto: o pacote se chama `aerographene-<tag>-<sha>-x86_64_linux.tar.zst` e tem um symlink `aerographene` → `chrome`. Branding (nome do binário, ícones, strings) fica para depois.
+- produto: o pacote se chama `aerographene-<AERO_VERSION>-<tag>-<sha>-x86_64_linux.tar.zst` (versão do produto de `build/config.sh`, tag ungoogled, SHA do repo) e tem um symlink `aerographene` → `chrome`. Ícones e nome do binário ficam para depois; versão e strings: seção "branding" abaixo.
 
 ## release e pacote
 
-Item 12 do `SCOPE.md`. A versão `vX.Y.Z` do aerographene é independente da do Chromium.
+Item 12 do `SCOPE.md`. A versão `vX.Y.Z` do aerographene (v0.x.x enquanto não houver release estável; primeira `v0.1.0`) é independente da do Chromium. Fonte única: `AERO_VERSION` em `build/config.sh`; `patches/aerographene/branding-version.patch` (linha `AERO_VERSION=` do BRANDING) e `pkgver` do PKGBUILD acompanham à mão, e o `inner.sh` aborta se o BRANDING divergir do `config.sh`. Para subir a versão: mudar os três, a tag do `release` e o `.SRCINFO`.
 
 1. rodar o workflow `build` e anotar o `run_id`.
 2. disparar `release` (`workflow_dispatch`) com `run_id` e `tag` (`vX.Y.Z`): baixa o artifact `aerographene-linux-x86_64`, renomeia para `aerographene-X.Y.Z-x86_64_linux.tar.zst`, gera `SHA256SUMS` e cria a release como draft. Publicar à mão depois de conferir.
 3. `packaging/arch/PKGBUILD` consome esse tarball (instala em `/opt/aerographene`, symlink `/usr/bin/aerographene`, GPL3). Com a release publicada: ajustar `pkgver`, rodar `updpkgsums` e `makepkg --printsrcinfo > .SRCINFO`. Hoje os sha256 são `SKIP`. O repo é privado, então baixar o asset exige token.
 
 Não testado: `makepkg` completo e `namcap` (não há release ainda).
+
+## branding: versão e strings da UI
+
+Versão: `patches/aerographene/branding-version.patch` (depois de `branding.patch`) acrescenta `AERO_VERSION=0.1.0` ao BRANDING (lido por `version.py` como `@AERO_VERSION@`, sem comentários no arquivo), `GetAeroVersionNumber()` em `base/version_info`, e usa em `--version` (`aerographene 0.1.0 (Chromium 154.0.8037.97)`), `--product-version`, chrome://version e Sobre (`0.1.0 (Chromium 154.0.8037.97)` no campo de versão). Não altera mensagens GRIT nem HTML (diferente do `add-helium-versioning.patch`, que muda a mensagem `IDS_SETTINGS_ABOUT_PAGE_BROWSER_VERSION` e perderia as traduções). `GetVersionNumber()`, UA e extensões continuam em 154.0.8037.97.
+
+Strings: `build/branding_strings.py` roda no `inner.sh` depois dos patches e antes do `gn gen` (parte do hash da série; o original de cada arquivo tocado vai para `.aero-applied/strings-orig` e é restaurado antes do `patch -R` do re-patch incremental). Troca "Chrome"/"Chromium"/"Google Chrome" por "aerographene" no texto das mensagens dos grds raiz `chrome/app/{chromium_strings,generated_resources}.grd`, `components/components_{chromium_,}strings.grd`, `extensions/strings/extensions_strings.grd`, `ui/strings/ui_strings.grd` e suas partes `.grdp`.
+
+Ids: o id GRIT é o fingerprint do texto inglês (+ `meaning`), então mudar o texto sem mexer nos `.xtb` derrubaria todas as traduções para inglês. O script calcula o id antigo e o novo com o próprio grit da árvore (`grd_reader.Parse` de um grd sintético com as mensagens, `clique.GetId()` = `grit.extern.tclib.GenerateMessageId`), reescreve nos `.xtb` de cada idioma o id e troca o nome literal na tradução. É reproduzível porque usa o código do grit, não uma cópia do fingerprint. Limites: tradução sem o nome literal (idiomas que transliteram) só ganha o id novo e mantém o nome antigo; mensagens com `use_name_for_id` ou `translateable="false"` só têm o texto trocado; ids que colidem após a troca mantêm a primeira entrada do xtb (12 casos no espelho, `duplicadas descartadas`). Se um dia a árvore já estiver com texto novo e xtb antigo (execução interrompida entre as escritas), não há como recuperar: recriar a árvore. A escrita é xtb antes do grd, cada arquivo por rename atômico.
+
+Exclusões (continuam com o nome Google; regex `_EXCLUDE_AFTER` do script): Chrome Web Store/Webstore, Chrome OS/ChromeOS/ChromiumOS (já excluídos por palavra colada), ChromeVox, Chromebook, Chromecast, Chrome Enterprise, Chrome Browser Cloud Management, Chrome Remote Desktop, Chrome Cleanup, Chrome Labs, Chrome DevTools, Chrome Apps/apps (plataforma de apps), Chrome Dino, Chrome Canary/Beta/Dev, Chrome Updater, Chrome for Testing, Chrome Nearby. Efeito colateral: "o app Chromium" (mensagens sobre o app mobile) também fica de fora pela regra de "app". `<ex>`, nomes de `<ph>`, atributos (`desc`, `meaning`), URLs `chrome://` e texto em minúscula não são tocados. Em inglês, "a Chrome" vira "an aerographene".
+
+Uso e testes:
+
+```
+python3 build/branding_strings.py --src <árvore> --check --list   # lista e conta, sem escrever
+AERO_TEST_SRC=<árvore ou espelho com chrome/ components/ tools/grit> python3 build/test_branding_strings.py
+```
+
+O teste de integração carrega os grds com o grit real (chromium_strings, generated_resources, components_chromium_strings; pt-BR e en-GB) antes e depois da troca e exige o mesmo número de mensagens com tradução (635 de 635 em chromium_strings pt-BR); com o grd novo e o xtb antigo cai para 170.
+
+Não coberto: aparência real no navegador, locales além de pt-BR/en-GB (a lógica é a mesma), `.xtb` de `extensions/` e `ui/` (não estavam no espelho), mensagens de grds fora da lista (ex.: `content/`, `chrome/browser/resources` com grd próprio), strings dentro de HTML/TS/C++ fixas, `.desktop` e WM class. Mudar os `.grd` invalida o cache de recursos/strings (reconstrói muitos objetos de `//chrome`).

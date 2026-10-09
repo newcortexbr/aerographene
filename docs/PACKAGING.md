@@ -76,7 +76,7 @@ Páginas internas (WebUI) usam `chrome://theme/colors.css`, gerado do ColorProvi
 
 ## nome e diretório de dados
 
-Com `aerographene/branding.patch`, `--version` mostra `aerographene 154.0.8037.97` e o perfil padrão fica em `${XDG_CONFIG_HOME:-$HOME/.config}/aerographene` (cache em `~/.cache/aerographene`), separado de um Chromium instalado; perfis antigos em `~/.config/chromium` não migram sozinhos (copiar ou usar `--user-data-dir`). O wrapper exporta `CHROME_DESKTOP=aerographene.desktop`. Policies continuam em `/etc/chromium/policies` e strings da UI ainda dizem "Chromium".
+Com `aerographene/branding.patch` e `aerographene/branding-version.patch`, `--version` mostra `aerographene 0.1.0 (Chromium 154.0.8037.97)` (`--product-version` mostra `0.1.0`; chrome://version e a página Sobre mostram `0.1.0 (Chromium 154.0.8037.97)` no lugar do número de versão) e o perfil padrão fica em `${XDG_CONFIG_HOME:-$HOME/.config}/aerographene` (cache em `~/.cache/aerographene`), separado de um Chromium instalado; perfis antigos em `~/.config/chromium` não migram sozinhos (copiar ou usar `--user-data-dir`). O wrapper exporta `CHROME_DESKTOP=aerographene.desktop`. Policies continuam em `/etc/chromium/policies` e as strings da UI passam a dizer "aerographene" pela troca de `build/branding_strings.py` (ver `docs/BUILD.md`, seção branding). A versão do produto (`AERO_VERSION` em `build/config.sh`, esquema v0.x.x; primeira = 0.1.0) é independente da do Chromium (154.0.8037.97), que segue em UA, extensões e `PRODUCT_VERSION`. `pkgver` do PKGBUILD = `AERO_VERSION`, tag `v${pkgver}`, e `_chromium` fica separado.
 
 ## PKGBUILD (`packaging/arch/`)
 
