@@ -1,0 +1,31 @@
+# aerographene: patch portado sem alteração do conteúdo do diff.
+# Origem: https://github.com/imputnet/helium-linux (tag 0.18.3.1, ref 0e4e30b0a7c612182e255790fe7eaa4ccfcab15f)
+# Caminho original: patches/helium/linux/use-default-theme.patch
+# Licença: GPL-3.0 (helium-linux); ver LICENSE do helium-linux.
+#
+--- a/ui/linux/linux_ui_factory.cc
++++ b/ui/linux/linux_ui_factory.cc
+@@ -187,22 +187,7 @@ SystemTheme GetDefaultSystemTheme() {
+   std::unique_ptr<base::Environment> env = base::Environment::Create();
+ 
+   switch (base::nix::GetDesktopEnvironment(env.get())) {
+-    case base::nix::DESKTOP_ENVIRONMENT_CINNAMON:
+-    case base::nix::DESKTOP_ENVIRONMENT_GNOME:
+-    case base::nix::DESKTOP_ENVIRONMENT_PANTHEON:
+-    case base::nix::DESKTOP_ENVIRONMENT_UNITY:
+-    case base::nix::DESKTOP_ENVIRONMENT_XFCE:
+-    case base::nix::DESKTOP_ENVIRONMENT_COSMIC:
+-      return SystemTheme::kGtk;
+-    case base::nix::DESKTOP_ENVIRONMENT_KDE3:
+-    case base::nix::DESKTOP_ENVIRONMENT_KDE4:
+-    case base::nix::DESKTOP_ENVIRONMENT_KDE5:
+-    case base::nix::DESKTOP_ENVIRONMENT_KDE6:
+-    case base::nix::DESKTOP_ENVIRONMENT_UKUI:
+-    case base::nix::DESKTOP_ENVIRONMENT_DEEPIN:
+-    case base::nix::DESKTOP_ENVIRONMENT_LXQT:
+-      return SystemTheme::kQt;
+-    case base::nix::DESKTOP_ENVIRONMENT_OTHER:
++    default:
+       return SystemTheme::kDefault;
+   }
+ }
