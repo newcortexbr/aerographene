@@ -1,0 +1,946 @@
+aerographene: pasta de pinned com gaveta na grade vertical (F6).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: SCOPE item 4, CONTEXT "pasta": linha que ocupa toda a largura
+da grade de pinned e, ao abrir, revela uma gaveta com a grade dos pinned
+que contém.
+Modelo: PinnedItem.expanded e PinnedModel::SetExpanded gravam
+`aerographene.expanded=1` na pasta (ausente = fechada); o estado é por
+perfil, compartilhado entre janelas, persiste e sincroniza como as outras
+chaves. GetParentFolder, MoveIntoNewFolder (cria a pasta aberta no lugar
+do pinned de topo e o move para dentro) e MoveToTopLevel (tira da gaveta,
+logo depois da pasta).
+Grade: AerographenePinnedFolderView (views::Button, desenho só em Canvas:
+chevron, glifo de pasta, rótulo ou título) é uma linha de largura total.
+GetGridChildren intercala, em ordem do modelo, linhas de pasta e
+placeholders de topo entre as abas vivas de topo (ordem do tab strip);
+depois de uma pasta aberta vem a gaveta: abas vivas mapeadas a filhos da
+pasta e placeholders de filhos fechados (F5), com span F1/F2 na mesma
+largura de célula. A grade abre linha nova a cada troca de seção (topo,
+linha de pasta, gaveta). Abas vivas de pasta fechada ficam no
+TabStripModel e só recebem visible=false no layout (nada é destruído nem
+movido). Clicar na linha alterna aberto/fechado.
+Comandos: tabs::CommandAerographeneNewPinnedFolder e
+CommandAerographeneMovePinnedToRoot (fim do enum, depois do
+CommandAerographeneRenamePinned da F3), no menu de contexto da aba fixada
+(abas verticais, uma aba) e no menu do placeholder; o
+TabStripCollectionController habilita só o que se aplica e executa; o
+TabStripModel só devolve false/ignora.
+Mirror: OpenClosedEntry aceita filhos de gaveta (inseridos depois do
+último pinned); AlignOrder continua sem mover nós de gaveta.
+Fora desta fatia: arrastar para dentro/fora de pasta, renomear ou apagar
+pasta pela grade, pasta no layout horizontal. Arrastar uma aba de gaveta
+reordena só o tab strip; a grade continua seguindo o modelo.
+Strings novas em chrome/app/generated_resources.grd (blocos normal e Title
+Case): IDS_AEROGRAPHENE_NEW_PINNED_FOLDER,
+IDS_AEROGRAPHENE_MOVE_PINNED_TO_ROOT,
+IDS_AEROGRAPHENE_PINNED_FOLDER_DEFAULT_TITLE. Sem tradução (.xtb).
+Depende de aerographene/pinned-model.patch, pinned-model-tabstrip.patch,
+pinned-closed.patch e pinned-label.patch.
+
+--- a/chrome/app/generated_resources.grd
++++ b/chrome/app/generated_resources.grd
+@@ -12202,6 +12202,15 @@
+         <message name="IDS_AEROGRAPHENE_RENAME_PINNED_FIELD" desc="Label of the text field, in the 'Rename pinned tab' dialog, holding the text shown on the pinned tab. Empty restores the page title.">
+           Name
+         </message>
++        <message name="IDS_AEROGRAPHENE_NEW_PINNED_FOLDER" desc="The label of the context menu item, on a pinned tab in the vertical pinned grid, that creates a pinned folder and moves the pinned tab into it.">
++          Move to new pinned folder
++        </message>
++        <message name="IDS_AEROGRAPHENE_MOVE_PINNED_TO_ROOT" desc="The label of the context menu item, on a pinned tab inside a pinned folder, that moves it out of the folder.">
++          Move out of folder
++        </message>
++        <message name="IDS_AEROGRAPHENE_PINNED_FOLDER_DEFAULT_TITLE" desc="Default name of a new pinned folder in the vertical pinned grid.">
++          Folder
++        </message>
+         <message name="IDS_TAB_CXMENU_CLOSETAB" desc="The label of the tab context menu item for closing one or more tabs.">
+           Close
+         </message>
+@@ -12339,6 +12348,15 @@
+         <message name="IDS_AEROGRAPHENE_RENAME_PINNED_FIELD" desc="Label of the text field, in the 'Rename pinned tab' dialog, holding the text shown on the pinned tab. Empty restores the page title.">
+           Name
+         </message>
++        <message name="IDS_AEROGRAPHENE_NEW_PINNED_FOLDER" desc="In Title Case: The label of the context menu item, on a pinned tab in the vertical pinned grid, that creates a pinned folder and moves the pinned tab into it.">
++          Move to New Pinned Folder
++        </message>
++        <message name="IDS_AEROGRAPHENE_MOVE_PINNED_TO_ROOT" desc="In Title Case: The label of the context menu item, on a pinned tab inside a pinned folder, that moves it out of the folder.">
++          Move Out of Folder
++        </message>
++        <message name="IDS_AEROGRAPHENE_PINNED_FOLDER_DEFAULT_TITLE" desc="Default name of a new pinned folder in the vertical pinned grid.">
++          Folder
++        </message>
+         <message name="IDS_TAB_CXMENU_CLOSETAB" desc="In Title Case: The label of the tab context menu item for closing one or more tabs.">
+           Close
+         </message>
+--- a/chrome/browser/ui/tabs/aerographene/pinned_model.cc
++++ b/chrome/browser/ui/tabs/aerographene/pinned_model.cc
+@@ -51,6 +51,7 @@
+   item.span = ReadSpan(node);
+   item.is_folder = IsDrawer(node);
+   item.open = node->is_url() && HasFlag(node, kPinnedOpenMetaKey);
++  item.expanded = item.is_folder && HasFlag(node, kPinnedExpandedMetaKey);
+   if (with_children && item.is_folder) {
+     for (const auto& child : node->children()) {
+       if (child->is_url()) {
+@@ -211,6 +212,59 @@
+   return true;
+ }
+ 
++bool PinnedModel::SetExpanded(const base::Uuid& uuid, bool expanded) {
++  const BookmarkNode* node = Resolve(uuid);
++  if (!node || !IsDrawer(node) || node->parent() != root_) {
++    return false;
++  }
++  if (expanded == HasFlag(node, kPinnedExpandedMetaKey)) {
++    return true;
++  }
++  if (expanded) {
++    model_->SetNodeMetaInfo(node, kPinnedExpandedMetaKey, "1");
++  } else {
++    model_->DeleteNodeMetaInfo(node, kPinnedExpandedMetaKey);
++  }
++  return true;
++}
++
++base::Uuid PinnedModel::GetParentFolder(const base::Uuid& uuid) const {
++  const BookmarkNode* node = Resolve(uuid);
++  if (!node || node->parent() == root_ || !IsDrawer(node->parent())) {
++    return base::Uuid();
++  }
++  return node->parent()->uuid();
++}
++
++std::optional<base::Uuid> PinnedModel::MoveIntoNewFolder(
++    const base::Uuid& uuid,
++    const std::u16string& title) {
++  const BookmarkNode* node = Resolve(uuid);
++  if (!node || !node->is_url() || node->parent() != root_) {
++    return std::nullopt;
++  }
++  const std::optional<size_t> index = root_->GetIndexOf(node);
++  if (!index) {
++    return std::nullopt;
++  }
++  const std::optional<base::Uuid> folder = AddFolder(title, *index);
++  if (!folder) {
++    return std::nullopt;
++  }
++  Move(uuid, *folder, 0);
++  SetExpanded(*folder, true);
++  return folder;
++}
++
++bool PinnedModel::MoveToTopLevel(const base::Uuid& uuid) {
++  const BookmarkNode* node = Resolve(uuid);
++  if (!node || node->parent() == root_) {
++    return false;
++  }
++  const std::optional<size_t> index = root_->GetIndexOf(node->parent());
++  return index && Move(uuid, base::Uuid(), *index + 1);
++}
++
+ void PinnedModel::StartTabMirror(Profile* profile) {
+   if (!tab_mirror_ && model_) {
+     tab_mirror_ = std::make_unique<PinnedTabMirror>(profile, this);
+--- a/chrome/browser/ui/tabs/aerographene/pinned_model.h
++++ b/chrome/browser/ui/tabs/aerographene/pinned_model.h
+@@ -39,6 +39,9 @@
+ // (kept through window close and quit); absent once the user closes the tab.
+ // Read at startup to reopen the entry.
+ inline constexpr char kPinnedOpenMetaKey[] = "aerographene.open";
++// "1" on a drawer folder shown open in the pinned grid; absent = closed.
++// Shared by every window of the profile and synced like the other keys.
++inline constexpr char kPinnedExpandedMetaKey[] = "aerographene.expanded";
+ 
+ class PinnedTabMirror;
+ 
+@@ -59,6 +62,7 @@
+   int span = 1;       // Horizontal grid cells, >= 1.
+   bool is_folder = false;  // Drawer folder (aerographene.folder=1).
+   bool open = false;       // aerographene.open=1.
++  bool expanded = false;   // Folders only: aerographene.expanded=1.
+   std::vector<PinnedItem> children;  // Only filled for folders.
+ };
+ 
+@@ -112,6 +116,17 @@
+   // URL entries only.
+   bool SetURL(const base::Uuid& uuid, const GURL& url);
+   bool SetOpen(const base::Uuid& uuid, bool open);
++  // Drawer folders only.
++  bool SetExpanded(const base::Uuid& uuid, bool expanded);
++  // Drawer folder holding `uuid`; invalid Uuid for top-level entries or if
++  // `uuid` is unknown.
++  base::Uuid GetParentFolder(const base::Uuid& uuid) const;
++  // Creates an open drawer folder titled `title` where the top-level URL
++  // entry `uuid` is and moves the entry into it. Returns the folder's uuid.
++  std::optional<base::Uuid> MoveIntoNewFolder(const base::Uuid& uuid,
++                                              const std::u16string& title);
++  // Moves the entry `uuid` out of its drawer, right after the folder.
++  bool MoveToTopLevel(const base::Uuid& uuid);
+   // Favicon of the entry's bookmark node; empty while not loaded or unknown.
+   // The first call starts the load; OnPinnedChanged() fires when it lands.
+   gfx::Image GetFavicon(const base::Uuid& uuid);
+--- a/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc
++++ b/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc
+@@ -107,12 +107,11 @@
+   }
+   const std::vector<PinnedItem> items = model_->GetPinned();
+   const int target = TopLevelIndex(items, uuid);
+-  if (target < 0) {
+-    // Missing or inside a drawer (F6).
++  std::optional<PinnedItem> item = model_->Find(uuid);
++  if (!item) {
+     return false;
+   }
+-  const PinnedItem& item = items[target];
+-  if (item.is_folder || item.open || !item.url.is_valid()) {
++  if (item->is_folder || item->open || !item->url.is_valid()) {
+     return false;
+   }
+   for (const auto& [handle, mapped] : tab_nodes_) {
+@@ -121,11 +120,12 @@
+     }
+   }
+   // Before the first pinned tab mapped to a later entry, so AlignOrder()
+-  // finds the order already right and does not move the entry.
++  // finds the order already right and does not move the entry. Entries
++  // inside a drawer (target < 0) go last; AlignOrder() leaves them alone.
+   TabStripModel* strip = browser->GetTabStripModel();
+   const int pinned_count = strip->IndexOfFirstNonPinnedTab();
+   int index = pinned_count;
+-  for (int i = 0; i < pinned_count; ++i) {
++  for (int i = 0; target >= 0 && i < pinned_count; ++i) {
+     const std::optional<base::Uuid> entry =
+         GetEntryForTab(strip->GetTabAtIndex(i));
+     if (entry && TopLevelIndex(items, *entry) > target) {
+@@ -133,7 +133,7 @@
+       break;
+     }
+   }
+-  const GURL url = item.url;
++  const GURL url = item->url;
+   next_entry_ = uuid;
+   // Inserted already pinned: Associate() runs from the insertion.
+   chrome::AddTabAt(browser, url, index, /*foreground=*/true,
+--- a/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.h
++++ b/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.h
+@@ -65,7 +65,8 @@
+   // of `browser`, inserted where the model order puts it among the pinned
+   // tabs, and maps it to that same entry (no new entry, no URL matching).
+   // False if `browser` is not a normal window of this profile or the entry is
+-  // missing, a folder, inside a drawer or already open.
++  // missing, a folder or already open. An entry inside a drawer goes after
++  // the last pinned tab (its place in the grid comes from the model).
+   bool OpenClosedEntry(BrowserWindowInterface* browser, const base::Uuid& uuid);
+ 
+   // BrowserCollectionObserver:
+--- a/chrome/browser/ui/tabs/tab_menu_model.cc
++++ b/chrome/browser/ui/tabs/tab_menu_model.cc
+@@ -512,6 +512,12 @@
+   if (showing_vertical_tabs && !will_pin && num_tabs == 1) {
+     AddItemWithStringId(TabStripModel::CommandAerographeneRenamePinned,
+                         IDS_AEROGRAPHENE_RENAME_PINNED);
++    // Drawer folders: the controller enables only the one that applies
++    // (top-level entry or entry inside a drawer).
++    AddItemWithStringId(TabStripModel::CommandAerographeneNewPinnedFolder,
++                        IDS_AEROGRAPHENE_NEW_PINNED_FOLDER);
++    AddItemWithStringId(TabStripModel::CommandAerographeneMovePinnedToRoot,
++                        IDS_AEROGRAPHENE_MOVE_PINNED_TO_ROOT);
+   }
+ 
+   const bool will_mute = !AreAllSitesMuted(*tab_strip_, indices);
+--- a/chrome/browser/ui/tabs/tab_strip_model.cc
++++ b/chrome/browser/ui/tabs/tab_strip_model.cc
+@@ -2717,6 +2717,8 @@
+ 
+     // aerographene: handled by the vertical tab strip controller.
+     case CommandAerographeneRenamePinned:
++    case CommandAerographeneNewPinnedFolder:
++    case CommandAerographeneMovePinnedToRoot:
+       return false;
+ 
+     case CommandToggleGrouped:
+@@ -2922,6 +2924,8 @@
+ 
+     // aerographene: handled by the vertical tab strip controller.
+     case CommandAerographeneRenamePinned:
++    case CommandAerographeneNewPinnedFolder:
++    case CommandAerographeneMovePinnedToRoot:
+       break;
+ 
+     case CommandTogglePinned: {
+--- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
++++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
+@@ -30,12 +30,15 @@
+ #include "chrome/grit/generated_resources.h"
+ #include "ui/base/cursor/cursor.h"
+ #include "ui/base/cursor/mojom/cursor_type.mojom.h"
++#include "ui/base/l10n/l10n_util.h"
+ #include "ui/base/metadata/metadata_impl_macros.h"
+ #include "ui/color/color_id.h"
+ #include "ui/color/color_provider.h"
+ #include "ui/gfx/canvas.h"
+ #include "ui/gfx/font_list.h"
++#include "ui/gfx/geometry/point_f.h"
+ #include "ui/gfx/geometry/rect.h"
++#include "ui/gfx/geometry/rect_f.h"
+ #include "ui/gfx/image/image.h"
+ #include "ui/gfx/image/image_skia.h"
+ #include "ui/menus/simple_menu_model.h"
+@@ -88,6 +91,16 @@
+ constexpr int kClosedPinnedIconSize = 16;
+ constexpr int kClosedPinnedIconTextGap = 6;
+ constexpr int kClosedPinnedRenameCommand = 1;
++constexpr int kClosedPinnedFolderCommand = 2;
++
++// Drawer folder row: chevron, folder glyph, then the folder label or title.
++constexpr int kFolderRowPadding = 8;
++constexpr int kFolderChevronSize = 8;
++constexpr int kFolderIconWidth = 16;
++constexpr int kFolderIconHeight = 12;
++constexpr int kFolderIconTabWidth = 7;
++constexpr int kFolderIconGap = 6;
++constexpr float kFolderStrokeWidth = 1.5f;
+ 
+ // Pinned entry label, or empty, for the live pinned `child`.
+ std::u16string GetPinnedLabel(const views::View* child) {
+@@ -115,9 +128,11 @@
+ 
+  public:
+   AerographeneClosedPinnedView(PressedCallback callback,
+-                               base::RepeatingClosure rename_callback)
++                               base::RepeatingClosure rename_callback,
++                               base::RepeatingClosure folder_callback)
+       : views::Button(std::move(callback)),
+-        rename_callback_(std::move(rename_callback)) {
++        rename_callback_(std::move(rename_callback)),
++        folder_callback_(std::move(folder_callback)) {
+     set_context_menu_controller(this);
+   }
+   AerographeneClosedPinnedView(const AerographeneClosedPinnedView&) = delete;
+@@ -125,11 +140,15 @@
+       const AerographeneClosedPinnedView&) = delete;
+   ~AerographeneClosedPinnedView() override = default;
+ 
++  // `model_index` is the index among the top-level entries, or among the
++  // children of `folder` when `folder` is valid (entry inside a drawer).
+   void Update(const aerographene::PinnedItem& item,
+               int model_index,
++              const base::Uuid& folder,
+               const gfx::Image& favicon) {
+     uuid_ = item.uuid;
+     model_index_ = model_index;
++    folder_ = folder;
+     span_ = std::max(item.span, 1);
+     favicon_ = favicon.IsEmpty() ? gfx::ImageSkia() : favicon.AsImageSkia();
+     const std::u16string name =
+@@ -142,6 +161,7 @@
+ 
+   const base::Uuid& uuid() const { return uuid_; }
+   int model_index() const { return model_index_; }
++  const base::Uuid& folder() const { return folder_; }
+   int span() const { return span_; }
+ 
+   // views::Button:
+@@ -216,6 +236,10 @@
+     menu_model_ = std::make_unique<ui::SimpleMenuModel>(this);
+     menu_model_->AddItemWithStringId(kClosedPinnedRenameCommand,
+                                      IDS_AEROGRAPHENE_RENAME_PINNED);
++    menu_model_->AddItemWithStringId(
++        kClosedPinnedFolderCommand, folder_.is_valid()
++                                        ? IDS_AEROGRAPHENE_MOVE_PINNED_TO_ROOT
++                                        : IDS_AEROGRAPHENE_NEW_PINNED_FOLDER);
+     menu_runner_ = std::make_unique<views::MenuRunner>(
+         menu_model_.get(),
+         views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU);
+@@ -227,16 +251,20 @@
+   void ExecuteCommand(int command_id, int event_flags) override {
+     if (command_id == kClosedPinnedRenameCommand) {
+       rename_callback_.Run();
++    } else if (command_id == kClosedPinnedFolderCommand) {
++      folder_callback_.Run();
+     }
+   }
+ 
+  private:
+   base::Uuid uuid_;
+   int model_index_ = 0;
++  base::Uuid folder_;
+   int span_ = 1;
+   gfx::ImageSkia favicon_;
+   std::u16string text_;
+   base::RepeatingClosure rename_callback_;
++  base::RepeatingClosure folder_callback_;
+   std::unique_ptr<ui::SimpleMenuModel> menu_model_;
+   std::unique_ptr<views::MenuRunner> menu_runner_;
+ };
+@@ -244,6 +272,118 @@
+ BEGIN_METADATA(AerographeneClosedPinnedView)
+ END_METADATA
+ 
++// Full-width row of a drawer folder in the vertical pinned grid. Clicking it
++// opens or closes the drawer. Painted with the canvas only (chevron, folder
++// glyph, text); no layer of its own, like the placeholders.
++class AerographenePinnedFolderView : public views::Button {
++  METADATA_HEADER(AerographenePinnedFolderView, views::Button)
++
++ public:
++  explicit AerographenePinnedFolderView(PressedCallback callback)
++      : views::Button(std::move(callback)) {}
++  AerographenePinnedFolderView(const AerographenePinnedFolderView&) = delete;
++  AerographenePinnedFolderView& operator=(
++      const AerographenePinnedFolderView&) = delete;
++  ~AerographenePinnedFolderView() override = default;
++
++  void Update(const aerographene::PinnedItem& item, int model_index) {
++    uuid_ = item.uuid;
++    model_index_ = model_index;
++    expanded_ = item.expanded;
++    text_ = item.label.empty() ? item.title : base::UTF8ToUTF16(item.label);
++    SetTooltipText(text_);
++    GetViewAccessibility().SetName(text_);
++    if (expanded_) {
++      GetViewAccessibility().SetIsExpanded();
++    } else {
++      GetViewAccessibility().SetIsCollapsed();
++    }
++    SchedulePaint();
++  }
++
++  const base::Uuid& uuid() const { return uuid_; }
++  int model_index() const { return model_index_; }
++  bool expanded() const { return expanded_; }
++
++  // views::Button:
++  gfx::Size CalculatePreferredSize(
++      const views::SizeBounds& available_size) const override {
++    return gfx::Size(GetLayoutConstant(LayoutConstant::kVerticalTabMinWidth),
++                     GetLayoutConstant(LayoutConstant::kVerticalTabHeight));
++  }
++
++  void PaintButtonContents(gfx::Canvas* canvas) override {
++    const ui::ColorProvider* color_provider = GetColorProvider();
++    if (!color_provider) {
++      return;
++    }
++    const SkColor color = color_provider->GetColor(ui::kColorIcon);
++    const gfx::Rect bounds = GetLocalBounds();
++    const float cy = bounds.y() + bounds.height() / 2.0f;
++    auto point = [&](float logical_x, float y) {
++      return gfx::PointF(base::i18n::IsRTL() ? bounds.width() - logical_x
++                                             : logical_x,
++                         y);
++    };
++
++    cc::PaintFlags stroke;
++    stroke.setAntiAlias(true);
++    stroke.setStyle(cc::PaintFlags::kStroke_Style);
++    stroke.setStrokeWidth(kFolderStrokeWidth);
++    stroke.setColor(color);
++
++    // Chevron: pointing down when open, towards the text when closed.
++    const float cx = bounds.x() + kFolderRowPadding + kFolderChevronSize / 2.0f;
++    const float half = kFolderChevronSize / 2.0f;
++    if (expanded_) {
++      canvas->DrawLine(point(cx - half, cy - half / 2),
++                       point(cx, cy + half / 2), stroke);
++      canvas->DrawLine(point(cx, cy + half / 2),
++                       point(cx + half, cy - half / 2), stroke);
++    } else {
++      canvas->DrawLine(point(cx - half / 2, cy - half),
++                       point(cx + half / 2, cy), stroke);
++      canvas->DrawLine(point(cx + half / 2, cy),
++                       point(cx - half / 2, cy + half), stroke);
++    }
++
++    // Folder glyph: a tab on top of an outlined body.
++    const int icon_x =
++        bounds.x() + kFolderRowPadding + kFolderChevronSize + kFolderIconGap;
++    const int icon_y = bounds.y() + (bounds.height() - kFolderIconHeight) / 2;
++    cc::PaintFlags fill;
++    fill.setAntiAlias(true);
++    fill.setColor(color);
++    canvas->DrawRoundRect(GetMirroredRect(gfx::Rect(icon_x, icon_y,
++                                                    kFolderIconTabWidth, 4)),
++                          1, fill);
++    canvas->DrawRoundRect(
++        gfx::RectF(GetMirroredRect(gfx::Rect(icon_x, icon_y + 2,
++                                             kFolderIconWidth,
++                                             kFolderIconHeight - 2))),
++        2, stroke);
++
++    const int text_x = icon_x + kFolderIconWidth + kFolderIconGap;
++    const gfx::Rect text_bounds(
++        text_x, bounds.y(),
++        std::max(0, bounds.right() - kFolderRowPadding - text_x),
++        bounds.height());
++    canvas->DrawStringRect(
++        text_, gfx::FontList(),
++        color_provider->GetColor(ui::kColorLabelForeground),
++        GetMirroredRect(text_bounds));
++  }
++
++ private:
++  base::Uuid uuid_;
++  int model_index_ = 0;
++  bool expanded_ = false;
++  std::u16string text_;
++};
++
++BEGIN_METADATA(AerographenePinnedFolderView)
++END_METADATA
++
+ PinnedTabContainerView::PinnedTabContainerView(
+     TabCollectionNode* collection_node)
+     : DraggedTabsContainer(
+@@ -374,7 +514,8 @@
+     const views::View& child_view) const {
+   // Closed placeholders appear and move without animation.
+   return views::IsViewClass<SplitTabView>(&child_view) ||
+-         views::IsViewClass<AerographeneClosedPinnedView>(&child_view);
++         views::IsViewClass<AerographeneClosedPinnedView>(&child_view) ||
++         views::IsViewClass<AerographenePinnedFolderView>(&child_view);
+ }
+ 
+ std::optional<BrowserRootView::DropIndex>
+@@ -611,8 +752,10 @@
+   // the current row wraps to the next one. With every span equal to 1 this is
+   // the previous uniform-column layout.
+   int total_cells = 0;
++  bool has_folder = false;
+   for (auto* child : GetGridChildren()) {
+     total_cells += GetTabSpan(child);
++    has_folder |= views::IsViewClass<AerographenePinnedFolderView>(child);
+   }
+   metrics.cells_on_row = total_cells;
+   metrics.max_cells = total_cells;
+@@ -640,6 +783,10 @@
+                                     (metrics.cell_width + kTabPadding)) +
+                          1));
+     metrics.cells_on_row = std::max(1, std::min(total_cells, metrics.max_cells));
++    // A folder row takes the whole width of the grid.
++    if (has_folder) {
++      metrics.cells_on_row = metrics.max_cells;
++    }
+ 
+     // Allocate extra space to the cells.
+     available_width -= (metrics.cells_on_row * metrics.cell_width) +
+@@ -652,7 +799,8 @@
+ views::ProposedLayout PinnedTabContainerView::CalculateVerticalLayout(
+     const views::SizeBounds& size_bounds) const {
+   views::ProposedLayout layouts;
+-  const std::vector<views::View*> children = GetGridChildren();
++  std::vector<int> sections;
++  const std::vector<views::View*> children = GetGridChildren(&sections);
+ 
+   int total_width = 0;
+   int total_height = 0;
+@@ -669,8 +817,14 @@
+   const int cells_on_row = metrics.cells_on_row;
+ 
+   int col = 0;
+-  for (auto* child : children) {
+-    const int span = std::min(GetTabSpan(child), cells_on_row);
++  int section = 0;
++  for (size_t i = 0; i < children.size(); ++i) {
++    views::View* child = children[i];
++    // Folder rows span the whole row; drawers start and end on a new row.
++    const int span =
++        views::IsViewClass<AerographenePinnedFolderView>(child)
++            ? cells_on_row
++            : std::min(GetTabSpan(child), cells_on_row);
+     const int span_width = span * child_width + (span - 1) * kTabPadding;
+     gfx::Rect bounds =
+         gfx::Rect(child->GetPreferredSize(views::SizeBounds(span_width, {})));
+@@ -683,9 +837,10 @@
+       continue;
+     }
+ 
+-    // Wrap before placing a child that does not fit in the remaining cells.
++    // Wrap before placing a child that does not fit in the remaining cells,
++    // or that starts another section (folder row, drawer, top level).
+     if ((!drag_data || !drag_data->should_float) && col > 0 &&
+-        col + span > cells_on_row) {
++        (col + span > cells_on_row || sections[i] != section)) {
+       y = total_height + kTabPadding;
+       col = 0;
+       x = 0;
+@@ -710,6 +865,7 @@
+       total_width = std::max(total_width, x);
+       total_height = std::max(total_height, (y + bounds.height()));
+ 
++      section = sections[i];
+       col += span;
+       if (col >= cells_on_row) {
+         y = total_height + kTabPadding;
+@@ -721,6 +877,15 @@
+     layouts.child_layouts.emplace_back(child, true, bounds);
+   }
+ 
++  // Live children of closed drawers stay in the tab strip but are hidden.
++  if (collection_node_) {
++    for (views::View* child : collection_node_->GetDirectChildren()) {
++      if (std::ranges::find(children, child) == children.end()) {
++        layouts.child_layouts.emplace_back(child, false, gfx::Rect());
++      }
++    }
++  }
++
+   // Make sure we snap to bounded width if defined. This is necessary as the
+   // `child_width` calculation above rounds width down and this can result in
+   // off-by-one width calculations when the number of children on a row changes.
+@@ -950,32 +1115,61 @@
+     items = model->GetPinned();
+   }
+ 
+-  std::map<base::Uuid, AerographeneClosedPinnedView*> previous;
++  std::map<base::Uuid, views::View*> previous;
+   for (AerographeneClosedPinnedView* view : closed_views_) {
+     previous[view->uuid()] = view;
+   }
++  for (AerographenePinnedFolderView* view : folder_views_) {
++    previous[view->uuid()] = view;
++  }
+   std::vector<raw_ptr<AerographeneClosedPinnedView>> next;
+-  for (size_t i = 0; i < items.size(); ++i) {
+-    const aerographene::PinnedItem& item = items[i];
+-    // Top-level URL entries only; drawer folders and their children are F6.
++  std::vector<raw_ptr<AerographenePinnedFolderView>> next_folders;
++  auto add_closed = [&](const aerographene::PinnedItem& item, int index,
++                        const base::Uuid& folder) {
+     if (item.is_folder || item.open || !item.url.is_valid()) {
+-      continue;
++      return;
+     }
+     AerographeneClosedPinnedView* view = nullptr;
+-    if (auto it = previous.find(item.uuid); it != previous.end()) {
+-      view = it->second;
++    if (auto it = previous.find(item.uuid); it != previous.end() &&
++        views::IsViewClass<AerographeneClosedPinnedView>(it->second)) {
++      view = views::AsViewClass<AerographeneClosedPinnedView>(it->second);
+       previous.erase(it);
+     } else {
+       view = AddChildView(std::make_unique<AerographeneClosedPinnedView>(
+           base::BindRepeating(&PinnedTabContainerView::OpenClosedPinned,
+                               base::Unretained(this), item.uuid),
+           base::BindRepeating(&PinnedTabContainerView::RenameClosedPinned,
++                              base::Unretained(this), item.uuid),
++          base::BindRepeating(&PinnedTabContainerView::MoveClosedPinnedFolder,
+                               base::Unretained(this), item.uuid)));
+     }
+-    view->Update(item, static_cast<int>(i), model->GetFavicon(item.uuid));
++    view->Update(item, index, folder, model->GetFavicon(item.uuid));
+     next.push_back(view);
++  };
++  for (size_t i = 0; i < items.size(); ++i) {
++    const aerographene::PinnedItem& item = items[i];
++    if (!item.is_folder) {
++      add_closed(item, static_cast<int>(i), base::Uuid());
++      continue;
++    }
++    AerographenePinnedFolderView* row = nullptr;
++    if (auto it = previous.find(item.uuid); it != previous.end() &&
++        views::IsViewClass<AerographenePinnedFolderView>(it->second)) {
++      row = views::AsViewClass<AerographenePinnedFolderView>(it->second);
++      previous.erase(it);
++    } else {
++      row = AddChildView(std::make_unique<AerographenePinnedFolderView>(
++          base::BindRepeating(&PinnedTabContainerView::ToggleFolder,
++                              base::Unretained(this), item.uuid)));
++    }
++    row->Update(item, static_cast<int>(i));
++    next_folders.push_back(row);
++    for (size_t j = 0; j < item.children.size(); ++j) {
++      add_closed(item.children[j], static_cast<int>(j), item.uuid);
++    }
+   }
+   closed_views_ = std::move(next);
++  folder_views_ = std::move(next_folders);
+   // Out of the grid now; the layout manager deletes them on a later layout
+   // (one of them may be the sender of the click that reopened its entry).
+   for (auto& [uuid, view] : previous) {
+@@ -984,43 +1178,126 @@
+   InvalidateLayout();
+ }
+ 
+-std::vector<views::View*> PinnedTabContainerView::GetGridChildren() const {
++std::vector<views::View*> PinnedTabContainerView::GetGridChildren(
++    std::vector<int>* sections) const {
++  if (sections) {
++    sections->clear();
++  }
+   if (!collection_node_) {
+     return {};
+   }
+   std::vector<views::View*> live = collection_node_->GetDirectChildren();
+-  if (closed_views_.empty()) {
++  if (closed_views_.empty() && folder_views_.empty()) {
++    if (sections) {
++      sections->assign(live.size(), 0);
++    }
+     return live;
+   }
++  // Model position of every entry: top-level index, or (folder, child index)
++  // for entries inside a drawer.
+   std::map<base::Uuid, int> model_index;
++  std::map<base::Uuid, base::Uuid> parent_folder;
+   if (const aerographene::PinnedModel* model = GetWindowPinnedModel()) {
+     const std::vector<aerographene::PinnedItem> items = model->GetPinned();
+     for (size_t i = 0; i < items.size(); ++i) {
+       model_index[items[i].uuid] = static_cast<int>(i);
++      for (size_t j = 0; j < items[i].children.size(); ++j) {
++        model_index[items[i].children[j].uuid] = static_cast<int>(j);
++        parent_folder[items[i].children[j].uuid] = items[i].uuid;
++      }
+     }
+   }
+ 
+-  std::vector<views::View*> result;
+-  result.reserve(live.size() + closed_views_.size());
+-  size_t next_closed = 0;
++  // Live children: top level in tab strip order, the rest per drawer.
++  struct Entry {
++    raw_ptr<views::View> view;
++    int index;  // Model index, or -1 if unmapped.
++  };
++  std::vector<Entry> top_live;
++  std::map<base::Uuid, std::vector<Entry>> drawer_live;
+   for (views::View* child : live) {
+     const tabs::TabInterface* tab = GetPinnedTab(child);
+     const aerographene::PinnedTabMirror* mirror =
+         tab ? GetPinnedTabMirror(tab) : nullptr;
+     const std::optional<base::Uuid> uuid =
+         mirror ? mirror->GetEntryForTab(tab) : std::nullopt;
++    int index = -1;
+     if (uuid) {
+       if (auto it = model_index.find(*uuid); it != model_index.end()) {
+-        while (next_closed < closed_views_.size() &&
+-               closed_views_[next_closed]->model_index() < it->second) {
+-          result.push_back(closed_views_[next_closed++].get());
+-        }
++        index = it->second;
++      }
++      if (auto it = parent_folder.find(*uuid); it != parent_folder.end()) {
++        drawer_live[it->second].push_back({child, index});
++        continue;
++      }
++    }
++    top_live.push_back({child, index});
++  }
++
++  std::vector<views::View*> result;
++  result.reserve(live.size() + closed_views_.size() + folder_views_.size());
++  auto push = [&](views::View* view, int section) {
++    result.push_back(view);
++    if (sections) {
++      sections->push_back(section);
++    }
++  };
++
++  // Top-level placeholders and folder rows, merged in model order.
++  std::vector<Entry> inserts;
++  for (AerographeneClosedPinnedView* view : closed_views_) {
++    if (!view->folder().is_valid()) {
++      inserts.push_back({view, view->model_index()});
++    }
++  }
++  for (AerographenePinnedFolderView* view : folder_views_) {
++    inserts.push_back({view, view->model_index()});
++  }
++  std::ranges::stable_sort(inserts, {}, &Entry::index);
++
++  int folder_count = 0;
++  auto push_insert = [&](views::View* view) {
++    auto* row = views::AsViewClass<AerographenePinnedFolderView>(view);
++    if (!row) {
++      push(view, 0);
++      return;
++    }
++    ++folder_count;
++    push(row, 2 * folder_count - 1);
++    if (!row->expanded()) {
++      return;
++    }
++    // Drawer: live children keep their tab strip order; placeholders go
++    // before the first live child mapped to a later entry.
++    std::vector<AerographeneClosedPinnedView*> closed;
++    for (AerographeneClosedPinnedView* view_in_drawer : closed_views_) {
++      if (view_in_drawer->folder() == row->uuid()) {
++        closed.push_back(view_in_drawer);
+       }
+     }
+-    result.push_back(child);
++    size_t next_closed = 0;
++    for (const Entry& entry : drawer_live[row->uuid()]) {
++      while (next_closed < closed.size() &&
++             closed[next_closed]->model_index() < entry.index) {
++        push(closed[next_closed++], 2 * folder_count);
++      }
++      push(entry.view, 2 * folder_count);
++    }
++    while (next_closed < closed.size()) {
++      push(closed[next_closed++], 2 * folder_count);
++    }
++  };
++
++  size_t next_insert = 0;
++  for (const Entry& entry : top_live) {
++    while (entry.index >= 0 && next_insert < inserts.size() &&
++           inserts[next_insert].index < entry.index) {
++      push_insert(inserts[next_insert++].view);
++    }
++    push(entry.view, 0);
+   }
+-  while (next_closed < closed_views_.size()) {
+-    result.push_back(closed_views_[next_closed++].get());
++  while (next_insert < inserts.size()) {
++    push_insert(inserts[next_insert++].view);
+   }
+   return result;
+ }
+@@ -1049,6 +1326,29 @@
+                                        GetWidget()->GetNativeWindow());
+ }
+ 
++void PinnedTabContainerView::MoveClosedPinnedFolder(const base::Uuid& uuid) {
++  aerographene::PinnedModel* model = GetWindowPinnedModel();
++  if (!model || !model->IsLoaded()) {
++    return;
++  }
++  if (model->GetParentFolder(uuid).is_valid()) {
++    model->MoveToTopLevel(uuid);
++  } else {
++    model->MoveIntoNewFolder(
++        uuid, l10n_util::GetStringUTF16(
++                  IDS_AEROGRAPHENE_PINNED_FOLDER_DEFAULT_TITLE));
++  }
++}
++
++void PinnedTabContainerView::ToggleFolder(const base::Uuid& uuid) {
++  aerographene::PinnedModel* model = GetWindowPinnedModel();
++  const std::optional<aerographene::PinnedItem> item =
++      model ? model->Find(uuid) : std::nullopt;
++  if (item && item->is_folder) {
++    model->SetExpanded(uuid, !item->expanded);
++  }
++}
++
+ void PinnedTabContainerView::RefreshPersistedSpans() {
+   for (views::View* child : children()) {
+     if (auto* tab_view = views::AsViewClass<TabView>(child)) {
+--- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h
++++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h
+@@ -22,6 +22,7 @@
+ #include "ui/views/view_targeter_delegate.h"
+ 
+ class AerographeneClosedPinnedView;
++class AerographenePinnedFolderView;
+ class TabCollectionNode;
+ 
+ // The view class that represents the pinned tab region for the
+@@ -147,18 +148,33 @@
+   // Syncs `closed_views_` with the closed top-level entries of the model
+   // (vertical orientation only) and relayouts.
+   void RefreshClosedPinned();
+-  // Live children plus closed placeholders, interleaved in model order. Live
+-  // children keep their tab strip order; a placeholder goes before the first
+-  // live child mapped to a later entry, else at the end.
+-  std::vector<views::View*> GetGridChildren() const;
++  // Live children plus closed placeholders and drawer folder rows,
++  // interleaved in model order. Top-level live children keep their tab strip
++  // order; a placeholder or folder row goes before the first live child
++  // mapped to a later entry, else at the end. An open folder row is followed
++  // by its drawer (live children mapped to entries in that folder, then its
++  // placeholders, by model order); children of a closed folder are left out
++  // and laid out hidden. `sections`, if given, receives one value per
++  // returned view: 0 top level, odd for a folder row, even > 0 for a drawer;
++  // the grid starts a new row whenever the section changes.
++  std::vector<views::View*> GetGridChildren(
++      std::vector<int>* sections = nullptr) const;
+   // Click on a placeholder: reopens the entry as a pinned tab in this window.
+   void OpenClosedPinned(const base::Uuid& uuid);
+   // Placeholder context menu: edits the label of the entry.
+   void RenameClosedPinned(const base::Uuid& uuid);
++  // Placeholder context menu: moves a top-level entry into a new drawer
++  // folder, or an entry inside a drawer back to the top level.
++  void MoveClosedPinnedFolder(const base::Uuid& uuid);
++  // Click on a folder row: opens or closes the drawer (aerographene.expanded).
++  void ToggleFolder(const base::Uuid& uuid);
+ 
+   // Placeholders of closed pinned entries, in model order. Not tab collection
+   // nodes: they take no part in tab drags, link drops or span resize.
++  // Includes placeholders inside drawers (of open and closed folders).
+   std::vector<raw_ptr<AerographeneClosedPinnedView>> closed_views_;
++  // Rows of drawer folders, in model order. Not tab collection nodes either.
++  std::vector<raw_ptr<AerographenePinnedFolderView>> folder_views_;
+ 
+   // Started with the first tab child; spans come from its profile's model.
+   base::ScopedObservation<aerographene::PinnedModel,
+--- a/chrome/browser/ui/views/tabs/common/tab_strip_collection_controller.cc
++++ b/chrome/browser/ui/views/tabs/common/tab_strip_collection_controller.cc
+@@ -537,6 +537,19 @@
+   if (command_id == TabStripModel::CommandAerographeneRenamePinned) {
+     return GetAerographenePinnedEntry(tab).has_value();
+   }
++  if (command_id == TabStripModel::CommandAerographeneNewPinnedFolder ||
++      command_id == TabStripModel::CommandAerographeneMovePinnedToRoot) {
++    const std::optional<base::Uuid> uuid = GetAerographenePinnedEntry(tab);
++    if (!uuid) {
++      return false;
++    }
++    const bool in_drawer = aerographene::PinnedModelFactory::GetForProfile(
++                               browser_view_->GetProfile())
++                               ->GetParentFolder(*uuid)
++                               .is_valid();
++    return in_drawer ==
++           (command_id == TabStripModel::CommandAerographeneMovePinnedToRoot);
++  }
+   return model_->IsContextMenuCommandEnabled(model_->GetIndexOfTab(tab),
+                                              command_id);
+ }
+@@ -558,6 +571,22 @@
+     }
+     return;
+   }
++  if (command_id == TabStripModel::CommandAerographeneNewPinnedFolder ||
++      command_id == TabStripModel::CommandAerographeneMovePinnedToRoot) {
++    if (std::optional<base::Uuid> uuid = GetAerographenePinnedEntry(tab)) {
++      aerographene::PinnedModel* pinned_model =
++          aerographene::PinnedModelFactory::GetForProfile(
++              browser_view_->GetProfile());
++      if (command_id == TabStripModel::CommandAerographeneNewPinnedFolder) {
++        pinned_model->MoveIntoNewFolder(
++            *uuid, l10n_util::GetStringUTF16(
++                       IDS_AEROGRAPHENE_PINNED_FOLDER_DEFAULT_TITLE));
++      } else {
++        pinned_model->MoveToTopLevel(*uuid);
++      }
++    }
++    return;
++  }
+   model_->ExecuteContextMenuCommand(model_->GetIndexOfTab(tab), command_id);
+ }
+ 
+--- a/chrome/browser/ui/views/tabs/common/tab_strip_collection_controller.h
++++ b/chrome/browser/ui/views/tabs/common/tab_strip_collection_controller.h
+@@ -154,7 +154,8 @@
+   void OnTabContextMenuClosed();
+ 
+   // aerographene: pinned model entry of the pinned `tab` in a normal window,
+-  // for the "Rename pinned tab" context menu command; nullopt otherwise.
++  // for the "Rename pinned tab" and drawer folder context menu commands;
++  // nullopt otherwise.
+   std::optional<base::Uuid> GetAerographenePinnedEntry(
+       const tabs::TabInterface* tab) const;
+ 
+--- a/components/tabs/public/tab_context_menu_command.h
++++ b/components/tabs/public/tab_context_menu_command.h
+@@ -40,6 +40,8 @@
+   CommandGlicUnshare,
+   CommandDiscard,
+   CommandAerographeneRenamePinned,
++  CommandAerographeneNewPinnedFolder,
++  CommandAerographeneMovePinnedToRoot,
+ };
+ // LINT.ThenChange(//tools/metrics/histograms/metadata/tab/histograms.xml:TabContextMenuCommand)
+ 
