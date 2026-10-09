@@ -1,0 +1,574 @@
+aerographene: pinned fechado visível na grade de pinned (F5).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: SCOPE item 4, CONTEXT "pinned fechado": pinned sem aba viva, com
+indicador visual próprio; clicar nele abre do zero.
+Grade: PinnedTabContainerView (só orientação vertical) cria um
+AerographeneClosedPinnedView (views::Button, definido no .cc) por entrada de
+topo do PinnedModel com URL e sem `aerographene.open`. A grade passa a usar
+GetGridChildren(): filhos vivos na ordem da faixa, com cada placeholder
+intercalado antes da primeira aba viva mapeada a uma entrada posterior no
+modelo (senão no fim). Span do placeholder = `aerographene.span` do nó.
+Indicador: contorno arredondado com o favicon do nó de favorito esmaecido
+(PinnedModel::GetFavicon -> BookmarkModel::GetFavicon, carga preguiçosa;
+BookmarkNodeFaviconChanged agora notifica OnPinnedChanged) ou um ponto sem
+favicon. Sem asset, IDS_* ou VIEW_ID_* novos; tooltip e nome acessível =
+título do nó (ou URL).
+Reativo: o container observa o PinnedModel do perfil da janela desde
+AddedToWidget (antes só depois da primeira aba filha) e refaz os
+placeholders em OnPinnedModelLoaded/OnPinnedChanged; placeholders que saem
+vão por AnimateAndDestroyChildView (a remoção acontece num layout posterior,
+seguro quando o próprio placeholder disparou o clique).
+Clique: PinnedTabMirror::OpenClosedEntry (novo) insere a aba com
+chrome::AddTabAt(..., pinned=true) no índice que respeita a ordem do modelo
+e, via `next_entry_`, Associate() mapeia a aba nova ao MESMO nó (sem casar
+por URL nem criar nó), marca open=1 e alinha a ordem.
+Limitações: placeholders não participam do arraste de abas, do drop de links
+nem do redimensionamento de span (não são TabCollectionNode; o drag e o
+GetLinkDropIndex* os ignoram); filhos de gaveta ficam para a F6; não há item
+"descarregar" no menu (fechar a aba já deixa o nó como pinned fechado; o item
+exigiria IDS_* novo). Orientação horizontal não mostra pinned fechado.
+Depende de aerographene/pinned-grid-span.patch, pinned-span-drag.patch,
+pinned-model.patch e pinned-model-tabstrip.patch.
+
+--- a/chrome/browser/ui/tabs/aerographene/pinned_model.cc
++++ b/chrome/browser/ui/tabs/aerographene/pinned_model.cc
+@@ -282,7 +282,20 @@ void PinnedModel::BookmarkMetaInfoChanged(const BookmarkNode* node) {
+   }
+ }
+ 
+-void PinnedModel::BookmarkNodeFaviconChanged(const BookmarkNode* node) {}
++void PinnedModel::BookmarkNodeFaviconChanged(const BookmarkNode* node) {
++  // Lets the grid repaint closed pinned with the loaded favicon.
++  if (IsUnderRoot(node)) {
++    NotifyChanged();
++  }
++}
++
++gfx::Image PinnedModel::GetFavicon(const base::Uuid& uuid) {
++  const BookmarkNode* node = Resolve(uuid);
++  if (!node || !node->is_url()) {
++    return gfx::Image();
++  }
++  return model_->GetFavicon(node);
++}
+ 
+ void PinnedModel::BookmarkNodeChildrenReordered(const BookmarkNode* node) {
+   if (IsUnderRoot(node)) {
+--- a/chrome/browser/ui/tabs/aerographene/pinned_model.h
++++ b/chrome/browser/ui/tabs/aerographene/pinned_model.h
+@@ -19,6 +19,7 @@
+ #include "components/bookmarks/browser/bookmark_model.h"
+ #include "components/bookmarks/browser/bookmark_model_observer.h"
+ #include "components/keyed_service/core/keyed_service.h"
++#include "ui/gfx/image/image.h"
+ #include "url/gurl.h"
+ 
+ class Profile;
+@@ -111,6 +112,9 @@ class PinnedModel : public KeyedService,
+   // URL entries only.
+   bool SetURL(const base::Uuid& uuid, const GURL& url);
+   bool SetOpen(const base::Uuid& uuid, bool open);
++  // Favicon of the entry's bookmark node; empty while not loaded or unknown.
++  // The first call starts the load; OnPinnedChanged() fires when it lands.
++  gfx::Image GetFavicon(const base::Uuid& uuid);
+ 
+   // Starts mirroring the pinned tabs of `profile`'s normal windows into this
+   // model (see PinnedTabMirror). Called once by the factory.
+--- a/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc
++++ b/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc
+@@ -3,6 +3,7 @@
+ 
+ #include "chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.h"
+ 
++#include <algorithm>
+ #include <set>
+ #include <vector>
+ 
+@@ -10,6 +11,7 @@
+ #include "base/functional/bind.h"
+ #include "chrome/browser/lifetime/application_lifetime_desktop.h"
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/browser_tabstrip.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
+ #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
+@@ -96,6 +98,50 @@ bool PinnedTabMirror::SetSpanForTab(const tabs::TabInterface* tab, int span) {
+   return uuid && model_->SetSpan(*uuid, span);
+ }
+ 
++bool PinnedTabMirror::OpenClosedEntry(BrowserWindowInterface* browser,
++                                      const base::Uuid& uuid) {
++  if (!browser || browser->GetProfile() != profile_ ||
++      browser->GetType() != BrowserWindowInterface::TYPE_NORMAL ||
++      !model_->IsLoaded()) {
++    return false;
++  }
++  const std::vector<PinnedItem> items = model_->GetPinned();
++  const int target = TopLevelIndex(items, uuid);
++  if (target < 0) {
++    // Missing or inside a drawer (F6).
++    return false;
++  }
++  const PinnedItem& item = items[target];
++  if (item.is_folder || item.open || !item.url.is_valid()) {
++    return false;
++  }
++  for (const auto& [handle, mapped] : tab_nodes_) {
++    if (mapped == uuid) {
++      return false;
++    }
++  }
++  // Before the first pinned tab mapped to a later entry, so AlignOrder()
++  // finds the order already right and does not move the entry.
++  TabStripModel* strip = browser->GetTabStripModel();
++  const int pinned_count = strip->IndexOfFirstNonPinnedTab();
++  int index = pinned_count;
++  for (int i = 0; i < pinned_count; ++i) {
++    const std::optional<base::Uuid> entry =
++        GetEntryForTab(strip->GetTabAtIndex(i));
++    if (entry && TopLevelIndex(items, *entry) > target) {
++      index = i;
++      break;
++    }
++  }
++  const GURL url = item.url;
++  next_entry_ = uuid;
++  // Inserted already pinned: Associate() runs from the insertion.
++  chrome::AddTabAt(browser, url, index, /*foreground=*/true,
++                   /*group=*/std::nullopt, /*pinned=*/true);
++  next_entry_.reset();
++  return true;
++}
++
+ void PinnedTabMirror::OnBrowserCreated(BrowserWindowInterface* browser) {
+   if (browser->GetProfile() != profile_ ||
+       browser->GetType() != BrowserWindowInterface::TYPE_NORMAL) {
+@@ -237,6 +283,21 @@ void PinnedTabMirror::Associate(tabs::TabInterface* tab) {
+     AlignOrder(tab);
+     return;
+   }
++  if (next_entry_) {
++    // Reopened from the grid: map to that entry whatever the URL.
++    const base::Uuid uuid = *next_entry_;
++    next_entry_.reset();
++    const bool taken = std::ranges::any_of(
++        tab_nodes_, [&](const auto& entry) { return entry.second == uuid; });
++    if (!taken && model_->Find(uuid)) {
++      base::AutoReset<bool> writing(&writing_, true);
++      tab_nodes_[tab->GetHandle()] = uuid;
++      model_->SetOpen(uuid, true);
++      AlignOrder(tab);
++      model_->NotifyTabMappingChanged();
++      return;
++    }
++  }
+   const GURL url = GetTabURL(tab);
+   if (!url.is_valid()) {
+     // Retried from OnTabChangedAt() once the tab has a URL.
+--- a/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.h
++++ b/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.h
+@@ -39,6 +39,8 @@ namespace aerographene {
+ //  - move: align the entry order with the neighbouring pinned tabs.
+ //  - committed URL change: update the entry URL.
+ //  - close by the user: keep the entry, clear `open` (closed pinned).
++//  - reopen of a closed entry (OpenClosedEntry, the grid placeholder): the
++//    new tab is mapped to that entry directly.
+ //  - close of the whole window or quit: keep the entry and `open`, so the
+ //    next startup reopens it.
+ //  - entry removed elsewhere (bookmark manager, Sync): the tab stays pinned
+@@ -59,6 +61,12 @@ class PinnedTabMirror : public BrowserCollectionObserver,
+   std::optional<int> GetSpanForTab(const tabs::TabInterface* tab) const;
+   // Persists `span` on the entry mapped to `tab`. False if unmapped.
+   bool SetSpanForTab(const tabs::TabInterface* tab, int span);
++  // Reopens the closed top-level entry `uuid` as a new foreground pinned tab
++  // of `browser`, inserted where the model order puts it among the pinned
++  // tabs, and maps it to that same entry (no new entry, no URL matching).
++  // False if `browser` is not a normal window of this profile or the entry is
++  // missing, a folder, inside a drawer or already open.
++  bool OpenClosedEntry(BrowserWindowInterface* browser, const base::Uuid& uuid);
+ 
+   // BrowserCollectionObserver:
+   void OnBrowserCreated(BrowserWindowInterface* browser) override;
+@@ -89,6 +97,9 @@ class PinnedTabMirror : public BrowserCollectionObserver,
+   raw_ptr<PinnedModel> model_;
+   std::map<tabs::TabHandle, base::Uuid> tab_nodes_;
+   bool closing_all_browsers_ = false;
++  // Entry for the tab being inserted by OpenClosedEntry(); consumed by the
++  // next Associate().
++  std::optional<base::Uuid> next_entry_;
+   // Guards against re-entrant OnPinnedChanged() from our own writes.
+   bool writing_ = false;
+ 
+--- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
++++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
+@@ -7,13 +7,16 @@
+ #include <algorithm>
+ #include <iterator>
+ 
++#include "base/functional/bind.h"
+ #include "base/i18n/rtl.h"
++#include "base/strings/utf_string_conversions.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/layout_constants.h"
+ #include "chrome/browser/ui/tabs/aerographene/pinned_model_factory.h"
+ #include "chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.h"
+ #include "chrome/browser/ui/tabs/features.h"
+ #include "chrome/browser/ui/tabs/tab_style.h"
++#include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "chrome/browser/ui/views/tabs/common/dragged_tabs_container.h"
+ #include "chrome/browser/ui/views/tabs/common/split_tab_view.h"
+ #include "chrome/browser/ui/views/tabs/common/tab_collection_animating_layout_manager.h"
+@@ -24,7 +27,14 @@
+ #include "ui/base/cursor/cursor.h"
+ #include "ui/base/cursor/mojom/cursor_type.mojom.h"
+ #include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/color/color_id.h"
++#include "ui/color/color_provider.h"
++#include "ui/gfx/canvas.h"
+ #include "ui/gfx/geometry/rect.h"
++#include "ui/gfx/image/image.h"
++#include "ui/gfx/image/image_skia.h"
++#include "ui/views/accessibility/view_accessibility.h"
++#include "ui/views/controls/button/button.h"
+ #include "ui/views/controls/scroll_view.h"
+ #include "ui/views/layout/delegating_layout_manager.h"
+ #include "ui/views/layout/layout_types.h"
+@@ -58,8 +68,94 @@ aerographene::PinnedTabMirror* GetPinnedTabMirror(
+   aerographene::PinnedModel* model = GetPinnedModel(tab);
+   return model ? model->tab_mirror() : nullptr;
+ }
++
++// Closed pinned placeholder look: dimmed favicon in an outlined cell.
++constexpr uint8_t kClosedPinnedIconAlpha = 0x73;
++constexpr SkAlpha kClosedPinnedOutlineAlpha = 0x40;
++constexpr int kClosedPinnedCornerRadius = 8;
++constexpr int kClosedPinnedDotRadius = 3;
+ }  // namespace
+ 
++// Grid cell of a closed pinned entry (pinned without a live tab). Clicking it
++// reopens the entry. Draws the bookmark favicon dimmed inside an outline, or a
++// dot while there is no favicon. No layer of its own: the animating layout
++// manager destroys layers of direct children.
++class AerographeneClosedPinnedView : public views::Button {
++  METADATA_HEADER(AerographeneClosedPinnedView, views::Button)
++
++ public:
++  explicit AerographeneClosedPinnedView(PressedCallback callback)
++      : views::Button(std::move(callback)) {}
++  AerographeneClosedPinnedView(const AerographeneClosedPinnedView&) = delete;
++  AerographeneClosedPinnedView& operator=(
++      const AerographeneClosedPinnedView&) = delete;
++  ~AerographeneClosedPinnedView() override = default;
++
++  void Update(const aerographene::PinnedItem& item,
++              int model_index,
++              const gfx::Image& favicon) {
++    uuid_ = item.uuid;
++    model_index_ = model_index;
++    span_ = std::max(item.span, 1);
++    favicon_ = favicon.IsEmpty() ? gfx::ImageSkia() : favicon.AsImageSkia();
++    const std::u16string name =
++        item.title.empty() ? base::UTF8ToUTF16(item.url.spec()) : item.title;
++    SetTooltipText(name);
++    GetViewAccessibility().SetName(name);
++    SchedulePaint();
++  }
++
++  const base::Uuid& uuid() const { return uuid_; }
++  int model_index() const { return model_index_; }
++  int span() const { return span_; }
++
++  // views::Button:
++  gfx::Size CalculatePreferredSize(
++      const views::SizeBounds& available_size) const override {
++    return gfx::Size(GetLayoutConstant(LayoutConstant::kVerticalTabMinWidth),
++                     GetLayoutConstant(LayoutConstant::kVerticalTabHeight));
++  }
++
++  void PaintButtonContents(gfx::Canvas* canvas) override {
++    const ui::ColorProvider* color_provider = GetColorProvider();
++    if (!color_provider) {
++      return;
++    }
++    const SkColor color = color_provider->GetColor(ui::kColorIcon);
++    const gfx::Rect bounds = GetLocalBounds();
++
++    cc::PaintFlags outline;
++    outline.setAntiAlias(true);
++    outline.setStyle(cc::PaintFlags::kStroke_Style);
++    outline.setStrokeWidth(1);
++    outline.setColor(SkColorSetA(color, kClosedPinnedOutlineAlpha));
++    gfx::Rect outline_bounds = bounds;
++    outline_bounds.Inset(1);
++    canvas->DrawRoundRect(outline_bounds, kClosedPinnedCornerRadius, outline);
++
++    if (!favicon_.isNull()) {
++      canvas->DrawImageInt(
++          favicon_, bounds.x() + (bounds.width() - favicon_.width()) / 2,
++          bounds.y() + (bounds.height() - favicon_.height()) / 2,
++          kClosedPinnedIconAlpha);
++      return;
++    }
++    cc::PaintFlags dot;
++    dot.setAntiAlias(true);
++    dot.setColor(SkColorSetA(color, kClosedPinnedIconAlpha));
++    canvas->DrawCircle(bounds.CenterPoint(), kClosedPinnedDotRadius, dot);
++  }
++
++ private:
++  base::Uuid uuid_;
++  int model_index_ = 0;
++  int span_ = 1;
++  gfx::ImageSkia favicon_;
++};
++
++BEGIN_METADATA(AerographeneClosedPinnedView)
++END_METADATA
++
+ PinnedTabContainerView::PinnedTabContainerView(
+     TabCollectionNode* collection_node)
+     : DraggedTabsContainer(
+@@ -120,7 +216,7 @@ views::ProposedLayout PinnedTabContainerView::CalculateProposedLayout(
+ }
+ 
+ gfx::Size PinnedTabContainerView::GetMinimumSize() const {
+-  if (!collection_node_ || collection_node_->GetDirectChildren().empty()) {
++  if (!collection_node_ || GetGridChildren().empty()) {
+     return gfx::Size();
+   }
+ 
+@@ -148,7 +244,7 @@ gfx::Size PinnedTabContainerView::GetMinimumSize() const {
+ 
+   // The minimum size should be enough to show a row and a half, if needed.
+   auto collapse_state = GetTabStripCollapseState();
+-  const int num_children = collection_node_->GetDirectChildren().size();
++  const int num_children = GetGridChildren().size();
+   const float min_rows = std::min(
+       (collapse_state != tabs::VerticalTabStripCollapseState::kExpanded ? 1.5f
+                                                                         : 1.0f),
+@@ -188,7 +284,9 @@ bool PinnedTabContainerView::ShouldAnimateOpacityForAddAndRemove(
+ 
+ bool PinnedTabContainerView::ShouldSnapToTarget(
+     const views::View& child_view) const {
+-  return views::IsViewClass<SplitTabView>(&child_view);
++  // Closed placeholders appear and move without animation.
++  return views::IsViewClass<SplitTabView>(&child_view) ||
++         views::IsViewClass<AerographeneClosedPinnedView>(&child_view);
+ }
+ 
+ std::optional<BrowserRootView::DropIndex>
+@@ -425,7 +523,7 @@ PinnedTabContainerView::GridMetrics PinnedTabContainerView::GetGridMetrics(
+   // the current row wraps to the next one. With every span equal to 1 this is
+   // the previous uniform-column layout.
+   int total_cells = 0;
+-  for (auto* child : collection_node_->GetDirectChildren()) {
++  for (auto* child : GetGridChildren()) {
+     total_cells += GetTabSpan(child);
+   }
+   metrics.cells_on_row = total_cells;
+@@ -466,9 +564,7 @@ PinnedTabContainerView::GridMetrics PinnedTabContainerView::GetGridMetrics(
+ views::ProposedLayout PinnedTabContainerView::CalculateVerticalLayout(
+     const views::SizeBounds& size_bounds) const {
+   views::ProposedLayout layouts;
+-  const std::vector<views::View*> children =
+-      collection_node_ ? collection_node_->GetDirectChildren()
+-                       : std::vector<views::View*>();
++  const std::vector<views::View*> children = GetGridChildren();
+ 
+   int total_width = 0;
+   int total_height = 0;
+@@ -569,6 +665,10 @@ void PinnedTabContainerView::SetTabSpan(views::View* child, int span) {
+ }
+ 
+ int PinnedTabContainerView::GetTabSpan(const views::View* child) const {
++  if (const auto* closed =
++          views::AsViewClass<AerographeneClosedPinnedView>(child)) {
++    return closed->span();
++  }
+   const TabCollectionNode* node = GetCollectionNodeFromView(*child);
+   if (!node) {
+     return 1;
+@@ -719,14 +819,133 @@ void PinnedTabContainerView::ViewHierarchyChanged(
+   }
+ }
+ 
++void PinnedTabContainerView::AddedToWidget() {
++  views::View::AddedToWidget();
++  if (!pinned_model_observation_.IsObserving()) {
++    if (aerographene::PinnedModel* model = GetWindowPinnedModel()) {
++      pinned_model_observation_.Observe(model);
++    }
++  }
++  RefreshClosedPinned();
++}
++
+ void PinnedTabContainerView::OnPinnedModelLoaded() {
++  RefreshClosedPinned();
+   RefreshPersistedSpans();
+ }
+ 
+ void PinnedTabContainerView::OnPinnedChanged() {
++  RefreshClosedPinned();
+   RefreshPersistedSpans();
+ }
+ 
++aerographene::PinnedModel* PinnedTabContainerView::GetWindowPinnedModel()
++    const {
++  TabStripCollectionController* controller =
++      collection_node_ ? collection_node_->GetController() : nullptr;
++  BrowserView* browser_view =
++      controller ? controller->GetBrowserView() : nullptr;
++  BrowserWindowInterface* browser =
++      browser_view ? browser_view->browser() : nullptr;
++  if (!browser || browser->GetType() != BrowserWindowInterface::TYPE_NORMAL) {
++    return nullptr;
++  }
++  return aerographene::PinnedModelFactory::GetForProfile(
++      browser->GetProfile());
++}
++
++void PinnedTabContainerView::RefreshClosedPinned() {
++  aerographene::PinnedModel* model = GetWindowPinnedModel();
++  std::vector<aerographene::PinnedItem> items;
++  if (model && model->IsLoaded() && collection_node_ &&
++      collection_node_->orientation() == TabStripOrientation::kVertical) {
++    items = model->GetPinned();
++  }
++
++  std::map<base::Uuid, AerographeneClosedPinnedView*> previous;
++  for (AerographeneClosedPinnedView* view : closed_views_) {
++    previous[view->uuid()] = view;
++  }
++  std::vector<raw_ptr<AerographeneClosedPinnedView>> next;
++  for (size_t i = 0; i < items.size(); ++i) {
++    const aerographene::PinnedItem& item = items[i];
++    // Top-level URL entries only; drawer folders and their children are F6.
++    if (item.is_folder || item.open || !item.url.is_valid()) {
++      continue;
++    }
++    AerographeneClosedPinnedView* view = nullptr;
++    if (auto it = previous.find(item.uuid); it != previous.end()) {
++      view = it->second;
++      previous.erase(it);
++    } else {
++      view = AddChildView(std::make_unique<AerographeneClosedPinnedView>(
++          base::BindRepeating(&PinnedTabContainerView::OpenClosedPinned,
++                              base::Unretained(this), item.uuid)));
++    }
++    view->Update(item, static_cast<int>(i), model->GetFavicon(item.uuid));
++    next.push_back(view);
++  }
++  closed_views_ = std::move(next);
++  // Out of the grid now; the layout manager deletes them on a later layout
++  // (one of them may be the sender of the click that reopened its entry).
++  for (auto& [uuid, view] : previous) {
++    layout_manager_->AnimateAndDestroyChildView(view);
++  }
++  InvalidateLayout();
++}
++
++std::vector<views::View*> PinnedTabContainerView::GetGridChildren() const {
++  if (!collection_node_) {
++    return {};
++  }
++  std::vector<views::View*> live = collection_node_->GetDirectChildren();
++  if (closed_views_.empty()) {
++    return live;
++  }
++  std::map<base::Uuid, int> model_index;
++  if (const aerographene::PinnedModel* model = GetWindowPinnedModel()) {
++    const std::vector<aerographene::PinnedItem> items = model->GetPinned();
++    for (size_t i = 0; i < items.size(); ++i) {
++      model_index[items[i].uuid] = static_cast<int>(i);
++    }
++  }
++
++  std::vector<views::View*> result;
++  result.reserve(live.size() + closed_views_.size());
++  size_t next_closed = 0;
++  for (views::View* child : live) {
++    const tabs::TabInterface* tab = GetPinnedTab(child);
++    const aerographene::PinnedTabMirror* mirror =
++        tab ? GetPinnedTabMirror(tab) : nullptr;
++    const std::optional<base::Uuid> uuid =
++        mirror ? mirror->GetEntryForTab(tab) : std::nullopt;
++    if (uuid) {
++      if (auto it = model_index.find(*uuid); it != model_index.end()) {
++        while (next_closed < closed_views_.size() &&
++               closed_views_[next_closed]->model_index() < it->second) {
++          result.push_back(closed_views_[next_closed++].get());
++        }
++      }
++    }
++    result.push_back(child);
++  }
++  while (next_closed < closed_views_.size()) {
++    result.push_back(closed_views_[next_closed++].get());
++  }
++  return result;
++}
++
++void PinnedTabContainerView::OpenClosedPinned(const base::Uuid& uuid) {
++  aerographene::PinnedModel* model = GetWindowPinnedModel();
++  aerographene::PinnedTabMirror* mirror = model ? model->tab_mirror() : nullptr;
++  if (!mirror) {
++    return;
++  }
++  BrowserView* browser_view =
++      collection_node_->GetController()->GetBrowserView();
++  mirror->OpenClosedEntry(browser_view->browser(), uuid);
++}
++
+ void PinnedTabContainerView::RefreshPersistedSpans() {
+   for (views::View* child : children()) {
+     if (auto* tab_view = views::AsViewClass<TabView>(child)) {
+--- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h
++++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h
+@@ -7,6 +7,7 @@
+ 
+ #include <map>
+ #include <optional>
++#include <vector>
+ 
+ #include "base/callback_list.h"
+ #include "base/scoped_observation.h"
+@@ -20,6 +21,7 @@
+ #include "ui/views/view.h"
+ #include "ui/views/view_targeter_delegate.h"
+ 
++class AerographeneClosedPinnedView;
+ class TabCollectionNode;
+ 
+ // The view class that represents the pinned tab region for the
+@@ -53,6 +55,7 @@ class PinnedTabContainerView
+   void OnMouseCaptureLost() override;
+   void ViewHierarchyChanged(
+       const views::ViewHierarchyChangedDetails& details) override;
++  void AddedToWidget() override;
+ 
+   // views::ViewTargeterDelegate:
+   views::View* TargetForRect(views::View* root, const gfx::Rect& rect) override;
+@@ -139,6 +142,22 @@ class PinnedTabContainerView
+   // Re-reads persisted spans into the TabViews and relayouts.
+   void RefreshPersistedSpans();
+ 
++  // Pinned model of this window's profile; null for non-normal windows.
++  aerographene::PinnedModel* GetWindowPinnedModel() const;
++  // Syncs `closed_views_` with the closed top-level entries of the model
++  // (vertical orientation only) and relayouts.
++  void RefreshClosedPinned();
++  // Live children plus closed placeholders, interleaved in model order. Live
++  // children keep their tab strip order; a placeholder goes before the first
++  // live child mapped to a later entry, else at the end.
++  std::vector<views::View*> GetGridChildren() const;
++  // Click on a placeholder: reopens the entry as a pinned tab in this window.
++  void OpenClosedPinned(const base::Uuid& uuid);
++
++  // Placeholders of closed pinned entries, in model order. Not tab collection
++  // nodes: they take no part in tab drags, link drops or span resize.
++  std::vector<raw_ptr<AerographeneClosedPinnedView>> closed_views_;
++
+   // Started with the first tab child; spans come from its profile's model.
+   base::ScopedObservation<aerographene::PinnedModel,
+                           aerographene::PinnedModel::Observer>
