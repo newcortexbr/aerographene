@@ -60,3 +60,4 @@ aerographene/pinned-model-tabstrip.patch
 helium/linux/use-default-theme.patch
 aerographene/pinned-closed.patch
 aerographene/pinned-barskip.patch
+aerographene/pinned-label.patch
