@@ -1,6 +1,6 @@
 # Maintainer: newcortexbr
 pkgname=aerographene
-pkgver=1.0.0
+pkgver=0.1.0   # = AERO_VERSION de build/config.sh; tag v${pkgver}
 pkgrel=1
 _chromium=154.0.8037.97   # base do ungoogled-chromium; independente do pkgver
 pkgdesc="Navegador baseado em ungoogled-chromium ${_chromium}"
@@ -24,7 +24,7 @@ noextract=("${pkgname}-${pkgver}-x86_64_linux.tar.zst")
 
 prepare() {
   mkdir -p app
-  # o tarball tem um diretório raiz aerographene-<tag>-<sha>-x86_64_linux
+  # o tarball tem um diretório raiz aerographene-<versão>-<tag>-<sha>-x86_64_linux
   bsdtar -xf "${pkgname}-${pkgver}-x86_64_linux.tar.zst" -C app --strip-components=1
 }
 
