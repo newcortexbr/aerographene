@@ -1,0 +1,329 @@
+aerographene: pinned do Arc vão para a pasta do space (PinnedModel).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: decisão do dono. A pasta "pinned" de cada space do Arc (container
+`pinned` de StorableSidebar.json) é mapeada para a pasta do space no
+aerographene::PinnedModel do perfil, em vez da pasta "Importado do Arc" dos
+favoritos. Favoritos que não são pinned (topApps) seguem como antes.
+Ponto de integração: ProfileWriter::AddBookmarks (processo do browser, thread
+de UI, onde o KeyedService existe). O utility só marca as entradas:
+ImportedBookmarkEntry::is_pinned (campo novo, serializado em
+IPC_STRUCT_TRAITS de profile_import_process_param_traits_macros.h) e passa
+`path` relativo ao container (sem o nome do space). O ProfileWriter separa as
+entradas marcadas, escreve no PinnedModel e segue o fluxo antigo só com o
+resto. Sem PinnedModel (incógnito, testes) as marcadas ficam como favoritos
+comuns. Nenhum IDS_* novo.
+Mapeamento: sem path = pinned direto; path[0] = gaveta (aerographene.folder=1,
+um nível; níveis mais fundos do Arc são achatados na gaveta de path[0]).
+Vários spaces do Arc vão para o mesmo PinnedModel (um perfil = um space); o
+nome do space do Arc deixa de virar pasta. Dedupe por URL no mesmo lugar
+(topo, ou gaveta de mesmo título): importar duas vezes não duplica. Span fica
+no padrão (1, sem chave). Se o modelo ainda não tem a pasta (IsLoaded falso),
+PendingPinnedWrite espera OnPinnedModelLoaded/OnPinnedChanged, escreve uma vez
+e se apaga.
+Depende de: helium/core/add-arc-importer.patch, brave/custom-importer.patch
+(BUILD.gn e macros IPC), aerographene/pinned-model.patch (PinnedModel,
+PinnedModelFactory, alvo ui/tabs:tabs).
+
+--- a/chrome/browser/importer/BUILD.gn
++++ b/chrome/browser/importer/BUILD.gn
+@@ -64,6 +64,7 @@
+     "//chrome/browser/password_manager/factories",
+     "//chrome/browser/profiles:profile",
+     "//chrome/browser/search_engines",
++    "//chrome/browser/ui/tabs:tabs",
+     "//chrome/browser/webdata_services",
+     "//chrome/common/importer:interfaces",
+     "//components/bookmarks/browser",
+--- a/chrome/browser/importer/profile_writer.cc
++++ b/chrome/browser/importer/profile_writer.cc
+@@ -7,14 +7,20 @@
+ #include <stddef.h>
+ 
+ #include <algorithm>
++#include <limits>
+ #include <map>
++#include <memory>
++#include <optional>
+ #include <set>
+ #include <string>
++#include <utility>
+ 
++#include "base/scoped_observation.h"
+ #include "base/strings/string_number_conversions.h"
+ #include "base/strings/string_util.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/threading/thread.h"
++#include "base/uuid.h"
+ #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+ #include "chrome/browser/favicon/favicon_service_factory.h"
+ #include "chrome/browser/first_run/first_run.h"
+@@ -22,6 +28,8 @@
+ #include "chrome/browser/password_manager/factories/profile_password_store_factory.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/search_engines/template_url_service_factory.h"
++#include "chrome/browser/ui/tabs/aerographene/pinned_model.h"
++#include "chrome/browser/ui/tabs/aerographene/pinned_model_factory.h"
+ #include "chrome/browser/webdata_services/web_data_service_factory.h"
+ #include "chrome/common/pref_names.h"
+ #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
+@@ -38,6 +46,7 @@
+ #include "components/search_engines/template_url.h"
+ #include "components/search_engines/template_url_service.h"
+ #include "components/user_data_importer/common/imported_bookmark_entry.h"
++#include "url/gurl.h"
+ 
+ using bookmarks::BookmarkModel;
+ using bookmarks::BookmarkNode;
+@@ -76,6 +85,104 @@
+   profile->GetPrefs()->SetBoolean(bookmarks::prefs::kShowBookmarkBar, true);
+ }
+ 
++// aerographene: writes entries imported from the pinned container of another
++// browser (ImportedBookmarkEntry::is_pinned) into the PinnedModel of the
++// profile (= space). `path` is relative to the container: no path = direct
++// pinned; path[0] = drawer folder (aerographene.folder=1) that holds the
++// entry. The model has a single drawer level, so deeper folders are flattened
++// into the drawer of path[0]. Importing twice adds nothing: an entry is
++// skipped when its URL already exists in the same place (top level, or the
++// drawer with the same title). Entries with an invalid URL and folder entries
++// are ignored.
++void WritePinnedEntries(
++    aerographene::PinnedModel* model,
++    const std::vector<user_data_importer::ImportedBookmarkEntry>& entries) {
++  struct Drawer {
++    base::Uuid uuid;
++    std::set<GURL> urls;
++  };
++  std::set<GURL> top_level_urls;
++  std::map<std::u16string, Drawer> drawers;
++  for (const aerographene::PinnedItem& item : model->GetPinned()) {
++    if (item.is_folder) {
++      // With drawers of equal title the first one wins.
++      auto [it, inserted] = drawers.try_emplace(item.title);
++      if (inserted) {
++        it->second.uuid = item.uuid;
++        for (const aerographene::PinnedItem& child : item.children) {
++          it->second.urls.insert(child.url);
++        }
++      }
++    } else {
++      top_level_urls.insert(item.url);
++    }
++  }
++
++  constexpr size_t kAtEnd = std::numeric_limits<size_t>::max();
++  for (const user_data_importer::ImportedBookmarkEntry& entry : entries) {
++    if (entry.is_folder || !entry.url.is_valid()) {
++      continue;
++    }
++    base::Uuid parent;  // Invalid = top level.
++    std::set<GURL>* urls = &top_level_urls;
++    if (!entry.path.empty()) {
++      auto it = drawers.find(entry.path.front());
++      if (it == drawers.end()) {
++        std::optional<base::Uuid> uuid =
++            model->AddFolder(entry.path.front(), kAtEnd);
++        if (!uuid) {
++          continue;
++        }
++        it = drawers.emplace(entry.path.front(), Drawer{*uuid, {}}).first;
++      }
++      parent = it->second.uuid;
++      urls = &it->second.urls;
++    }
++    if (urls->insert(entry.url).second) {
++      model->AddPinned(entry.url, entry.title, parent, kAtEnd);
++    }
++  }
++}
++
++// Waits until the PinnedModel has its space folder (IsLoaded()), writes the
++// entries once and deletes itself. If the model is destroyed first (profile
++// shutdown) nothing is written and the object leaks until process exit.
++class PendingPinnedWrite : public aerographene::PinnedModel::Observer {
++ public:
++  PendingPinnedWrite(
++      aerographene::PinnedModel* model,
++      std::vector<user_data_importer::ImportedBookmarkEntry> entries)
++      : model_(model), entries_(std::move(entries)) {
++    observation_.Observe(model_);
++  }
++
++  PendingPinnedWrite(const PendingPinnedWrite&) = delete;
++  PendingPinnedWrite& operator=(const PendingPinnedWrite&) = delete;
++
++  // aerographene::PinnedModel::Observer:
++  void OnPinnedModelLoaded() override { WriteIfLoaded(); }
++  // The folder can also come back (recreated or adopted from Sync) without
++  // OnPinnedModelLoaded.
++  void OnPinnedChanged() override { WriteIfLoaded(); }
++
++ private:
++  void WriteIfLoaded() {
++    if (!model_->IsLoaded()) {
++      return;
++    }
++    // Stop observing first: writing notifies this observer again.
++    observation_.Reset();
++    WritePinnedEntries(model_, entries_);
++    delete this;
++  }
++
++  raw_ptr<aerographene::PinnedModel> model_;
++  std::vector<user_data_importer::ImportedBookmarkEntry> entries_;
++  base::ScopedObservation<aerographene::PinnedModel,
++                          aerographene::PinnedModel::Observer>
++      observation_{this};
++};
++
+ }  // namespace
+ 
+ ProfileWriter::ProfileWriter(Profile* profile) : profile_(profile) {}
+@@ -129,6 +236,33 @@
+   BookmarkModel* model = BookmarkModelFactory::GetForBrowserContext(profile_);
+   DCHECK(model->loaded());
+ 
++  // aerographene: entries from the pinned container of the source browser go
++  // to the PinnedModel of the profile instead of the imported-from folder.
++  // Without a PinnedModel (incognito, tests) they stay regular bookmarks.
++  std::vector<user_data_importer::ImportedBookmarkEntry> pinned_entries;
++  std::vector<user_data_importer::ImportedBookmarkEntry> regular_entries;
++  aerographene::PinnedModel* pinned_model =
++      aerographene::PinnedModelFactory::GetForProfile(profile_);
++  if (pinned_model) {
++    for (const auto& bookmark : bookmarks) {
++      (bookmark.is_pinned ? pinned_entries : regular_entries)
++          .push_back(bookmark);
++    }
++    if (!pinned_entries.empty()) {
++      if (pinned_model->IsLoaded()) {
++        WritePinnedEntries(pinned_model, pinned_entries);
++      } else {
++        // Self-owned; see PendingPinnedWrite.
++        new PendingPinnedWrite(pinned_model, std::move(pinned_entries));
++      }
++    }
++    if (regular_entries.empty()) {
++      return;
++    }
++  }
++  const std::vector<user_data_importer::ImportedBookmarkEntry>& to_add =
++      pinned_model ? regular_entries : bookmarks;
++
+   // If the bookmark bar is currently empty, we should import directly to it.
+   // Otherwise, we should import everything to a subfolder.
+   const BookmarkNode* bookmark_bar = model->account_bookmark_bar_node()
+@@ -139,7 +273,7 @@
+   // Reorder bookmarks so that the toolbar entries come first.
+   std::vector<user_data_importer::ImportedBookmarkEntry> toolbar_bookmarks;
+   std::vector<user_data_importer::ImportedBookmarkEntry> reordered_bookmarks;
+-  for (auto it = bookmarks.begin(); it != bookmarks.end(); ++it) {
++  for (auto it = to_add.begin(); it != to_add.end(); ++it) {
+     if (it->in_toolbar)
+       toolbar_bookmarks.push_back(*it);
+     else
+--- a/chrome/common/importer/profile_import_process_param_traits_macros.h
++++ b/chrome/common/importer/profile_import_process_param_traits_macros.h
+@@ -55,6 +55,7 @@
+ IPC_STRUCT_TRAITS_BEGIN(user_data_importer::ImportedBookmarkEntry)
+   IPC_STRUCT_TRAITS_MEMBER(in_toolbar)
+   IPC_STRUCT_TRAITS_MEMBER(is_folder)
++  IPC_STRUCT_TRAITS_MEMBER(is_pinned)
+   IPC_STRUCT_TRAITS_MEMBER(url)
+   IPC_STRUCT_TRAITS_MEMBER(path)
+   IPC_STRUCT_TRAITS_MEMBER(title)
+--- a/chrome/utility/importer/arc_sidebar_importer.cc
++++ b/chrome/utility/importer/arc_sidebar_importer.cc
+@@ -104,6 +104,7 @@
+               const std::map<std::string, ArcSidebarItem>& items,
+               const std::vector<std::u16string>& path,
+               bool in_toolbar,
++              bool is_pinned,
+               std::vector<user_data_importer::ImportedBookmarkEntry>* bookmarks,
+               std::unordered_set<std::string>& visited) {
+   if (!visited.insert(item_id).second) {
+@@ -126,6 +127,7 @@
+   if (!item.saved_url.empty()) {
+     user_data_importer::ImportedBookmarkEntry entry;
+     entry.in_toolbar = in_toolbar;
++    entry.is_pinned = is_pinned;
+     entry.is_folder = false;
+     entry.url = GURL(item.saved_url);
+     entry.path = path;
+@@ -147,7 +149,8 @@
+     std::vector<std::u16string> child_path = path;
+     child_path.push_back(base::UTF8ToUTF16(folder_name));
+     for (const auto& child_id : item.children_ids) {
+-      WalkItem(child_id, items, child_path, in_toolbar, bookmarks, visited);
++      WalkItem(child_id, items, child_path, in_toolbar, is_pinned, bookmarks,
++               visited);
+     }
+     return;
+   }
+@@ -155,7 +158,8 @@
+   // For containers, just recurse into children.
+   if (item.is_container) {
+     for (const auto& child_id : item.children_ids) {
+-      WalkItem(child_id, items, path, in_toolbar, bookmarks, visited);
++      WalkItem(child_id, items, path, in_toolbar, is_pinned, bookmarks,
++               visited);
+     }
+   }
+ }
+@@ -296,16 +300,18 @@
+       if (it != items.end()) {
+         std::vector<std::u16string> path_parts;
+         for (const auto& child_id : it->second.children_ids) {
+-          WalkItem(child_id, items, path_parts, /*in_toolbar=*/true, &bookmarks,
+-                   visited_ids);
++          WalkItem(child_id, items, path_parts, /*in_toolbar=*/true,
++                   /*is_pinned=*/false, &bookmarks, visited_ids);
+         }
+       }
+       break;
+     }
+   }
+ 
+-  bool multiple_spaces = spaces.size() > 1;
+-
++  // The pinned container of each space goes to the PinnedModel of the profile
++  // (ProfileWriter::AddBookmarks). The space name is not part of the path:
++  // paths are relative to the pinned container, and the writer keeps one
++  // folder level (the Arc folder) as a drawer.
+   for (const auto& space : spaces) {
+     if (space.pinned_container_id.empty()) {
+       continue;
+@@ -317,17 +323,9 @@
+     }
+ 
+     std::vector<std::u16string> path_parts;
+-    if (multiple_spaces) {
+-      std::string space_name = space.id;
+-      if (space_name.contains("defaultPersonalSpaceID")) {
+-        space_name = "Personal";
+-      }
+-      path_parts.push_back(base::UTF8ToUTF16(space_name));
+-    }
+-
+     for (const auto& child_id : it->second.children_ids) {
+-      WalkItem(child_id, items, path_parts, /*in_toolbar=*/false, &bookmarks,
+-               visited_ids);
++      WalkItem(child_id, items, path_parts, /*in_toolbar=*/false,
++               /*is_pinned=*/true, &bookmarks, visited_ids);
+     }
+   }
+ 
+--- a/components/user_data_importer/common/imported_bookmark_entry.h
++++ b/components/user_data_importer/common/imported_bookmark_entry.h
+@@ -23,6 +23,10 @@
+ 
+   bool in_toolbar;
+   bool is_folder;
++  // aerographene: entry comes from the pinned container of the source browser
++  // (Arc). `path` is relative to that container. ProfileWriter::AddBookmarks
++  // sends these to the PinnedModel of the profile.
++  bool is_pinned = false;
+   GURL url;
+   std::vector<std::u16string> path;
+   std::u16string title;
