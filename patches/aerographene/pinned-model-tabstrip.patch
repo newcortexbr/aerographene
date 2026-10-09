@@ -274,7 +274,7 @@ pinned-span-drag.patch.
 +namespace {
 +
 +GURL GetTabURL(const tabs::TabInterface* tab) {
-+  const content::WebContents* contents = tab ? tab->GetContents() : nullptr;
++  content::WebContents* contents = tab ? tab->GetContents() : nullptr;
 +  if (!contents) {
 +    return GURL();
 +  }
@@ -519,7 +519,7 @@ pinned-span-drag.patch.
 +
 +  base::AutoReset<bool> writing(&writing_, true);
 +  if (!match) {
-+    const content::WebContents* contents = tab->GetContents();
++    content::WebContents* contents = tab->GetContents();
 +    match = model_->AddPinned(url, contents ? contents->GetTitle() : u"",
 +                              base::Uuid(), static_cast<size_t>(-1));
 +    if (!match) {
