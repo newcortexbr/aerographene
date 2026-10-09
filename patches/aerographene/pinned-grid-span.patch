@@ -1,0 +1,198 @@
+aerographene: grade de pinned do modo vertical com células e span (F1).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: SCOPE item 4. Troca a largura de coluna uniforme de
+PinnedTabContainerView::CalculateVerticalLayout por células: cada pinned ocupa
+span (inteiro >= 1, padrão 1) células horizontais; a grade quebra linha por
+células e se rearranja quando a largura muda. Com todos os spans em 1 a conta
+é a do upstream (mesma largura de célula, mesmas colunas por linha, mesma
+repartição do espaço que sobra).
+Fórmula: w = kVerticalTabMinWidth (x2 com split); C = max(1, min(total_cells,
+floor((disp - w)/(w + 4)) + 1)), 1 se recolhido; w' = w + floor((disp - C*w -
+4*(C-1))/C); largura do filho = s*w' + (s-1)*4, s = min(span, C); quebra antes
+do filho se col > 0 e col + s > C.
+Escopo: span só em memória, por view (SetTabSpan/GetTabSpan); sem persistência,
+arraste, rótulo ou pasta (F2-F6). Ninguém chama SetTabSpan ainda.
+Risco: chave é ponteiro de view sem limpeza ao destruir (F2 troca por id).
+Depende de helium/ui/layout/vertical.patch (orientação vertical do container;
+o patch não toca este arquivo).
+
+--- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h
++++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h
+@@ -5,6 +5,8 @@
+ #ifndef CHROME_BROWSER_UI_VIEWS_TABS_COMMON_PINNED_TAB_CONTAINER_VIEW_H_
+ #define CHROME_BROWSER_UI_VIEWS_TABS_COMMON_PINNED_TAB_CONTAINER_VIEW_H_
+ 
++#include <map>
++
+ #include "base/callback_list.h"
+ #include "chrome/browser/ui/views/frame/browser_root_view.h"
+ #include "chrome/browser/ui/views/tabs/common/dragged_tabs_container.h"
+@@ -48,6 +50,12 @@
+   std::optional<BrowserRootView::DropIndex> GetLinkDropIndex(
+       const gfx::Point& loc_in_container);
+ 
++  // Number of horizontal grid cells `child` occupies in the vertical layout
++  // (>= 1, default 1). Kept in memory only; entries are keyed by view and not
++  // persisted. A span of 1 erases the entry.
++  void SetTabSpan(const views::View* child, int span);
++  int GetTabSpan(const views::View* child) const;
++
+  private:
+   // DraggedTabsContainer:
+   views::ScrollView* GetScrollViewForContainer() const override;
+@@ -82,6 +90,8 @@
+   raw_ptr<TabCollectionNode> collection_node_;
+   const raw_ref<TabCollectionAnimatingLayoutManager> layout_manager_;
+ 
++  std::map<const views::View*, int> tab_spans_;
++
+   base::CallbackListSubscription node_destroyed_subscription_;
+   base::CallbackListSubscription collapsed_state_changed_subscription_;
+ };
+--- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
++++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
+@@ -383,9 +383,7 @@
+ 
+   int x = 0;
+   int y = 0;
+-  int children_on_row = children.size();
+-
+-  if (children_on_row == 0) {
++  if (children.empty()) {
+     layouts.host_size = gfx::Size(0, 0);
+     return layouts;
+   }
+@@ -400,9 +398,17 @@
+   int child_width = GetLayoutConstant(LayoutConstant::kVerticalTabMinWidth) *
+                     (contains_split ? 2 : 1);
+ 
+-  // If the width is bounded, calculate how many children can fit on a row.
+-  // Since all children are allocated the same width this will be the same for
+-  // every row.
++  // Each child occupies `GetTabSpan()` cells of `child_width`. Cells per row
++  // is the same for every row; a child that does not fit in the cells left on
++  // the current row wraps to the next one. With every span equal to 1 this is
++  // the previous uniform-column layout.
++  int total_cells = 0;
++  for (auto* child : children) {
++    total_cells += GetTabSpan(child);
++  }
++  int cells_on_row = total_cells;
++
++  // If the width is bounded, calculate how many cells can fit on a row.
+   if (size_bounds.width().is_bounded() && size_bounds.width().value() > 0) {
+     auto collapse_state = GetTabStripCollapseState();
+ 
+@@ -412,30 +418,34 @@
+         size_bounds.width().value() -
+         GetLayoutConstant(LayoutConstant::kVerticalTabStripHorizontalPadding);
+ 
+-    // When we are in collapsed state, only one child should be shown per row.
++    // When we are in collapsed state, only one cell should be shown per row.
+     // During collapse animation and other cases, fit as many as possible.
+-    children_on_row =
++    cells_on_row =
+         tabs::IsVerticalTabsExpandOnHoverFeatureEnabled() &&
+                 collapse_state ==
+                     tabs::VerticalTabStripCollapseState::kCollapsed
+             ? 1
+-            : std::min(
+-                  children_on_row,
+-                  static_cast<int>(std::floor((available_width - child_width) /
+-                                              (child_width + kTabPadding)) +
+-                                   1));
++            : std::max(
++                  1, std::min(
++                         total_cells,
++                         static_cast<int>(
++                             std::floor((available_width - child_width) /
++                                        (child_width + kTabPadding)) +
++                             1)));
+ 
+-    // Allocate extra space to the tabs.
++    // Allocate extra space to the cells.
+     available_width -=
+-        (children_on_row * child_width) + (kTabPadding * (children_on_row - 1));
+-    child_width += std::floor(available_width / children_on_row);
++        (cells_on_row * child_width) + (kTabPadding * (cells_on_row - 1));
++    child_width += std::floor(available_width / cells_on_row);
+   }
+ 
+-  int row_index = 0;
++  int col = 0;
+   for (auto* child : children) {
++    const int span = std::min(GetTabSpan(child), cells_on_row);
++    const int span_width = span * child_width + (span - 1) * kTabPadding;
+     gfx::Rect bounds =
+-        gfx::Rect(child->GetPreferredSize(views::SizeBounds(child_width, {})));
+-    bounds.set_width(child_width);
++        gfx::Rect(child->GetPreferredSize(views::SizeBounds(span_width, {})));
++    bounds.set_width(span_width);
+ 
+     auto drag_data = GetVisualDataForDraggedView(*child);
+     const bool should_show_child = !(drag_data && drag_data->should_hide);
+@@ -444,29 +454,37 @@
+       continue;
+     }
+ 
++    // Wrap before placing a child that does not fit in the remaining cells.
++    if ((!drag_data || !drag_data->should_float) && col > 0 &&
++        col + span > cells_on_row) {
++      y = total_height + kTabPadding;
++      col = 0;
++      x = 0;
++    }
++
+     bounds.set_y(drag_data ? drag_data->offset.y() : y);
+     int child_x = drag_data ? drag_data->offset.x() : x;
+     if (drag_data && base::i18n::IsRTL()) {
+-      child_x = size_bounds.width().value() - child_x - child_width;
++      child_x = size_bounds.width().value() - child_x - span_width;
+     }
+     bounds.set_x(child_x);
+ 
+-    if (row_index != 0) {
++    if (col != 0) {
+       bounds.set_x(bounds.x() + kTabPadding);
+     }
+ 
+     if (!drag_data || !drag_data->should_float) {
+-      if (row_index != 0) {
++      if (col != 0) {
+         x += kTabPadding;
+       }
+       x += bounds.width();
+       total_width = std::max(total_width, x);
+       total_height = std::max(total_height, (y + bounds.height()));
+ 
+-      row_index++;
+-      if (row_index >= children_on_row) {
++      col += span;
++      if (col >= cells_on_row) {
+         y = total_height + kTabPadding;
+-        row_index = 0;
++        col = 0;
+         x = 0;
+       }
+     }
+@@ -484,5 +502,19 @@
+   return layouts;
+ }
+ 
++void PinnedTabContainerView::SetTabSpan(const views::View* child, int span) {
++  if (span <= 1) {
++    tab_spans_.erase(child);
++  } else {
++    tab_spans_[child] = span;
++  }
++  InvalidateLayout();
++}
++
++int PinnedTabContainerView::GetTabSpan(const views::View* child) const {
++  const auto it = tab_spans_.find(child);
++  return it == tab_spans_.end() ? 1 : it->second;
++}
++
+ BEGIN_METADATA(PinnedTabContainerView)
+ END_METADATA

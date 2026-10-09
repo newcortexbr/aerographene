@@ -1,0 +1,514 @@
+aerographene: arrastar a borda direita de um pinned muda o span (F2).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: SCOPE item 4. Em PinnedTabContainerView (grade vertical expandida),
+os ~6 px da borda direita de um TabView pinned viram zona de redimensionamento:
+cursor ew-resize, e arrastar muda o span (células, F1) com snap por célula
+(span = round((dx + 4) / (w' + 4)), mínimo 1, máximo células que cabem na linha
+a partir da coluna do pinned). Com span >= 2 o TabView mostra o título (rótulo =
+título da aba; rótulo editável é F5). Splits, estado recolhido e toque não têm
+zona.
+Hit-test: o container instala um ViewTargeter (é o próprio ViewTargeterDelegate)
+que, só para eventos de mouse (rect 1x1) dentro da zona, devolve o container
+como alvo; fora da zona o alvo é o padrão, então clique e arraste de aba seguem
+nas outras áreas. Efeito colateral: os 6 px da borda direita de cada pinned não
+iniciam clique/arraste de aba nem hover.
+Geometria congelada no press (origem x, passo, máximo): reflow da grade durante
+o arraste não realimenta o span.
+Chave do span: tabs::TabCollectionNodeHandle do nó (estável; troca o ponteiro de
+view do F1). Entradas são removidas em ViewHierarchyChanged (filho removido) e
+em ResetCollectionNode. CalculateVerticalLayout passa a usar GetGridMetrics
+(mesma conta do F1, extraída).
+Escopo: span ainda só em memória; sem persistência, rótulo editável nem pasta
+(F3-F6).
+Risco: arraste de abas (DragLayout::kSquash) e GetLinkDropIndexForHorizontal
+supõem filhos de mesma largura; com spans mistos o índice de soltura pode ficar
+impreciso (não verificado). Toca tab_view.{h,cc} e tab_view_vertical_layout.cc,
+também tocados por helium/ui/layout/vertical.patch (hunks distintos).
+Depende de aerographene/pinned-grid-span.patch e helium/ui/layout/vertical.patch.
+
+--- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
++++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
+@@ -4,6 +4,9 @@
+ 
+ #include "chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h"
+ 
++#include <algorithm>
++#include <iterator>
++
+ #include "base/i18n/rtl.h"
+ #include "chrome/browser/ui/layout_constants.h"
+ #include "chrome/browser/ui/tabs/features.h"
+@@ -15,6 +18,8 @@
+ #include "chrome/browser/ui/views/tabs/common/tab_drag_handler.h"
+ #include "chrome/browser/ui/views/tabs/common/tab_strip_collection_controller.h"
+ #include "chrome/browser/ui/views/tabs/common/tab_view.h"
++#include "ui/base/cursor/cursor.h"
++#include "ui/base/cursor/mojom/cursor_type.mojom.h"
+ #include "ui/base/metadata/metadata_impl_macros.h"
+ #include "ui/gfx/geometry/rect.h"
+ #include "ui/views/controls/scroll_view.h"
+@@ -22,11 +27,15 @@
+ #include "ui/views/layout/layout_types.h"
+ #include "ui/views/layout/proposed_layout.h"
+ #include "ui/views/view.h"
++#include "ui/views/view_targeter.h"
+ #include "ui/views/view_class_properties.h"
+ #include "ui/views/view_utils.h"
+ 
+ namespace {
+ constexpr int kTabPadding = 4;
++// Width of the strip along the right edge of a pinned tab that starts a span
++// resize instead of a tab click or drag.
++constexpr int kSpanResizeZoneWidth = 6;
+ }  // namespace
+ 
+ PinnedTabContainerView::PinnedTabContainerView(
+@@ -52,6 +61,8 @@
+               ? TabCollectionAnimatingLayoutManager::AnimationAxis::kHorizontal
+               : TabCollectionAnimatingLayoutManager::AnimationAxis::
+                     kHorizontalWrappingVertically))) {
++  SetEventTargeter(std::make_unique<views::ViewTargeter>(this));
++
+   collection_node->set_remove_child_from_node(base::BindRepeating(
+       &TabCollectionAnimatingLayoutManager::AnimateAndDestroyChildView,
+       base::Unretained(base::to_address(layout_manager_))));
+@@ -290,6 +301,8 @@
+ }
+ 
+ void PinnedTabContainerView::ResetCollectionNode() {
++  tab_spans_.clear();
++  resizing_handle_.reset();
+   collapsed_state_changed_subscription_ = {};
+   collection_node_ = nullptr;
+ }
+@@ -371,22 +384,9 @@
+   return layouts;
+ }
+ 
+-views::ProposedLayout PinnedTabContainerView::CalculateVerticalLayout(
++PinnedTabContainerView::GridMetrics PinnedTabContainerView::GetGridMetrics(
+     const views::SizeBounds& size_bounds) const {
+-  views::ProposedLayout layouts;
+-  const std::vector<views::View*> children =
+-      collection_node_ ? collection_node_->GetDirectChildren()
+-                       : std::vector<views::View*>();
+-
+-  int total_width = 0;
+-  int total_height = 0;
+-
+-  int x = 0;
+-  int y = 0;
+-  if (children.empty()) {
+-    layouts.host_size = gfx::Size(0, 0);
+-    return layouts;
+-  }
++  GridMetrics metrics;
+ 
+   // Child width will be uniform and match the largest child's width.
+   bool contains_split = false;
+@@ -395,18 +395,19 @@
+       contains_split = true;
+     }
+   }
+-  int child_width = GetLayoutConstant(LayoutConstant::kVerticalTabMinWidth) *
+-                    (contains_split ? 2 : 1);
++  metrics.cell_width = GetLayoutConstant(LayoutConstant::kVerticalTabMinWidth) *
++                       (contains_split ? 2 : 1);
+ 
+-  // Each child occupies `GetTabSpan()` cells of `child_width`. Cells per row
++  // Each child occupies `GetTabSpan()` cells of `cell_width`. Cells per row
+   // is the same for every row; a child that does not fit in the cells left on
+   // the current row wraps to the next one. With every span equal to 1 this is
+   // the previous uniform-column layout.
+   int total_cells = 0;
+-  for (auto* child : children) {
++  for (auto* child : collection_node_->GetDirectChildren()) {
+     total_cells += GetTabSpan(child);
+   }
+-  int cells_on_row = total_cells;
++  metrics.cells_on_row = total_cells;
++  metrics.max_cells = total_cells;
+ 
+   // If the width is bounded, calculate how many cells can fit on a row.
+   if (size_bounds.width().is_bounded() && size_bounds.width().value() > 0) {
+@@ -420,24 +421,46 @@
+ 
+     // When we are in collapsed state, only one cell should be shown per row.
+     // During collapse animation and other cases, fit as many as possible.
+-    cells_on_row =
++    metrics.max_cells =
+         tabs::IsVerticalTabsExpandOnHoverFeatureEnabled() &&
+                 collapse_state ==
+                     tabs::VerticalTabStripCollapseState::kCollapsed
+             ? 1
+             : std::max(
+-                  1, std::min(
+-                         total_cells,
+-                         static_cast<int>(
+-                             std::floor((available_width - child_width) /
+-                                        (child_width + kTabPadding)) +
+-                             1)));
++                  1, static_cast<int>(
++                         std::floor((available_width - metrics.cell_width) /
++                                    (metrics.cell_width + kTabPadding)) +
++                         1));
++    metrics.cells_on_row = std::max(1, std::min(total_cells, metrics.max_cells));
+ 
+     // Allocate extra space to the cells.
+-    available_width -=
+-        (cells_on_row * child_width) + (kTabPadding * (cells_on_row - 1));
+-    child_width += std::floor(available_width / cells_on_row);
++    available_width -= (metrics.cells_on_row * metrics.cell_width) +
++                       (kTabPadding * (metrics.cells_on_row - 1));
++    metrics.cell_width += std::floor(available_width / metrics.cells_on_row);
+   }
++  return metrics;
++}
++
++views::ProposedLayout PinnedTabContainerView::CalculateVerticalLayout(
++    const views::SizeBounds& size_bounds) const {
++  views::ProposedLayout layouts;
++  const std::vector<views::View*> children =
++      collection_node_ ? collection_node_->GetDirectChildren()
++                       : std::vector<views::View*>();
++
++  int total_width = 0;
++  int total_height = 0;
++
++  int x = 0;
++  int y = 0;
++  if (children.empty()) {
++    layouts.host_size = gfx::Size(0, 0);
++    return layouts;
++  }
++
++  const GridMetrics metrics = GetGridMetrics(size_bounds);
++  const int child_width = metrics.cell_width;
++  const int cells_on_row = metrics.cells_on_row;
+ 
+   int col = 0;
+   for (auto* child : children) {
+@@ -502,19 +525,153 @@
+   return layouts;
+ }
+ 
+-void PinnedTabContainerView::SetTabSpan(const views::View* child, int span) {
++void PinnedTabContainerView::SetTabSpan(views::View* child, int span) {
++  const TabCollectionNode* node = GetCollectionNodeFromView(*child);
++  if (!node) {
++    return;
++  }
+   if (span <= 1) {
+-    tab_spans_.erase(child);
++    tab_spans_.erase(node->GetHandle());
+   } else {
+-    tab_spans_[child] = span;
++    tab_spans_[node->GetHandle()] = span;
++  }
++  if (auto* tab_view = views::AsViewClass<TabView>(child)) {
++    tab_view->SetPinnedSpan(std::max(span, 1));
+   }
+   InvalidateLayout();
+ }
+ 
+ int PinnedTabContainerView::GetTabSpan(const views::View* child) const {
+-  const auto it = tab_spans_.find(child);
++  const TabCollectionNode* node = GetCollectionNodeFromView(*child);
++  if (!node) {
++    return 1;
++  }
++  const auto it = tab_spans_.find(node->GetHandle());
+   return it == tab_spans_.end() ? 1 : it->second;
+ }
+ 
++views::View* PinnedTabContainerView::GetSpanResizeChildAt(
++    const gfx::Point& loc_in_container) const {
++  if (!collection_node_ ||
++      collection_node_->orientation() != TabStripOrientation::kVertical ||
++      GetTabStripCollapseState() !=
++          tabs::VerticalTabStripCollapseState::kExpanded ||
++      IsDragging()) {
++    return nullptr;
++  }
++  const int logical_x = GetMirroredXInView(loc_in_container.x());
++  for (const auto& child_node : collection_node_->children()) {
++    views::View* view = child_node->view();
++    // Only single tabs resize; a split already spans its own cells.
++    if (!view || !view->GetVisible() || !views::IsViewClass<TabView>(view)) {
++      continue;
++    }
++    const gfx::Rect bounds = view->bounds();
++    if (loc_in_container.y() >= bounds.y() &&
++        loc_in_container.y() < bounds.bottom() &&
++        logical_x >= bounds.right() - kSpanResizeZoneWidth &&
++        logical_x < bounds.right()) {
++      return view;
++    }
++  }
++  return nullptr;
++}
++
++views::View* PinnedTabContainerView::TargetForRect(views::View* root,
++                                                   const gfx::Rect& rect) {
++  // Mouse events only (1x1 rect): inside the resize zone the container itself
++  // is the target so the tab under it neither receives the press nor starts a
++  // tab drag. Everywhere else targeting is the default.
++  if (root == this && rect.size() == gfx::Size(1, 1) &&
++      GetSpanResizeChildAt(rect.origin())) {
++    return root;
++  }
++  return views::ViewTargeterDelegate::TargetForRect(root, rect);
++}
++
++ui::Cursor PinnedTabContainerView::GetCursor(const ui::MouseEvent& event) {
++  if (resizing_handle_ || GetSpanResizeChildAt(event.location())) {
++    return ui::Cursor(ui::mojom::CursorType::kEastWestResize);
++  }
++  return views::View::GetCursor(event);
++}
++
++bool PinnedTabContainerView::OnMousePressed(const ui::MouseEvent& event) {
++  views::View* child = event.IsOnlyLeftMouseButton()
++                           ? GetSpanResizeChildAt(event.location())
++                           : nullptr;
++  if (!child) {
++    return views::View::OnMousePressed(event);
++  }
++  // Freeze the grid geometry for the whole gesture: the span follows the
++  // pointer through these values only, so reflowing the grid while dragging
++  // cannot feed back into the span.
++  const GridMetrics metrics =
++      GetGridMetrics(views::SizeBounds(width(), {}));
++  const int pitch = metrics.cell_width + kTabPadding;
++  const int first_cell = std::clamp(child->bounds().x() / pitch, 0,
++                                    std::max(0, metrics.max_cells - 1));
++  resizing_handle_ = GetCollectionNodeFromView(*child)->GetHandle();
++  resize_origin_x_ = child->bounds().x();
++  resize_pitch_ = pitch;
++  resize_max_span_ = std::max(1, metrics.max_cells - first_cell);
++  return true;
++}
++
++bool PinnedTabContainerView::OnMouseDragged(const ui::MouseEvent& event) {
++  if (!resizing_handle_) {
++    return views::View::OnMouseDragged(event);
++  }
++  if (!collection_node_) {
++    resizing_handle_.reset();
++    return true;
++  }
++  // Snap to the nearest cell boundary: span = round((dx + padding) / pitch).
++  const int dx = std::max(0, GetMirroredXInView(event.x()) - resize_origin_x_);
++  const int span = std::clamp((dx + kTabPadding + resize_pitch_ / 2) /
++                                  resize_pitch_,
++                              1, resize_max_span_);
++  for (const auto& child_node : collection_node_->children()) {
++    if (child_node->GetHandle() == *resizing_handle_) {
++      if (views::View* view = child_node->view();
++          view && GetTabSpan(view) != span) {
++        SetTabSpan(view, span);
++      }
++      return true;
++    }
++  }
++  resizing_handle_.reset();
++  return true;
++}
++
++void PinnedTabContainerView::OnMouseReleased(const ui::MouseEvent& event) {
++  resizing_handle_.reset();
++}
++
++void PinnedTabContainerView::OnMouseCaptureLost() {
++  resizing_handle_.reset();
++}
++
++void PinnedTabContainerView::ViewHierarchyChanged(
++    const views::ViewHierarchyChangedDetails& details) {
++  views::View::ViewHierarchyChanged(details);
++  if (details.is_add || details.parent != this) {
++    return;
++  }
++  // A child view left the container: drop spans of tabs that are no longer
++  // direct children (closed, unpinned or moved elsewhere).
++  if (!collection_node_) {
++    tab_spans_.clear();
++    return;
++  }
++  for (auto it = tab_spans_.begin(); it != tab_spans_.end();) {
++    const bool present = std::ranges::any_of(
++        collection_node_->children(), [&](const auto& child_node) {
++          return child_node->GetHandle() == it->first;
++        });
++    it = present ? std::next(it) : tab_spans_.erase(it);
++  }
++}
++
+ BEGIN_METADATA(PinnedTabContainerView)
+ END_METADATA
+--- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h
++++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h
+@@ -6,14 +6,17 @@
+ #define CHROME_BROWSER_UI_VIEWS_TABS_COMMON_PINNED_TAB_CONTAINER_VIEW_H_
+ 
+ #include <map>
++#include <optional>
+ 
+ #include "base/callback_list.h"
+ #include "chrome/browser/ui/views/frame/browser_root_view.h"
+ #include "chrome/browser/ui/views/tabs/common/dragged_tabs_container.h"
+ #include "chrome/browser/ui/views/tabs/common/tab_collection_animating_layout_manager.h"
++#include "components/tabs/public/tab_collection.h"
+ #include "ui/base/metadata/metadata_header_macros.h"
+ #include "ui/views/layout/delegating_layout_manager.h"
+ #include "ui/views/view.h"
++#include "ui/views/view_targeter_delegate.h"
+ 
+ class TabCollectionNode;
+ 
+@@ -23,6 +26,7 @@
+ class PinnedTabContainerView
+     : public views::View,
+       public views::LayoutDelegate,
++      public views::ViewTargeterDelegate,
+       public DraggedTabsContainer,
+       public TabCollectionAnimatingLayoutManager::Delegate {
+   METADATA_HEADER(PinnedTabContainerView, views::View)
+@@ -39,6 +43,16 @@
+ 
+   // views::View:
+   gfx::Size GetMinimumSize() const override;
++  ui::Cursor GetCursor(const ui::MouseEvent& event) override;
++  bool OnMousePressed(const ui::MouseEvent& event) override;
++  bool OnMouseDragged(const ui::MouseEvent& event) override;
++  void OnMouseReleased(const ui::MouseEvent& event) override;
++  void OnMouseCaptureLost() override;
++  void ViewHierarchyChanged(
++      const views::ViewHierarchyChangedDetails& details) override;
++
++  // views::ViewTargeterDelegate:
++  views::View* TargetForRect(views::View* root, const gfx::Rect& rect) override;
+ 
+   // TabCollectionAnimatingLayoutManager::Delegate:
+   bool IsDragging() const override;
+@@ -51,9 +65,11 @@
+       const gfx::Point& loc_in_container);
+ 
+   // Number of horizontal grid cells `child` occupies in the vertical layout
+-  // (>= 1, default 1). Kept in memory only; entries are keyed by view and not
+-  // persisted. A span of 1 erases the entry.
+-  void SetTabSpan(const views::View* child, int span);
++  // (>= 1, default 1). Kept in memory only; entries are keyed by the handle of
++  // the child's collection node (stable for the life of the tab) and dropped
++  // when the child leaves the container. A span of 1 erases the entry. The
++  // user changes it by dragging the right edge of a pinned tab.
++  void SetTabSpan(views::View* child, int span);
+   int GetTabSpan(const views::View* child) const;
+ 
+  private:
+@@ -70,6 +86,18 @@
+   views::ProposedLayout CalculateVerticalLayout(
+       const views::SizeBounds& size_bounds) const;
+ 
++  // Cell geometry of the vertical grid. `max_cells` is how many cells fit on a
++  // row by width alone; `cells_on_row` is also capped by the total cells.
++  struct GridMetrics {
++    int cell_width = 0;
++    int cells_on_row = 1;
++    int max_cells = 1;
++  };
++  GridMetrics GetGridMetrics(const views::SizeBounds& size_bounds) const;
++
++  // Returns the tab whose right-edge resize zone contains the point, if any.
++  views::View* GetSpanResizeChildAt(const gfx::Point& loc_in_container) const;
++
+   // While in horizontal orientation, the x-coordinate of the single row is
+   // used to determine the drop index.
+   std::optional<BrowserRootView::DropIndex> GetLinkDropIndexForHorizontal(
+@@ -90,7 +118,13 @@
+   raw_ptr<TabCollectionNode> collection_node_;
+   const raw_ref<TabCollectionAnimatingLayoutManager> layout_manager_;
+ 
+-  std::map<const views::View*, int> tab_spans_;
++  std::map<tabs::TabCollectionNodeHandle, int> tab_spans_;
++
++  // Span resize gesture state, frozen at mouse press.
++  std::optional<tabs::TabCollectionNodeHandle> resizing_handle_;
++  int resize_origin_x_ = 0;
++  int resize_pitch_ = 1;
++  int resize_max_span_ = 1;
+ 
+   base::CallbackListSubscription node_destroyed_subscription_;
+   base::CallbackListSubscription collapsed_state_changed_subscription_;
+--- a/chrome/browser/ui/views/tabs/common/tab_view.cc
++++ b/chrome/browser/ui/views/tabs/common/tab_view.cc
+@@ -1282,6 +1282,18 @@
+   return collapsed_ && width > CollapsedWidth();
+ }
+ 
++void TabView::SetPinnedSpan(int span) {
++  if (pinned_span_ == span) {
++    return;
++  }
++  pinned_span_ = span;
++  InvalidateLayout();
++}
++
++bool TabView::ShowsPinnedTitle() const {
++  return pinned_ && !split_ && !collapsed_ && pinned_span_ >= 2;
++}
++
+ const tabs::TabInterface* TabView::GetTabInterface() const {
+   if (!collection_node_) {
+     return nullptr;
+--- a/chrome/browser/ui/views/tabs/common/tab_view.h
++++ b/chrome/browser/ui/views/tabs/common/tab_view.h
+@@ -105,6 +105,9 @@
+   bool IsClosing() const { return !collection_node_; }
+   bool split() const { return split_; }
+   bool pinned() const { return pinned_; }
++  // Horizontal grid cells a pinned tab occupies in the vertical pinned grid;
++  // the title shows from 2 cells up. Set by `PinnedTabContainerView`.
++  void SetPinnedSpan(int span);
+   const tabs::TabInterface* GetTabInterface() const;
+ 
+   GlowHoverController* GetHoverControllerForTesting() {
+@@ -200,6 +203,7 @@
+   static int CollapsedWidth();
+ 
+   bool IsInExpandOnHover(int width) const;
++  bool ShowsPinnedTitle() const;
+ 
+   SkScalar GetCornerRadius() const;
+ 
+@@ -231,6 +235,7 @@
+   bool split_ = false;
+   bool collapsed_ = false;
+   bool pinned_ = false;
++  int pinned_span_ = 1;
+   bool shift_pressed_on_mouse_down_ = false;
+   bool should_fill_background_tab_color_ = false;
+ 
+--- a/chrome/browser/ui/views/tabs/common/tab_view_vertical_layout.cc
++++ b/chrome/browser/ui/views/tabs/common/tab_view_vertical_layout.cc
+@@ -60,7 +60,8 @@
+   // If the tab is collapsed but animating with a wider width then we shouldn't
+   // center the contents.
+   const bool is_centered = (TabView().pinned_ || TabView().collapsed_) &&
+-                           !TabView().IsInExpandOnHover(width);
++                           !TabView().IsInExpandOnHover(width) &&
++                           !TabView().ShowsPinnedTitle();
+ 
+   int placed_children = 0;
+   for (const auto& child : tab_children_configs_) {
+@@ -146,7 +147,8 @@
+   if (child_view == TabView().title_) {
+     // Pinned titles should be visible in the expand on hover state when the
+     // width is sufficient to show the title.
+-    return !TabView().pinned_ || TabView().IsInExpandOnHover(width);
++    return !TabView().pinned_ || TabView().IsInExpandOnHover(width) ||
++           TabView().ShowsPinnedTitle();
+   }
+ 
+   if (child_view == TabView().alert_indicator_) {
