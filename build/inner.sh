@@ -342,6 +342,12 @@ for f in chrome chrome_100_percent.pak chrome_200_percent.pak chrome_crashpad_ha
          vk_swiftshader_icd.json xdg-mime xdg-settings; do
     [ -e "out/Default/$f" ] && cp -r "out/Default/$f" "$stage/"
 done
+# uBlock: o Chromium lê o schema de storage.managed do disco, em resources/ublock/ ao lado do binário
+# (sem isso o log traz "Failed to parse schema for extension blockjmkbacgjkknlgpkjjiijinjdanf").
+if [ -f "${_src_dir}/third_party/ublock/managed_storage.json" ]; then
+    mkdir -p "$stage/resources/ublock"
+    cp "${_src_dir}/third_party/ublock/managed_storage.json" "$stage/resources/ublock/"
+fi
 # tabela de símbolos fora do pacote (~234 MB no chrome; o Helium distribui sem).
 # Não muda código executado: .symtab/.strtab não são carregadas em runtime.
 strip_tool=""
