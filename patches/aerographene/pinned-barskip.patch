@@ -1,0 +1,170 @@
+aerographene: barra de favoritos não mostra a pasta dos pinned.
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: SCOPE item 4. A pasta de pinned do PinnedModel (meta info
+`aerographene.pinned=1`, F4a) fica na barra de favoritos do perfil; a barra e
+seus menus passam a ignorá-la. chrome://bookmarks continua mostrando.
+Arquivos: chrome/browser/ui/views/bookmarks/bookmark_bar_view.cc e
+bookmark_menu_delegate.cc. Função local `IsPinnedFolder` com a chave literal
+(sem dependência do alvo tabs).
+
+--- a/chrome/browser/ui/views/bookmarks/bookmark_bar_view.cc
++++ b/chrome/browser/ui/views/bookmarks/bookmark_bar_view.cc
+@@ -295,6 +295,16 @@ std::vector<raw_ptr<const BookmarkNode, VectorExperimental>> ToRawPtrVector(
+     return raw_ptr<const BookmarkNode, VectorExperimental>(node);
+   });
+ }
++
++// aerographene: the folder that holds the pinned tabs of the space lives on
++// the bookmark bar, but the bar must not show it. Key is
++// aerographene::kPinnedMetaKey (pinned_model.h), duplicated to avoid a
++// dependency from views/bookmarks on ui/tabs.
++bool IsPinnedFolder(const BookmarkNode* node) {
++  std::string value;
++  return node->is_folder() &&
++         node->GetMetaInfo("aerographene.pinned", &value) && value == "1";
++}
+ }  // namespace
+ 
+ // DropLocation ---------------------------------------------------------------
+@@ -523,6 +533,9 @@ BookmarkBarView::GetBookmarkFolderForButtonAtLocation(
+   // Then check the bookmark buttons.
+   for (const auto& button_and_node : bookmark_buttons_) {
+     views::View* child = button_and_node.first;
++    if (IsPinnedFolder(button_and_node.second)) {
++      continue;
++    }
+     if (!child->GetVisible()) {
+       break;
+     }
+@@ -864,6 +877,14 @@ void BookmarkBarView::Layout(PassKey) {
+       }
+       views::View* child = bookmark_buttons_[i].first;
+ 
++      // The pinned folder keeps its slot (indices stay equal to the model's)
++      // but takes no space and is never shown.
++      if (IsPinnedFolder(bookmark_buttons_[i].second)) {
++        child->SetBounds(x, y, 0, button_height);
++        child->SetVisible(false);
++        continue;
++      }
++
+       // If the child view can fit in the bookmarks comfortably, make it visible
+       // and set its bounds.
+       gfx::Size pref = child->GetPreferredSize();
+@@ -878,11 +899,29 @@ void BookmarkBarView::Layout(PassKey) {
+     }
+   }
+ 
++  bool has_unbuilt_shown_children = false;
++  if (bookmark_service_->loaded() &&
++      bookmark_bar_children_count > bookmark_buttons_.size()) {
++    BookmarkParentFolderChildren unbuilt_children =
++        bookmark_service_->GetChildren(bookmark_bar_folder);
++    for (size_t i = bookmark_buttons_.size(); i < unbuilt_children.size();
++         ++i) {
++      if (!IsPinnedFolder(unbuilt_children[i])) {
++        has_unbuilt_shown_children = true;
++        break;
++      }
++    }
++  }
++  const auto last_shown_button = std::ranges::find_if(
++      bookmark_buttons_.rbegin(), bookmark_buttons_.rend(),
++      [](const BookmarkButtonAndNode& pair) {
++        return !IsPinnedFolder(pair.second);
++      });
+   const bool show_bookmarks_overflow =
+       bookmark_service_->loaded() &&
+-      (bookmark_bar_children_count > bookmark_buttons_.size() ||
+-       (!bookmark_buttons_.empty() &&
+-        !bookmark_buttons_.back().first->GetVisible()));
++      (has_unbuilt_shown_children ||
++       (last_shown_button != bookmark_buttons_.rend() &&
++        !last_shown_button->first->GetVisible()));
+ 
+   // Set the visibility of the tab group separator if there are groups and
+   // bookmarks.
+@@ -1645,7 +1684,7 @@ void BookmarkBarView::Init() {
+ size_t BookmarkBarView::GetFirstHiddenNodeIndex() const {
+   const auto i = std::ranges::find_if_not(
+       bookmark_buttons_, [](const BookmarkButtonAndNode& pair) {
+-        return pair.first->GetVisible();
++        return pair.first->GetVisible() || IsPinnedFolder(pair.second);
+       });
+   return i - bookmark_buttons_.cbegin();
+ }
+@@ -2012,9 +2051,13 @@ void BookmarkBarView::CalculateDropLocation(
+     return;
+   }
+ 
+-  for (size_t i = 0; i < bookmark_buttons_.size() &&
+-                     bookmark_buttons_[i].first->GetVisible() && !found;
+-       i++) {
++  for (size_t i = 0; i < bookmark_buttons_.size() && !found; i++) {
++    if (IsPinnedFolder(bookmark_buttons_[i].second)) {
++      continue;
++    }
++    if (!bookmark_buttons_[i].first->GetVisible()) {
++      break;
++    }
+     views::LabelButton* button = bookmark_buttons_[i].first;
+     int button_x = mirrored_x - button->x();
+     int button_w = button->width();
+--- a/chrome/browser/ui/views/bookmarks/bookmark_menu_delegate.cc
++++ b/chrome/browser/ui/views/bookmarks/bookmark_menu_delegate.cc
+@@ -7,6 +7,7 @@
+ #include <cstdint>
+ #include <memory>
+ #include <optional>
++#include <string>
+ 
+ #include "base/containers/fixed_flat_set.h"
+ #include "base/containers/to_vector.h"
+@@ -90,6 +91,15 @@ size_t GetSubmenuChildCount(const MenuItemView* menu) {
+   return menu->HasSubmenu() ? menu->GetSubmenu()->children().size() : 0;
+ }
+ 
++// aerographene: folder that holds the pinned tabs of the space; never listed
++// in bookmark menus. Key is aerographene::kPinnedMetaKey (pinned_model.h),
++// duplicated to avoid a dependency from views/bookmarks on ui/tabs.
++bool IsPinnedFolder(const BookmarkNode* node) {
++  std::string value;
++  return node->is_folder() &&
++         node->GetMetaInfo("aerographene.pinned", &value) && value == "1";
++}
++
+ size_t SubmenuIndexOf(const MenuItemView* parent, const views::View* child) {
+   std::optional<size_t> index = parent->GetSubmenu()->GetIndexOf(child);
+   CHECK(index.has_value());
+@@ -875,6 +885,20 @@ void BookmarkMenuDelegate::AddBookmarkNode(const bookmarks::BookmarkNode* node,
+     insertion_idx -= node_to_start_child_idx->second;
+   }
+ 
++  // The pinned folder has no menu item: do not count it in the position.
++  {
++    const auto start_it = node_start_child_idx_map_.find(new_parent_folder);
++    const size_t first_index =
++        start_it != node_start_child_idx_map_.end() ? start_it->second : 0;
++    BookmarkParentFolderChildren siblings =
++        GetBookmarkMergedSurfaceService()->GetChildren(new_parent_folder);
++    for (size_t i = first_index; i < new_index && i < siblings.size(); ++i) {
++      if (IsPinnedFolder(siblings[i])) {
++        --insertion_idx;
++      }
++    }
++  }
++
+   // If the bookmark is embedded in a larger menu not controlled by this (e.g.,
+   // App menu), then the bookmark's menu item is inserted relative to the
+   // "Bookmarks" title.
+@@ -1188,6 +1212,9 @@ void BookmarkMenuDelegate::BuildNodeMenuItem(const BookmarkNode* node,
+ void BookmarkMenuDelegate::BuildNodeMenuItemAt(const BookmarkNode* node,
+                                                MenuItemView* parent_menu,
+                                                size_t index) {
++  if (IsPinnedFolder(node)) {
++    return;
++  }
+   if (node->is_url()) {
+     BuildMenuForURLAt(node, parent_menu, index);
+   } else {
