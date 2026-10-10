@@ -1,0 +1,228 @@
+#!/usr/bin/env python3
+"""runwatch: acompanha runs do GitHub Actions sem despejar log. Usa `gh` (já autenticado)."""
+import argparse, json, re, subprocess, sys, time
+from datetime import datetime, timezone
+
+DEFAULT_REPO = "newcortexbr/aerographene"
+DEFAULT_WORKFLOW = "build.yml"
+QUEUE_WARN_S = 180
+ERR_RE = re.compile(r"FAILED:|error:|##\[error\]|smoke:")
+NINJA_RE = re.compile(r"\[(\d+)/(\d+)\]")
+FIELDS = "databaseId,status,conclusion,headBranch,headSha,attempt,createdAt,startedAt,updatedAt,jobs,workflowName"
+
+
+def gh(args):
+    p = subprocess.run(["gh"] + args, capture_output=True, text=True)
+    if p.returncode != 0:
+        raise RuntimeError((p.stderr or p.stdout).strip()[:300])
+    return p.stdout
+
+
+def ts(s):
+    return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc) if s else None
+
+
+def fmt_dur(sec):
+    sec = max(0, int(sec))
+    h, r = divmod(sec, 3600)
+    m, s = divmod(r, 60)
+    return f"{h}h{m:02d}m" if h else f"{m}m{s:02d}s"
+
+
+def state_of(run):
+    """-> fila|rodando|ok|falhou|cancelado|não iniciado"""
+    st, co = run.get("status"), run.get("conclusion")
+    if st in ("queued", "waiting", "pending", "requested"):
+        return "fila"
+    if st == "in_progress":
+        return "rodando"
+    if co == "success":
+        return "ok"
+    if co == "cancelled":
+        return "cancelado"
+    if co == "skipped" or (co in ("failure", "startup_failure") and run.get("jobs") == []):
+        return "não iniciado"
+    if co in ("failure", "timed_out", "startup_failure", "action_required"):
+        return "falhou"
+    return "falhou" if st == "completed" else "rodando"
+
+
+def terminal(state):
+    return state in ("ok", "falhou", "cancelado", "não iniciado")
+
+
+def current_step(run):
+    """Step em andamento (ou a que falhou)."""
+    last = None
+    for j in run.get("jobs") or []:
+        for s in j.get("steps") or []:
+            if s.get("status") == "in_progress":
+                return s["name"]
+            if s.get("conclusion") == "failure":
+                last = s["name"]
+    return last or "-"
+
+
+def elapsed(run, now=None):
+    now = now or datetime.now(timezone.utc)
+    start = ts(run.get("startedAt") or run.get("createdAt"))
+    end = ts(run.get("updatedAt")) if terminal(state_of(run)) else now
+    return fmt_dur((end - start).total_seconds()) if start and end else "-"
+
+
+def parse_ninja(text):
+    m = None
+    for m in NINJA_RE.finditer(text or ""):
+        pass
+    return f"[{m.group(1)}/{m.group(2)}]" if m else None
+
+
+def ninja_ssh(host):
+    cmd = "docker logs --tail 3 $(docker ps -q | head -1) 2>&1"
+    try:
+        p = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", host, cmd],
+                           capture_output=True, text=True, timeout=25)
+        return parse_ninja(p.stdout)
+    except Exception:
+        return None
+
+
+def extract_errors(log, maxn=20, width=300):
+    out = []
+    for line in (log or "").splitlines():
+        if ERR_RE.search(line):
+            # remove prefixo "job\tstep\t" e timestamp
+            parts = line.split("\t", 2)
+            line = parts[-1]
+            line = re.sub(r"^\d{4}-\d\d-\d\dT[\d:.]+Z\s*", "", line).strip()
+            out.append(line[:width])
+            if len(out) >= maxn:
+                break
+    return out
+
+
+def fetch_run(ref, a):
+    if ref == "latest" or ref is None:
+        args = ["run", "list", "-R", a.repo, "-L", "1", "--json", "databaseId"]
+        if a.workflow:
+            args += ["--workflow", a.workflow]
+        if a.branch:
+            args += ["--branch", a.branch]
+        lst = json.loads(gh(args))
+        if not lst:
+            raise RuntimeError("nenhuma run encontrada")
+        ref = str(lst[0]["databaseId"])
+    return json.loads(gh(["run", "view", ref, "-R", a.repo, "--json", FIELDS]))
+
+
+def status_line(run, ninja=None):
+    s = state_of(run)
+    parts = [str(run["databaseId"]), run.get("headBranch", "?"), (run.get("headSha") or "")[:7], s,
+             f"tentativa {run.get('attempt', 1)}", f"step: {current_step(run)}", elapsed(run)]
+    if ninja:
+        parts.append(ninja)
+    return " | ".join(parts)
+
+
+def errors_for(run_id, a):
+    p = subprocess.run(["gh", "run", "view", str(run_id), "-R", a.repo, "--log-failed"],
+                       capture_output=True, text=True)
+    return extract_errors(p.stdout)
+
+
+def cmd_status(a):
+    run = fetch_run(a.run, a)
+    nj = ninja_ssh(a.ssh) if a.ssh and state_of(run) == "rodando" else None
+    print(status_line(run, nj))
+    return 0
+
+
+def cmd_errors(a):
+    for l in errors_for(a.run, a) or ["(nenhuma linha de erro encontrada)"]:
+        print(l)
+    return 0
+
+
+def cmd_list(a):
+    args = ["run", "list", "-R", a.repo, "-L", str(a.n), "--json", FIELDS.replace(",jobs", "")]
+    if a.workflow:
+        args += ["--workflow", a.workflow]
+    if a.branch:
+        args += ["--branch", a.branch]
+    for r in json.loads(gh(args)):
+        print(status_line(r))
+    return 0
+
+
+def cmd_wait(a):
+    deadline = time.time() + parse_dur(a.timeout)
+    last, warned = None, False
+    run = None
+    while True:
+        try:
+            run = fetch_run(a.run, a)
+            a.run = str(run["databaseId"])  # fixa a run
+        except Exception as e:
+            print(f"aviso: {e}", flush=True)
+            run = None
+        if run:
+            s = state_of(run)
+            key = (s, current_step(run), run.get("attempt"))
+            if key != last:
+                print(status_line(run), flush=True)
+                last = key
+            if s == "fila" and not warned:
+                age = (datetime.now(timezone.utc) - ts(run["createdAt"])).total_seconds()
+                if age > QUEUE_WARN_S:
+                    warned = True
+                    print("aviso: na fila há >3min; provável runner com sessão velha após reboot "
+                          "(reinicie o runner ou `gh run cancel` + `gh run rerun`)", flush=True)
+            if terminal(s):
+                return finish(run, s, a)
+        if time.time() >= deadline:
+            print("RESULT timed_out")
+            return 3
+        time.sleep(a.interval)
+
+
+def finish(run, s, a):
+    if s == "falhou":
+        for l in errors_for(run["databaseId"], a):
+            print(l)
+    res = {"ok": ("ok", 0), "falhou": ("failure", 1), "cancelado": ("cancelled", 2),
+           "não iniciado": ("not_started", 3)}[s]
+    print(f"RESULT {res[0]}")
+    return res[1]
+
+
+def parse_dur(s):
+    m = re.fullmatch(r"(\d+)([smhd]?)", str(s))
+    if not m:
+        raise SystemExit(f"duração inválida: {s}")
+    return int(m.group(1)) * {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}[m.group(2)]
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(prog="runwatch")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    def common(sp, run=True):
+        sp.add_argument("-R", "--repo", default=DEFAULT_REPO)
+        sp.add_argument("--workflow", default=DEFAULT_WORKFLOW)
+        sp.add_argument("--branch")
+        if run:
+            sp.add_argument("run", nargs="?", default="latest")
+    s = sub.add_parser("status"); common(s); s.add_argument("--ssh", help="host (ex: claude@cezanne) p/ ler progresso ninja; desligado por padrão"); s.set_defaults(f=cmd_status)
+    s = sub.add_parser("wait"); common(s); s.add_argument("--interval", type=int, default=30); s.add_argument("--timeout", default="3h"); s.set_defaults(f=cmd_wait)
+    s = sub.add_parser("errors"); common(s); s.set_defaults(f=cmd_errors)
+    s = sub.add_parser("list"); common(s, run=False); s.add_argument("-n", type=int, default=5); s.set_defaults(f=cmd_list)
+    a = p.parse_args(argv)
+    try:
+        return a.f(a)
+    except RuntimeError as e:
+        print(f"erro: {e}", file=sys.stderr)
+        return 3
+
+
+if __name__ == "__main__":
+    sys.exit(main())
