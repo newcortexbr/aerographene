@@ -38,3 +38,10 @@ jobs:
           echo "== últimas linhas da build em andamento"
           for c in $(docker ps --filter ancestor=aerographene-builder:v2 -q); do docker logs --tail 8 "$c" 2>&1 | cut -c1-200; done || true
           echo "== OOM recente"; (dmesg 2>/dev/null || journalctl -k -n 200 2>/dev/null) | grep -iE 'oom|killed process' | tail -5 || echo "sem acesso ou nada"
+      - name: parar container órfão da build cancelada 38014109214
+        if: github.event_name == 'push'
+        run: |
+          set -uo pipefail
+          docker stop -t 20 f1e24ca1beaa || true
+          docker ps --format '{{.ID}} {{.Image}} {{.Status}}'
+          echo "== clang ativos = $(pgrep -c clang || true)"
