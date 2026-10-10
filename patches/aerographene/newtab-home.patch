@@ -112,7 +112,7 @@ do theme-tokens.patch. Sem clima, mensagem do dia nem mais visitados
 +      return std::string();
 +    }
 +    GURL url(provider->url_ref().ReplaceSearchTerms(
-+        TemplateURLRef::SearchTermsArgs(base::UTF8ToUTF16(kMarker)),
++        TemplateURLRef::SearchTermsArgs(u"aeroq9x"),
 +        search_terms_data));
 +    if (!url.is_valid() || !url.SchemeIsHTTPOrHTTPS() ||
 +        url.host().find(kMarker) != std::string::npos) {
