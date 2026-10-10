@@ -22,7 +22,7 @@
 - antes de alterar build/cache/empacotamento, leia `docs/BUILD.md`, `build/inner.sh` e o workflow correspondente.
 - dependências do host de build: `git` e `docker`; o restante é preparado no container pelo script. Não há instalação npm nem servidor de desenvolvimento definido.
 - comando canônico no runner: `bash build/build.sh`; jobs e PGO vêm dos inputs de `.github/workflows/build.yml`.
-- compilação completa fica no runner Cezanne/WSL2, labels `self-hosted`, `linux`, `intense`; não iniciar Chromium na máquina local Comet Lake.
+- compilação completa fica no runner Cezanne (Ubuntu 24.04 bare metal desde 10/10/2026; antes WSL2), labels `self-hosted`, `linux`, `intense`; não iniciar Chromium na máquina local Comet Lake.
 - os três runners compartilham host e cache, confirmado pelo diagnóstico `cache-sharing-check`. Preserve `out/Default`; symlinks entre runners não são necessários.
 - mantenha exclusão mútua pelo grupo de concurrency `build`: builds simultâneas nesse cache não foram validadas.
 - dispatch de build e publicação exigem pedido explícito; pushes em `main` que tocam build/patches/workflow também disparam compilação.
@@ -34,7 +34,7 @@
 
 - antes de medir, leia `bench/README.md` e `docs/BASELINE.md` para comandos, condições e limites.
 - rodada rápida documentada: `python3 bench/harness.py --quick --tabs 10`.
-- medir no Comet Lake com perfil `performance`, sem carga pesada paralela; não comparar diretamente com medições no runner WSL2.
+- medir no Comet Lake com perfil `performance`, sem carga pesada paralela; não comparar diretamente com medições no runner do Cezanne.
 - a linha de base existente tem limites: perfil novo não equivale a disco frio; Speedometer não está automatizado.
 - regra do produto: nenhuma mudança piora mais de 2% a linha de base; isolar mudanças para atribuir efeitos.
 - não há suíte genérica de testes/lint configurada na raiz. Defina checagens adequadas ao alvo; diferencie aplicação de patch, compilação, inicialização do pacote e medição de desempenho.
