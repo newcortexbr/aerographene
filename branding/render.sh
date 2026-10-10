@@ -21,3 +21,10 @@ for c in black white; do
             "PNG32:png/logo-name-22-$c-${s}x.png"
     done
 done
+# logotipo com nome de chrome://version (IDR_PRODUCT_LOGO[_WHITE], components/resources): 171x32 (1x) e 342x64 (2x)
+for c in black white; do
+    for s in 1 2; do
+        magick "src/logo-$c.png" -background none -resize "$((171*s))x$((32*s))" -gravity center -extent "$((171*s))x$((32*s))" \
+            "PNG32:png/logo-name-32-$c-${s}x.png"
+    done
+done
