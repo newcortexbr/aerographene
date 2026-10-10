@@ -53,6 +53,8 @@ aerographene/peek.patch
 aerographene/theme-tokens.patch
 aerographene/branding.patch
 aerographene/branding-version.patch
+aerographene/branding-scheme.patch
+aerographene/branding-desktop.patch
 aerographene/omnibox-views-popup.patch
 aerographene/pinned-grid-span.patch
 aerographene/pinned-span-drag.patch

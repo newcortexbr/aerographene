@@ -1,0 +1,32 @@
+aerographene: nome padrão do .desktop e ícone sem depender de CHROME_DESKTOP.
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: sem `CHROME_DESKTOP` (binário executado direto, sem
+packaging/arch/aerographene-wrapper), o Chromium usa `chromium-browser.desktop`, e a
+janela sai com WM_CLASS `chromium-browser`/`Chromium-browser` e ícone `chromium-browser`.
+O padrão passa a ser `aerographene.desktop` (WM_CLASS/app_id `aerographene`, classe
+`Aerographene`, igual a StartupWMClass) e o ícone `aerographene` (hicolor do pacote).
+`CHROME_DESKTOP` e `--class` continuam sobrepondo.
+
+--- a/chrome/common/channel_info_posix.cc
++++ b/chrome/common/channel_info_posix.cc
+@@ -148,7 +148,7 @@
+   if (name.has_value() && !name.value().empty()) {
+     return name.value();
+   }
+-  return "chromium-browser.desktop";
++  return "aerographene.desktop";
+ #endif
+ }
+ #endif  // BUILDFLAG(IS_LINUX)
+--- a/chrome/browser/shell_integration_linux.cc
++++ b/chrome/browser/shell_integration_linux.cc
+@@ -471,7 +471,7 @@
+ #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+   return "google-chrome";
+ #else  // BUILDFLAG(CHROMIUM_BRANDING)
+-  return "chromium-browser";
++  return "aerographene";
+ #endif
+ }
+ 
