@@ -5,8 +5,8 @@ helium/core/change-chromium-branding.patch do Helium 0.18.3). Licença: GPL-3.0.
 Propósito: `--version`, títulos e metadados usam "aerographene" em vez de
 "Chromium" (PRODUCT_FULLNAME etc. viram version.h/version_info); o perfil
 padrão vai para ${XDG_CONFIG_HOME:-~/.config}/aerographene (cache em
-~/.cache/aerographene), sem colidir com um Chromium instalado. Strings da UI
-em chromium_strings.grd continuam dizendo "Chromium" (fora do escopo).
+~/.cache/aerographene), sem colidir com um Chromium instalado.
+Strings da UI em chromium_strings.grd são trocadas por build/branding_strings.py (ids GRIT e .xtb), não por este patch.
 
 --- a/chrome/app/theme/chromium/BRANDING
 +++ b/chrome/app/theme/chromium/BRANDING

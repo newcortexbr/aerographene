@@ -76,7 +76,7 @@ Páginas internas (WebUI) usam `chrome://theme/colors.css`, gerado do ColorProvi
 
 ## nome e diretório de dados
 
-Com `aerographene/branding.patch`, `--version` mostra `aerographene 154.0.8037.97` e o perfil padrão fica em `${XDG_CONFIG_HOME:-$HOME/.config}/aerographene` (cache em `~/.cache/aerographene`), separado de um Chromium instalado; perfis antigos em `~/.config/chromium` não migram sozinhos (copiar ou usar `--user-data-dir`). O wrapper exporta `CHROME_DESKTOP=aerographene.desktop`. Policies continuam em `/etc/chromium/policies` e strings da UI ainda dizem "Chromium".
+Com `aerographene/branding.patch` e `aerographene/branding-version.patch`, `--version` mostra `aerographene 0.1.0 (Chromium 154.0.8037.97)` (`--product-version` mostra `0.1.0`; chrome://version e a página Sobre mostram `0.1.0 (Chromium 154.0.8037.97)` no lugar do número de versão) e o perfil padrão fica em `${XDG_CONFIG_HOME:-$HOME/.config}/aerographene` (cache em `~/.cache/aerographene`), separado de um Chromium instalado; perfis antigos em `~/.config/chromium` não migram sozinhos (copiar ou usar `--user-data-dir`). O wrapper exporta `CHROME_DESKTOP=aerographene.desktop`. Policies continuam em `/etc/chromium/policies` e as strings da UI passam a dizer "aerographene" pela troca de `build/branding_strings.py` (ver `docs/BUILD.md`, seção branding). A versão do produto (`AERO_VERSION` em `build/config.sh`, esquema v0.x.x; primeira = 0.1.0) é independente da do Chromium (154.0.8037.97), que segue em UA, extensões e `PRODUCT_VERSION`. `pkgver` do PKGBUILD = `AERO_VERSION`, tag `v${pkgver}`, e `_chromium` fica separado.
 
 ## PKGBUILD (`packaging/arch/`)
 
@@ -105,3 +105,35 @@ Pendências:
 - ícone só 48x48 (`product_logo_48.png`, placeholder).
 - nenhuma tag existe no repositório.
 - `namcap` e `makepkg` não rodados.
+
+## ícones e identidade visual (`branding/`)
+
+- fonte: `branding/make.py` gera os SVGs (`aerographene-mark.svg` com `currentColor`, `-black`, `-white`, e `aerographene-icon.svg`); `branding/render.sh` renderiza `branding/png/` (7 tamanhos 16–256 do ícone e do símbolo, mais 22 do símbolo, `aerographene-icon.ico` e `logo-name-22-*`). Usa `rsvg-convert` e ImageMagick (`magick`); os PNGs gerados ficam versionados porque o build não depende dessas ferramentas.
+- símbolo: quadrado 90×90 com o canto superior esquerdo cortado a 30° (único ângulo); a aba cortada fica deslocada 9 unidades na normal do corte (vão fixo). A lasca do "A" do PNG antigo não existe mais.
+- ícone do app: fundo `#060b18` (derivado de `--bg` `#04070e`, um pouco mais claro para destacar em painéis escuros), raio 22%, contorno `#8cb4ff` a 22%, símbolo em `--accent` `#6cb6ff`. Motivo: o azul é o único sinal de identidade da linguagem de design; azul sobre quase-preto tem contraste alto, o que sustenta 16 px. Símbolo a 72% da área.
+- `branding/src/logo-{black,white}.png`: cópia do logotipo raster provisório (`theming/design-language/assets/`); alimenta `product_logo_name_22*` (escalado para caber em 97×22 / 194×44, centralizado).
+- legibilidade (renderizações vistas, 16/32/128 px): em 128 e 32 o corte e o vão são nítidos; em 16 o vão vira uma linha de ~1 px antialiasada, ainda visível, e a silhueta (quadrado com canto cortado, azul sobre escuro) se reconhece. Não testado em tema claro de bandeja nem em lançador real.
+
+### substituição no build
+
+`build/apply_branding_assets.sh <src> [branding]` roda em `build/inner.sh` depois dos patches/domain substitution e antes do `gn gen`. Copia só se o conteúdo mudou (mtime preservado) e aborta se um destino sumiu ou não tem o tamanho do upstream 154.0.8037.97. Não é patch: PNG binário não entra na série. Os arquivos não são tocados por patches, então o re-patch incremental não os reverte; a recriação da árvore os reaplica.
+
+Mapa (destino em `chrome/app/theme/`, tamanho original conferido na tag 154.0.8037.97; lidos por `chrome_unscaled_resources.grd`, `theme_resources.grd`, `chrome/BUILD.gn:2016` e `chrome/installer/linux/BUILD.gn:404-410`):
+
+- `chromium/linux/product_logo_{24,48,64,128,256}.png` (mesmos tamanhos); 64/128/256 são `IDR_PRODUCT_LOGO_*`, 48 vai para `out/Default/product_logo_48.png`.
+- `chromium/product_logo_{16,24,48,64,128,256}.png`: `*_SHORTCUTS` e caminho não-Linux.
+- `chromium/product_logo_22_mono.png` (22×22, `IDR_STATUS_TRAY_ICON`): símbolo branco.
+- `default_100_percent/chromium/{,linux/}product_logo_{16,32}.png` (16², 32²) e `default_200_percent/chromium/product_logo_{16,32}.png` (32², 64²): `IDR_PRODUCT_LOGO_16/32`.
+- `default_{100,200}_percent/chromium/product_logo_name_22{,_white}.png` (97×22 / 194×44): `IDR_PRODUCT_LOGO_NAME_22[_WHITE]`.
+- `chromium/product_logo.svg` (256×256): `IDR_PRODUCT_LOGO_SVG`, substituído pelo SVG do ícone.
+
+Fora do mapa: `product_logo_animation.svg`; `win/` (`*.ico`, `tiles/`) e `mac/` (`app.icns`, `AppIcon.appiconset`), que não entram numa build Linux; `chromeos/`. `branding/png/aerographene-icon.ico` já está pronto (16–256) para uma eventual substituição de `win/chromium.ico`, mas esse arquivo tem só 16×16 originalmente e não foi mapeado.
+
+### pacote e desktop entry
+
+- `build/inner.sh` põe `icons/hicolor/<n>x<n>/apps/aerographene.png` (16, 24, 32, 48, 64, 128, 256) no tarball; o `PKGBUILD` instala cada um em `/usr/share/icons/hicolor/<n>x<n>/apps/aerographene.png`. Tarballs gerados antes desta mudança não têm `icons/` e quebram o `package()`.
+- `aerographene.desktop` mantém `Icon=aerographene`.
+
+### WM_CLASS / StartupWMClass
+
+Sem patch. `shell_integration_linux.cc:426-468` (154.0.8037.97) deriva a classe da variável `CHROME_DESKTOP` (nome do `.desktop` sem extensão); `aerographene-wrapper` exporta `CHROME_DESKTOP=aerographene.desktop`, então o nome da instância é `aerographene` (igual ao `StartupWMClass=aerographene`; o Wayland usa o mesmo valor como app_id) e a classe X11 é `Aerographene` (primeira letra maiúscula). O valor `Chromium-browser` só aparece quando o binário roda sem o wrapper (padrão `chromium-browser.desktop`). Nada a mudar enquanto o lançador for `/usr/bin/aerographene`; `--class` não é necessário. Não verificado em execução (sem build): conferir com `xprop WM_CLASS` / `hyprctl clients` e, se o shell casar só pela classe, trocar para `StartupWMClass=Aerographene`.

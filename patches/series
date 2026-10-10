@@ -52,6 +52,7 @@ aerographene/command-bar-type-icons.patch
 aerographene/peek.patch
 aerographene/theme-tokens.patch
 aerographene/branding.patch
+aerographene/branding-version.patch
 aerographene/omnibox-views-popup.patch
 aerographene/pinned-grid-span.patch
 aerographene/pinned-span-drag.patch
@@ -65,3 +66,4 @@ aerographene/pinned-folder.patch
 aerographene/omnibox-centered.patch
 aerographene/sidebar-geometry.patch
 aerographene/sidebar-toggle-button.patch
+aerographene/newtab-home.patch

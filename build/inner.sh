@@ -24,6 +24,7 @@ patch_hash() {
         cat "${AERO_PATCHES}/series"
         series_list "${AERO_PATCHES}" | while read -r p; do cat "${AERO_PATCHES}/${p}"; done
         echo "march=${MARCH}"
+        cat /aero/build/branding_strings.py
     } | sha256sum | cut -d' ' -f1
 }
 
@@ -62,6 +63,8 @@ incremental_repatch() {
     fi
     {
         patch_files "${AERO_STATE}"; patch_files "${AERO_PATCHES}"; echo "${GNFILE_REL}"
+        # arquivos de strings reescritos por build/branding_strings.py
+        if [ -d "${AERO_STATE}/strings-orig" ]; then (cd "${AERO_STATE}/strings-orig" && find . -type f | sed 's#^\./##'); fi
         echo build/linux/sysroot_scripts/sysroots.json; echo tools/clang/scripts/update.py
         echo tools/clang/scripts/build.py; echo tools/rust/build_rust.py; echo tools/rust/build_bindgen.py
         if [ -f "${_src_dir}/.domsub.stamp" ]; then cat "${_main_repo}/domain_substitution.list"; fi
@@ -88,6 +91,10 @@ PY
         rm -f "${DOMSUB_CACHE}" "${_src_dir}/.domsub.stamp"
     fi
     cp -p "${AERO_STATE}/BUILD.gn.orig" "${_src_dir}/${GNFILE_REL}" || return 1   # desfaz -march
+    if [ -d "${AERO_STATE}/strings-orig" ]; then
+        echo "== restaura .grd/.grdp/.xtb anteriores à troca de branding"
+        cp -a "${AERO_STATE}/strings-orig/." "${_src_dir}/" || return 1
+    fi
     echo "== patch -R da série anterior (ordem inversa)"
     local p
     while read -r p; do
@@ -193,6 +200,12 @@ if [ ! -f "${_src_dir}/.aero-patches.hash" ]; then
         mkdir -p "${AERO_STATE}/$(dirname "$p")"; cp -p "${AERO_PATCHES}/${p}" "${AERO_STATE}/${p}"
     done
     cp -p "$gnfile" "${AERO_STATE}/BUILD.gn.orig"
+
+    # versão do produto: chrome/common/aero_version.h (branding-version.patch) deve coincidir com build/config.sh
+    grep -q "kVersion = \"${AERO_VERSION}\";" "${_src_dir}/chrome/common/aero_version.h" \
+        || { echo "erro: AERO_VERSION=${AERO_VERSION} (build/config.sh) != chrome/common/aero_version.h; atualize patches/aerographene/branding-version.patch" >&2; exit 1; }
+    # strings da UI: Chrome/Chromium -> aerographene, com ids GRIT e .xtb reescritos (ver docs/BUILD.md)
+    python3 /aero/build/branding_strings.py --src "${_src_dir}" --backup "${AERO_STATE}/strings-orig"
     python3 - "$gnfile" "$MARCH" <<'PY'
 import sys
 path, march = sys.argv[1], sys.argv[2]
@@ -308,6 +321,9 @@ if [ ! -f "${ob_dir}/.aero-onboarding-${ob_ver}" ]; then
     touch "${ob_dir}/.aero-onboarding-${ob_ver}"
 fi
 
+echo "== ícones (branding/)"
+bash /aero/build/apply_branding_assets.sh "${_src_dir}" /aero/branding
+
 echo "== gn gen"
 cd "${_src_dir}"
 [ -x out/Default/gn ] || ./tools/gn/bootstrap/bootstrap.py -o out/Default/gn --skip-generate-buildfiles
@@ -333,7 +349,7 @@ if [ "${target}" != chrome ]; then
     exit 0
 fi
 echo "== pacote"
-name="aerographene-${UC_TAG}-${AERO_SHA:-local}-x86_64_linux"
+name="aerographene-${AERO_VERSION}-${UC_TAG}-${AERO_SHA:-local}-x86_64_linux"
 stage="/work/dist/${name}"
 rm -rf "$stage"; mkdir -p "$stage"
 for f in chrome chrome_100_percent.pak chrome_200_percent.pak chrome_crashpad_handler chrome-wrapper \
@@ -341,6 +357,11 @@ for f in chrome chrome_100_percent.pak chrome_200_percent.pak chrome_crashpad_ha
          libvulkan.so.1 locales product_logo_48.png resources.pak v8_context_snapshot.bin \
          vk_swiftshader_icd.json xdg-mime xdg-settings; do
     [ -e "out/Default/$f" ] && cp -r "out/Default/$f" "$stage/"
+done
+# ícones hicolor do tema do app (PKGBUILD instala em /usr/share/icons/hicolor/<n>x<n>/apps/aerographene.png)
+for n in 16 24 32 48 64 128 256; do
+    mkdir -p "$stage/icons/hicolor/${n}x${n}/apps"
+    cp "/aero/branding/png/aerographene-icon-${n}.png" "$stage/icons/hicolor/${n}x${n}/apps/aerographene.png"
 done
 # tabela de símbolos fora do pacote (~234 MB no chrome; o Helium distribui sem).
 # Não muda código executado: .symtab/.strtab não são carregadas em runtime.

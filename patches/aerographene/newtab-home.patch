@@ -1,0 +1,265 @@
+aerographene: home/nova aba como HTML estático local, sem Mojo.
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: página inicial no estilo dos mockups B-r04/A-r06 (wallpaper SVG
+procedural, relógio e saudação pela hora do sistema, data, caixa de busca)
+com custo de inicialização mínimo. O ungoogled (inox restore-classic-ntp) já
+manda chrome://newtab para chrome://new-tab-page-third-party/ fora do
+anônimo; esse WebUI sobe um bundle JS (Lit/Polymer), duas fábricas Mojo,
+MostVisitedHandler e a lista de top sites. Aqui o config passa a criar
+AeroNewTabUI: content::WebUIController puro (sem MojoWebUIController, sem
+bindings), com um WebUIDataSource de um recurso (IDR_AERO_NEWTAB_HTML, grd
+de chrome/browser) e strings.js com a URL de busca do mecanismo padrão. O
+URL, IsNewTabPageOrigin, o reverse-rewrite (omnibox limpa, "chrome://newtab")
+e o foco da omnibox em aba/janela nova ficam como estão. Guest e anônimo
+seguem como antes. Zero requisições externas; um script inline mínimo (CSP
+ScriptSrc sobrescrito para 'self' 'unsafe-inline'; Trusted Types mantido, a
+página só usa textContent). Texto e destaque vêm de chrome://theme/colors.css
+(--color-new-tab-page-text, --color-sys-primary) e por isso seguem os tokens
+do theme-tokens.patch. Sem clima, mensagem do dia nem mais visitados
+(precisariam de backend/Mojo). Compilação e runtime não verificados.
+
+--- a/chrome/browser/ui/webui/new_tab_page_third_party/new_tab_page_third_party_ui.cc
++++ b/chrome/browser/ui/webui/new_tab_page_third_party/new_tab_page_third_party_ui.cc
+@@ -5,10 +5,14 @@
+ #include "chrome/browser/ui/webui/new_tab_page_third_party/new_tab_page_third_party_ui.h"
+ 
+ #include <memory>
++#include <string>
+ #include <utility>
+ 
++#include "base/strings/utf_string_conversions.h"
+ #include "chrome/browser/browser_features.h"
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/search_engines/template_url_service_factory.h"
++#include "chrome/browser/search_engines/ui_thread_search_terms_data.h"
+ #include "chrome/browser/themes/theme_properties.h"
+ #include "chrome/browser/themes/theme_service.h"
+ #include "chrome/browser/ui/color/chrome_color_id.h"
+@@ -23,6 +27,7 @@
+ #include "chrome/common/pref_names.h"
+ #include "chrome/common/url_constants.h"
+ #include "chrome/common/webui_url_constants.h"
++#include "chrome/grit/browser_resources.h"
+ #include "chrome/grit/generated_resources.h"
+ #include "chrome/grit/new_tab_page_third_party_resources.h"
+ #include "chrome/grit/new_tab_page_third_party_resources_map.h"
+@@ -30,19 +35,82 @@
+ #include "components/favicon_base/favicon_url_parser.h"
+ #include "components/prefs/pref_service.h"
+ #include "components/search/ntp_features.h"
++#include "components/search_engines/template_url.h"
++#include "components/search_engines/template_url_service.h"
+ #include "components/strings/grit/components_strings.h"
+ #include "content/public/browser/web_contents.h"
++#include "content/public/browser/web_ui_controller.h"
+ #include "content/public/browser/web_ui_data_source.h"
++#include "services/network/public/mojom/content_security_policy.mojom.h"
+ #include "ui/base/accelerators/accelerator.h"
+ #include "ui/base/l10n/l10n_util.h"
+ #include "ui/color/color_provider.h"
+ #include "ui/gfx/color_utils.h"
+ #include "ui/webui/webui_util.h"
++#include "url/gurl.h"
+ #include "url/url_util.h"
+ 
+ using content::BrowserContext;
+ using content::WebContents;
+ 
++namespace {
++
++// aerographene: static home page (aero_newtab.html), no Mojo, no WebUI
++// bindings, no JS bundle. Replaces NewTabPageThirdPartyUI as the controller
++// behind chrome://new-tab-page-third-party/, the URL that ungoogled-chromium
++// (inox restore-classic-ntp) always maps chrome://newtab to outside incognito,
++// so omnibox display, focus and NTP detection keep working unchanged.
++class AeroNewTabUI : public content::WebUIController {
++ public:
++  explicit AeroNewTabUI(content::WebUI* web_ui)
++      : content::WebUIController(web_ui) {
++    Profile* profile = Profile::FromWebUI(web_ui);
++    content::WebUIDataSource* source = content::WebUIDataSource::CreateAndAdd(
++        profile, chrome::kChromeUINewTabPageThirdPartyHost);
++    source->SetDefaultResource(IDR_AERO_NEWTAB_HTML);
++    source->UseStringsJs();
++    source->AddString("searchUrl", GetSearchUrl(profile));
++    // The page is static and ships one inline script; it loads nothing from
++    // the network (strings.js and chrome://theme/colors.css are local).
++    source->OverrideContentSecurityPolicy(
++        network::mojom::CSPDirectiveName::ScriptSrc,
++        "script-src 'self' 'unsafe-inline';");
++    content::URLDataSource::Add(profile,
++                                std::make_unique<ThemeSource>(profile));
++  }
++
++  AeroNewTabUI(const AeroNewTabUI&) = delete;
++  AeroNewTabUI& operator=(const AeroNewTabUI&) = delete;
++
++ private:
++  // Default search engine URL with a marker where the query goes. Empty when
++  // there is no usable engine (ungoogled "No Search", POST-only, non-http).
++  static std::string GetSearchUrl(Profile* profile) {
++    constexpr char kMarker[] = "aeroq9x";
++    TemplateURLService* service =
++        TemplateURLServiceFactory::GetForProfile(profile);
++    const TemplateURL* provider =
++        service ? service->GetDefaultSearchProvider() : nullptr;
++    if (!provider || !provider->search_url_post_params().empty()) {
++      return std::string();
++    }
++    UIThreadSearchTermsData search_terms_data;
++    if (!provider->SupportsReplacement(search_terms_data)) {
++      return std::string();
++    }
++    GURL url(provider->url_ref().ReplaceSearchTerms(
++        TemplateURLRef::SearchTermsArgs(base::UTF8ToUTF16(kMarker)),
++        search_terms_data));
++    if (!url.is_valid() || !url.SchemeIsHTTPOrHTTPS() ||
++        url.host().find(kMarker) != std::string::npos) {
++      return std::string();
++    }
++    return url.spec();
++  }
++};
++
++}  // namespace
++
+ bool NewTabPageThirdPartyUIConfig::IsWebUIEnabled(
+     content::BrowserContext* browser_context) {
+   Profile* profile = Profile::FromBrowserContext(browser_context);
+@@ -57,7 +125,7 @@
+     return std::make_unique<PageNotAvailableForGuestUI>(
+         web_ui, chrome::kChromeUINewTabPageThirdPartyHost);
+   }
+-  return std::make_unique<NewTabPageThirdPartyUI>(web_ui);
++  return std::make_unique<AeroNewTabUI>(web_ui);
+ }
+ 
+ namespace {
+--- a/chrome/browser/ui/webui/new_tab_page_third_party/BUILD.gn
++++ b/chrome/browser/ui/webui/new_tab_page_third_party/BUILD.gn
+@@ -47,8 +47,10 @@
+       ":mojo_bindings",
+       ":new_tab_page_third_party",
+       "//base",
++      "//chrome/browser:resources",
+       "//chrome/browser/profiles:profile",
+       "//chrome/browser/resources/new_tab_page_third_party:resources",
++      "//chrome/browser/search_engines",
+       "//chrome/browser/themes",
+       "//chrome/browser/ui/color:color_headers",
+       "//chrome/browser/ui/search",
+@@ -62,7 +64,9 @@
+       "//components/favicon_base",
+       "//components/prefs",
+       "//components/search",
++      "//components/search_engines",
+       "//content/public/browser",
++      "//services/network/public/mojom",
+       "//ui/color",
+       "//ui/gfx:color_utils",
+       "//ui/native_theme",
+--- a/chrome/browser/browser_resources.grd
++++ b/chrome/browser/browser_resources.grd
+@@ -104,6 +104,9 @@
+       </if>
+ 
+       <include name="IDR_AD_NETWORK_HASHES" file="resources\ad_networks.dat" type="BINDATA" />
++      <if expr="not is_android">
++        <include name="IDR_AERO_NEWTAB_HTML" file="resources\aero_newtab\aero_newtab.html" type="BINDATA" />
++      </if>
+       <if expr="is_chromeos">
+         <include name="IDR_CHROME_APP_MANIFEST" file="resources\chrome_app\manifest.json" type="BINDATA" />
+         <include name="IDR_URL_MOJOM_LITE_JS" file="${root_gen_dir}\url\mojom\url.mojom-lite.js" use_base_dir="false" type="BINDATA" />
+--- /dev/null
++++ b/chrome/browser/resources/aero_newtab/aero_newtab.html
+@@ -0,0 +1,89 @@
++<!doctype html>
++<html lang="en">
++<head>
++<meta charset="utf-8">
++<title>New Tab</title>
++<meta name="viewport" content="width=device-width,initial-scale=1">
++<meta name="color-scheme" content="dark light">
++<link rel="stylesheet" href="chrome://theme/colors.css?sets=ui,chrome">
++<style>
++:root{--fb-text:#EAF2FF;--fb-accent:#6cb6ff;--bg0:#03060d;--bg1:#050b19;--bg2:#02040a;--n1:#1b4fa8;--n2:#4a2fa0;--n3:#0e7a9c;--ln1:#6cb6ff;--ln2:#7fd8ff;--ln3:#8b7bff;--star:#cfe3ff;--star-o:1;--scrim:2,5,12}
++@media (prefers-color-scheme:light){:root{--fb-text:#0B1220;--fb-accent:#1f6feb;--bg0:#eef3fb;--bg1:#e6edf8;--bg2:#dfe8f6;--n1:#7aa8ff;--n2:#b3a4ff;--n3:#7fd6ea;--ln1:#3b82f6;--ln2:#0ea5c6;--ln3:#6d5bff;--star-o:0;--scrim:244,248,255}}
++:root{--text:var(--color-new-tab-page-text,var(--fb-text));--accent:var(--color-sys-primary,var(--fb-accent));--text2:color-mix(in srgb,var(--text) 68%,transparent);--line:color-mix(in srgb,var(--accent) 24%,transparent)}
++*{box-sizing:border-box;margin:0}
++html,body{height:100%;overflow:hidden;background:var(--bg0)}
++body{font:13px/1.2 "Noto Sans","DejaVu Sans",Inter,system-ui,sans-serif;color:var(--text)}
++.wp{position:fixed;inset:0;width:100%;height:100%;display:block}
++.scrim{position:fixed;inset:0;background:radial-gradient(ellipse at 50% 46%,rgba(var(--scrim),.38),rgba(var(--scrim),.12) 60%,transparent),linear-gradient(180deg,rgba(var(--scrim),.55),transparent 30%)}
++main{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding-bottom:40px}
++.clock{font-size:13px;letter-spacing:.32em;color:var(--text2);margin-bottom:10px}
++h1{font-weight:200;font-size:76px;line-height:1;letter-spacing:-.02em;text-shadow:0 0 40px color-mix(in srgb,var(--accent) 35%,transparent)}
++.date{margin-top:22px;color:var(--text2);font-size:14px;letter-spacing:.14em;text-transform:uppercase}
++form{margin-top:36px;width:420px;max-width:calc(100vw - 48px);height:44px;display:flex;align-items:center;gap:12px;padding:0 20px;border-radius:4px;background:color-mix(in srgb,var(--bg1) 60%,transparent);box-shadow:inset 0 0 0 1px var(--line);color:var(--text2)}
++form:hover{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 50%,transparent)}
++form:focus-within{box-shadow:inset 0 0 0 2px var(--accent)}
++svg.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;flex:none}
++input{flex:1;min-width:0;height:100%;background:none;border:0;outline:0;color:var(--text);font-size:14px;font-family:inherit}
++input::placeholder{color:var(--text2);opacity:1}
++@media (max-width:560px){h1{font-size:48px}}
++</style>
++</head>
++<body>
++<svg class="wp" viewBox="0 0 1440 800" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
++<defs>
++<radialGradient id="n1"><stop offset="0" stop-color="var(--n1)" stop-opacity=".75"/><stop offset="1" stop-color="var(--n1)" stop-opacity="0"/></radialGradient>
++<radialGradient id="n2"><stop offset="0" stop-color="var(--n2)" stop-opacity=".55"/><stop offset="1" stop-color="var(--n2)" stop-opacity="0"/></radialGradient>
++<radialGradient id="n3"><stop offset="0" stop-color="var(--n3)" stop-opacity=".45"/><stop offset="1" stop-color="var(--n3)" stop-opacity="0"/></radialGradient>
++<linearGradient id="l1" x1="0" x2="1"><stop offset="0" stop-color="var(--ln1)" stop-opacity="0"/><stop offset=".5" stop-color="var(--ln2)" stop-opacity=".55"/><stop offset="1" stop-color="var(--ln3)" stop-opacity="0"/></linearGradient>
++<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--bg0)"/><stop offset=".6" stop-color="var(--bg1)"/><stop offset="1" stop-color="var(--bg2)"/></linearGradient>
++</defs>
++<rect width="1440" height="800" fill="url(#bg)"/>
++<ellipse cx="420" cy="360" rx="620" ry="300" fill="url(#n1)" transform="rotate(-14 420 360)"/>
++<ellipse cx="1040" cy="300" rx="520" ry="270" fill="url(#n2)" transform="rotate(12 1040 300)"/>
++<ellipse cx="760" cy="640" rx="660" ry="220" fill="url(#n3)"/>
++<g fill="none" stroke="url(#l1)" stroke-linecap="round"><path d="M-40 520C260 380 480 600 760 440S1200 300 1480 420" stroke-width="1.4"/><path d="M-40 560C240 430 500 640 780 490S1220 350 1480 470" stroke-width=".9" opacity=".7"/><path d="M-40 480C300 330 520 560 740 390S1180 250 1480 360" stroke-width=".7" opacity=".5"/><path d="M200 700C480 600 800 700 1100 580" stroke-width="5" opacity=".14"/></g>
++<g fill="var(--star)" opacity="var(--star-o)"><circle cx="180" cy="150" r="1.2" opacity=".8"/><circle cx="520" cy="90" r=".9" opacity=".6"/><circle cx="930" cy="130" r="1.4" opacity=".85"/><circle cx="1260" cy="210" r="1" opacity=".6"/><circle cx="1360" cy="90" r=".8" opacity=".5"/><circle cx="330" cy="650" r="1" opacity=".5"/><circle cx="1120" cy="700" r="1.1" opacity=".6"/></g>
++</svg>
++<div class="scrim"></div>
++<main>
++<div class="clock" id="clk"></div>
++<h1 id="hi"></h1>
++<div class="date" id="dt"></div>
++<form id="f" role="search">
++<svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 2.5h4l2 2v4l-2 2h-4l-2-2v-4zM10.5 10.5l3 3"/></svg>
++<input id="q" type="text" autocomplete="off" spellcheck="false">
++</form>
++</main>
++<script>var loadTimeData={};</script>
++<script src="strings.js"></script>
++<script>
++(function(){
++var $=function(i){return document.getElementById(i)};
++var pt=(navigator.language||'en').toLowerCase().indexOf('pt')==0;
++var L=pt?{lang:'pt-BR',title:'Nova aba',hi:['bom dia.','boa tarde.','boa noite.'],ph:'Buscar ou abrir um endereço',nos:'Abrir um endereço'}
++        :{lang:'en',title:'New Tab',hi:['good morning.','good afternoon.','good evening.'],ph:'Search or enter an address',nos:'Enter an address'};
++var tpl=(loadTimeData.data&&loadTimeData.data.searchUrl)||'';
++var q=$('q');
++document.documentElement.lang=L.lang;document.title=L.title;
++q.placeholder=tpl?L.ph:L.nos;q.setAttribute('aria-label',q.placeholder);
++function tick(){
++ var d=new Date(),h=d.getHours();
++ $('clk').textContent=d.toLocaleTimeString(L.lang,{hour:'2-digit',minute:'2-digit'});
++ $('hi').textContent=L.hi[h<5||h>=18?2:h<12?0:1];
++ $('dt').textContent=d.toLocaleDateString(L.lang,{weekday:'long',day:'numeric',month:'long'});
++ setTimeout(tick,60050-(d.getSeconds()*1000+d.getMilliseconds()));
++}
++tick();
++$('f').addEventListener('submit',function(e){
++ e.preventDefault();
++ var s=q.value.trim(),u='';
++ if(!s)return;
++ if(/^https?:\/\/\S+$/i.test(s))u=s;
++ else if(/^[^\s\/:]+\.[a-z]{2,}(:\d+)?([\/?#]\S*)?$/i.test(s))u='https://'+s;
++ else if(tpl)u=tpl.split('aeroq9x').join(encodeURIComponent(s));
++ if(u)location.assign(u);
++});
++})();
++</script>
++</body>
++</html>
