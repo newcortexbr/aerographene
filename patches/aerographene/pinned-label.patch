@@ -476,7 +476,7 @@ pinned-model.patch, pinned-model-tabstrip.patch e pinned-closed.patch.
  };
  
  BEGIN_METADATA(AerographeneClosedPinnedView)
-@@ -885,6 +973,8 @@
+@@ -880,6 +968,8 @@
      } else {
        view = AddChildView(std::make_unique<AerographeneClosedPinnedView>(
            base::BindRepeating(&PinnedTabContainerView::OpenClosedPinned,
@@ -485,7 +485,7 @@ pinned-model.patch, pinned-model-tabstrip.patch e pinned-closed.patch.
                                base::Unretained(this), item.uuid)));
      }
      view->Update(item, static_cast<int>(i), model->GetFavicon(item.uuid));
-@@ -943,10 +1033,24 @@
+@@ -946,10 +1036,24 @@
    mirror->OpenClosedEntry(browser_view->browser(), uuid);
  }
  

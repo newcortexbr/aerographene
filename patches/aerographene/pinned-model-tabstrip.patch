@@ -16,9 +16,7 @@ da pasta; marca `aerographene.open=1` (meta info nova) e alinha a ordem com os
 vizinhos pinned da faixa (só move se a ordem relativa estiver errada; nós
 fechados entre eles ficam no lugar; nós dentro de gaveta não se movem).
 Desafixar remove o nó. Mover reordena. URL commitada nova atualiza o nó
-(SetURL) só quando muda origem+path: hash, query e pushState no mesmo path
-não gravam no BookmarkModel; a reassociação aceita origem+path quando não
-há URL exata. Fechar pela usuária mantém o nó e apaga `open` (pinned fechado; o
+(SetURL). Fechar pela usuária mantém o nó e apaga `open` (pinned fechado; o
 placeholder é a F5). Fechar a janela inteira (closing_all) ou sair
 (AddClosingAllBrowsersCallback) mantém `open`. Nó apagado fora (gerenciador
 de favoritos, Sync): a aba continua pinned sem nó; nada é recriado até fixar
@@ -93,7 +91,7 @@ pinned-span-drag.patch.
  StartupTabs StartupTabProviderImpl::GetPreferencesTabs(
 --- a/chrome/browser/ui/tabs/BUILD.gn
 +++ b/chrome/browser/ui/tabs/BUILD.gn
-@@ -413,6 +413,7 @@
+@@ -412,6 +412,7 @@
      sources = [
        "aerographene/pinned_model.h",
        "aerographene/pinned_model_factory.h",
@@ -101,7 +99,7 @@ pinned-span-drag.patch.
        "features.h",
        "horizontal_tab_strip_metrics.h",
        "hover_tab_selector.h",
-@@ -489,6 +490,7 @@
+@@ -488,6 +489,7 @@
      sources = [
        "aerographene/pinned_model.cc",
        "aerographene/pinned_model_factory.cc",
@@ -127,31 +125,7 @@ pinned-span-drag.patch.
    if (with_children && item.is_folder) {
      for (const auto& child : node->children()) {
        if (child->is_url()) {
-@@ -107,6 +109,23 @@
-   return MakeItem(node, true);
- }
- 
-+bool PinnedModel::Contains(const base::Uuid& uuid) const {
-+  return Resolve(uuid) != nullptr;
-+}
-+
-+std::optional<int> PinnedModel::GetSpan(const base::Uuid& uuid) const {
-+  const BookmarkNode* node = Resolve(uuid);
-+  if (!node) {
-+    return std::nullopt;
-+  }
-+  return ReadSpan(node);
-+}
-+
-+GURL PinnedModel::GetURL(const base::Uuid& uuid) const {
-+  const BookmarkNode* node = Resolve(uuid);
-+  return node && node->is_url() ? node->url() : GURL();
-+}
-+
- std::optional<base::Uuid> PinnedModel::AddPinned(const GURL& url,
-                                                  const std::u16string& title,
-                                                  const base::Uuid& parent,
-@@ -182,7 +201,42 @@
+@@ -182,7 +184,42 @@
    return true;
  }
  
@@ -234,19 +208,7 @@ pinned-span-drag.patch.
    std::vector<PinnedItem> children;  // Only filled for folders.
  };
  
-@@ -82,6 +92,11 @@
-   // Top-level entries in order; folders include their children.
-   std::vector<PinnedItem> GetPinned() const;
-   std::optional<PinnedItem> Find(const base::Uuid& uuid) const;
-+  // Cheap lookups that do not build a PinnedItem.
-+  bool Contains(const base::Uuid& uuid) const;
-+  std::optional<int> GetSpan(const base::Uuid& uuid) const;
-+  // Empty for folders and unknown entries.
-+  GURL GetURL(const base::Uuid& uuid) const;
- 
-   // `parent` invalid = top level; otherwise it must be a drawer folder. `index`
-   // is clamped to the end. Return the new entry's uuid or nullopt on failure.
-@@ -98,6 +113,17 @@
+@@ -98,6 +108,17 @@
    // span >= 1 (1 removes the key); label empty removes the key.
    bool SetSpan(const base::Uuid& uuid, int span);
    bool SetLabel(const base::Uuid& uuid, const std::string& label);
@@ -264,7 +226,7 @@ pinned-span-drag.patch.
  
    // KeyedService:
    void Shutdown() override;
-@@ -138,6 +164,7 @@
+@@ -138,6 +159,7 @@
    void NotifyChanged();
  
    raw_ptr<bookmarks::BookmarkModel> model_;
@@ -287,7 +249,7 @@ pinned-span-drag.patch.
  bool PinnedModelFactory::ServiceIsCreatedWithBrowserContext() const {
 --- /dev/null
 +++ b/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc
-@@ -0,0 +1,343 @@
+@@ -0,0 +1,327 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -306,7 +268,6 @@ pinned-span-drag.patch.
 +#include "chrome/browser/ui/tabs/tab_strip_model.h"
 +#include "content/public/browser/web_contents.h"
 +#include "url/gurl.h"
-+#include "url/origin.h"
 +
 +namespace aerographene {
 +
@@ -323,13 +284,6 @@ pinned-span-drag.patch.
 +    url = contents->GetVisibleURL();
 +  }
 +  return url;
-+}
-+
-+// The entry follows the tab only across documents: same-document navigations
-+// (fragment, pushState/replaceState keeping the path) and query changes do not
-+// rewrite the bookmark, so SPAs do not hit the BookmarkModel on every change.
-+bool SameOriginAndPath(const GURL& a, const GURL& b) {
-+  return url::Origin::Create(a).IsSameOriginWith(b) && a.path() == b.path();
 +}
 +
 +TabStripModel* GetTabStrip(tabs::TabInterface* tab) {
@@ -373,7 +327,7 @@ pinned-span-drag.patch.
 +    return std::nullopt;
 +  }
 +  const auto it = tab_nodes_.find(tab->GetHandle());
-+  if (it == tab_nodes_.end() || !model_->Contains(it->second)) {
++  if (it == tab_nodes_.end() || !model_->Find(it->second)) {
 +    return std::nullopt;
 +  }
 +  return it->second;
@@ -385,7 +339,8 @@ pinned-span-drag.patch.
 +  if (!uuid) {
 +    return std::nullopt;
 +  }
-+  return model_->GetSpan(*uuid);
++  const std::optional<PinnedItem> item = model_->Find(*uuid);
++  return item ? std::optional<int>(item->span) : std::nullopt;
 +}
 +
 +bool PinnedTabMirror::SetSpanForTab(const tabs::TabInterface* tab, int span) {
@@ -461,8 +416,8 @@ pinned-span-drag.patch.
 +    return;
 +  }
 +  const GURL url = GetTabURL(tab);
-+  const GURL stored = model_->GetURL(*uuid);
-+  if (url.is_valid() && stored.is_valid() && !SameOriginAndPath(stored, url)) {
++  const std::optional<PinnedItem> item = model_->Find(*uuid);
++  if (item && url.is_valid() && item->url != url) {
 +    base::AutoReset<bool> writing(&writing_, true);
 +    model_->SetURL(*uuid, url);
 +  }
@@ -498,7 +453,7 @@ pinned-span-drag.patch.
 +  // Drop mappings whose entry is gone (removed in the bookmark manager or by
 +  // Sync). The tabs stay pinned; nothing is recreated here.
 +  std::erase_if(tab_nodes_, [this](const auto& entry) {
-+    return !model_->Contains(entry.second);
++    return !model_->Find(entry.second);
 +  });
 +}
 +
@@ -546,22 +501,13 @@ pinned-span-drag.patch.
 +  }
 +  std::optional<base::Uuid> match;
 +  bool match_open = false;
-+  bool match_exact = false;
-+  // Exact URL first; the stored URL may lag same-document changes, so fall back
-+  // to origin + path before creating a duplicate entry.
 +  auto consider = [&](const PinnedItem& item) {
-+    if (item.is_folder || taken.contains(item.uuid)) {
++    if (item.is_folder || item.url != url || taken.contains(item.uuid)) {
 +      return;
 +    }
-+    const bool exact = item.url == url;
-+    if (!exact && !SameOriginAndPath(item.url, url)) {
-+      return;
-+    }
-+    if (!match || (exact && !match_exact) ||
-+        (exact == match_exact && item.open && !match_open)) {
++    if (!match || (item.open && !match_open)) {
 +      match = item.uuid;
 +      match_open = item.open;
-+      match_exact = exact;
 +    }
 +  };
 +  for (const PinnedItem& item : model_->GetPinned()) {

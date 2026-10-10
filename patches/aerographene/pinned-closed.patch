@@ -33,7 +33,7 @@ pinned-model.patch e pinned-model-tabstrip.patch.
 
 --- a/chrome/browser/ui/tabs/aerographene/pinned_model.cc
 +++ b/chrome/browser/ui/tabs/aerographene/pinned_model.cc
-@@ -299,7 +299,20 @@ void PinnedModel::BookmarkMetaInfoChanged(const BookmarkNode* node) {
+@@ -282,7 +282,20 @@ void PinnedModel::BookmarkMetaInfoChanged(const BookmarkNode* node) {
    }
  }
  
@@ -65,7 +65,7 @@ pinned-model.patch e pinned-model-tabstrip.patch.
  #include "url/gurl.h"
  
  class Profile;
-@@ -116,6 +117,9 @@ class PinnedModel : public KeyedService,
+@@ -111,6 +112,9 @@ class PinnedModel : public KeyedService,
    // URL entries only.
    bool SetURL(const base::Uuid& uuid, const GURL& url);
    bool SetOpen(const base::Uuid& uuid, bool open);
@@ -93,7 +93,7 @@ pinned-model.patch e pinned-model-tabstrip.patch.
  #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
  #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
  #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
-@@ -103,6 +105,50 @@ bool PinnedTabMirror::SetSpanForTab(const tabs::TabInterface* tab, int span) {
+@@ -96,6 +98,50 @@ bool PinnedTabMirror::SetSpanForTab(const tabs::TabInterface* tab, int span) {
    return uuid && model_->SetSpan(*uuid, span);
  }
  
@@ -144,7 +144,7 @@ pinned-model.patch e pinned-model-tabstrip.patch.
  void PinnedTabMirror::OnBrowserCreated(BrowserWindowInterface* browser) {
    if (browser->GetProfile() != profile_ ||
        browser->GetType() != BrowserWindowInterface::TYPE_NORMAL) {
-@@ -244,6 +290,21 @@ void PinnedTabMirror::Associate(tabs::TabInterface* tab) {
+@@ -237,6 +283,21 @@ void PinnedTabMirror::Associate(tabs::TabInterface* tab) {
      AlignOrder(tab);
      return;
    }
@@ -389,7 +389,7 @@ pinned-model.patch e pinned-model-tabstrip.patch.
    const TabCollectionNode* node = GetCollectionNodeFromView(*child);
    if (!node) {
      return 1;
-@@ -719,14 +819,130 @@ void PinnedTabContainerView::ViewHierarchyChanged(
+@@ -719,14 +819,133 @@ void PinnedTabContainerView::ViewHierarchyChanged(
    }
  }
  
@@ -435,11 +435,6 @@ pinned-model.patch e pinned-model-tabstrip.patch.
 +      collection_node_->orientation() == TabStripOrientation::kVertical) {
 +    items = model->GetPinned();
 +  }
-+  // Layout reads model order from here instead of copying the model per frame.
-+  model_index_.clear();
-+  for (size_t i = 0; i < items.size(); ++i) {
-+    model_index_[items[i].uuid] = static_cast<int>(i);
-+  }
 +
 +  std::map<base::Uuid, AerographeneClosedPinnedView*> previous;
 +  for (AerographeneClosedPinnedView* view : closed_views_) {
@@ -481,6 +476,14 @@ pinned-model.patch e pinned-model-tabstrip.patch.
 +  if (closed_views_.empty()) {
 +    return live;
 +  }
++  std::map<base::Uuid, int> model_index;
++  if (const aerographene::PinnedModel* model = GetWindowPinnedModel()) {
++    const std::vector<aerographene::PinnedItem> items = model->GetPinned();
++    for (size_t i = 0; i < items.size(); ++i) {
++      model_index[items[i].uuid] = static_cast<int>(i);
++    }
++  }
++
 +  std::vector<views::View*> result;
 +  result.reserve(live.size() + closed_views_.size());
 +  size_t next_closed = 0;
@@ -491,7 +494,7 @@ pinned-model.patch e pinned-model-tabstrip.patch.
 +    const std::optional<base::Uuid> uuid =
 +        mirror ? mirror->GetEntryForTab(tab) : std::nullopt;
 +    if (uuid) {
-+      if (auto it = model_index_.find(*uuid); it != model_index_.end()) {
++      if (auto it = model_index.find(*uuid); it != model_index.end()) {
 +        while (next_closed < closed_views_.size() &&
 +               closed_views_[next_closed]->model_index() < it->second) {
 +          result.push_back(closed_views_[next_closed++].get());
@@ -546,7 +549,7 @@ pinned-model.patch e pinned-model-tabstrip.patch.
  
    // views::ViewTargeterDelegate:
    views::View* TargetForRect(views::View* root, const gfx::Rect& rect) override;
-@@ -139,6 +142,25 @@ class PinnedTabContainerView
+@@ -139,6 +142,22 @@ class PinnedTabContainerView
    // Re-reads persisted spans into the TabViews and relayouts.
    void RefreshPersistedSpans();
  
@@ -565,9 +568,6 @@ pinned-model.patch e pinned-model-tabstrip.patch.
 +  // Placeholders of closed pinned entries, in model order. Not tab collection
 +  // nodes: they take no part in tab drags, link drops or span resize.
 +  std::vector<raw_ptr<AerographeneClosedPinnedView>> closed_views_;
-+  // Model order of the entries, refreshed with `closed_views_` on every model
-+  // change so layout does not copy the model.
-+  std::map<base::Uuid, int> model_index_;
 +
    // Started with the first tab child; spans come from its profile's model.
    base::ScopedObservation<aerographene::PinnedModel,
