@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""aerographene: troca "Chrome"/"Chromium" por "aerographene" nas strings de UI (GRIT).
+"""aerographene: troca "Chrome"/"Chromium"/"Helium" por "aerographene" nas strings de UI (GRIT)
+e injeta traduções pt-BR das mensagens adicionadas pelos patches (build/strings_ptbr_extra.json).
 
 Os ids de mensagem GRIT são fingerprints do texto inglês (+ meaning). Mudar o texto
 no .grd/.grdp sem mudar o id nos .xtb faria todas as traduções caírem em inglês.
@@ -9,22 +10,32 @@ Para cada mensagem afetada este script:
      grd_reader.Parse num grd sintético), sem reimplementar o fingerprint;
   3. reescreve nos .xtb de cada idioma o id antigo -> novo e troca o nome do produto
      na tradução quando ele aparece literal.
-Idempotente: depois da troca não sobra texto a trocar. Chamado por build/inner.sh depois
+Depois, para cada mensagem cujo nome está no JSON de extras, calcula o id do texto inglês
+(já trocado) e acrescenta <translation> no .xtb pt-BR do grd se o id ainda não existir.
+Idempotente: depois da troca não sobra texto a trocar e ids já presentes não são reinjetados. Chamado por build/inner.sh depois
 dos patches e antes do `gn gen`. Detalhes e exclusões: docs/BUILD.md (seção branding).
 
 Uso:
   branding_strings.py [--src DIR] [--check [--list]] [--root grd ...] [--backup DIR]
+                      [--extra JSON | --no-extra]
 """
 import argparse
 import io
+import json
 import os
 import re
 import shutil
 import sys
 import tempfile
 from collections import Counter
+from xml.sax.saxutils import escape
 
 NAME = "aerographene"
+HERE = os.path.dirname(os.path.abspath(__file__))
+EXTRA_DEFAULT = os.path.join(HERE, "strings_ptbr_extra.json")
+EXTRA_LANG = "pt-BR"
+# mensagens do Helium que falam do projeto Helium (não do navegador): mantêm o nome
+KEEP_NAMES = {"IDS_HELIUM_ONBOARDING_PARTNER_TITLE", "IDS_HELIUM_ONBOARDING_PARTNER_TOOLTIP"}
 
 # grds raiz (relativos a --src) cujas mensagens são procuradas; partes (<part file=...>)
 # e xtb (<translations>) saem do próprio grd. Ausentes na árvore são ignorados.
@@ -45,11 +56,12 @@ _EXCLUDE_AFTER = (
     r"Dino|Updater|Nearby|Sync\sfor\b)"
 )
 # \w e "/" "." "-" antes: não pegar "mychrome", URLs "www.Chrome" etc. Só maiúscula inicial.
+# Helium: nome do navegador-base (patches do Helium e helium-onboarding); sem exclusões.
 _PRODUCT = re.compile(
-    r"(?<![\w/.-])(?:Google\s(?:&nbsp;)?)?Chrom(?:e|ium)(?!\w)(?!" + _EXCLUDE_AFTER + r")"
+    r"(?<![\w/.-])(?:(?:Google\s(?:&nbsp;)?)?Chrom(?:e|ium)(?!\w)(?!" + _EXCLUDE_AFTER + r")|Helium(?!\w))"
 )
 # "a Chrome" -> "an aerographene" (inglês; o nome começa com vogal)
-_ARTICLE = re.compile(r"(?<![\w/.-])([Aa]) (?=(?:Google\s)?Chrom(?:e|ium)(?!\w)(?!" + _EXCLUDE_AFTER + r"))")
+_ARTICLE = re.compile(r"(?<![\w/.-])([Aa]) (?=(?:(?:Google\s)?Chrom(?:e|ium)(?!\w)(?!" + _EXCLUDE_AFTER + r")|Helium(?!\w)))")
 
 _ATTR = r"""(?:[^>"']|"[^"]*"|'[^']*')*"""
 # comentário ou <message ...>...</message>; comentários são pulados
@@ -156,10 +168,65 @@ def collect_files(root_path):
     return order
 
 
-def process_root(root, ids, check, stats, src, backup, listing=False):
+_PH = re.compile(r'<ph\s+name="([^"]+)"')
+_PH_XTB = re.compile(r'(<ph\s+name="[A-Za-z0-9_]+"\s*/>)')
+
+
+def load_extra(path):
+    """JSON nome IDS -> texto pt-BR (chaves com "_" no início são comentários)."""
+    if not path:
+        return {}
+    data = json.load(open(path, encoding="utf-8"))
+    return {k: v for k, v in data.items() if not k.startswith("_")}
+
+
+def xtb_text(text):
+    """Texto do JSON -> conteúdo de <translation>: escapa tudo exceto <ph name="X"/>."""
+    return "".join(part if _PH_XTB.fullmatch(part) else escape(part) for part in _PH_XTB.split(text))
+
+
+def inject_extra(files, contents, xtb_path, xtb_txt, extra, ids, stats, src):
+    """Acrescenta ao xtb as traduções de `extra` ausentes. Devolve o xtb novo (ou None)."""
+    blocks, names = [], []
+    for p in files:
+        for m in _MSG.finditer(contents[p]):
+            if m.group("msg") is None:
+                continue
+            attrs = m.group("attrs")
+            nm = re.search(r'\bname="([^"]*)"', attrs)
+            if not nm or nm.group(1) not in extra:
+                continue
+            if 'use_name_for_id="true"' in attrs or 'translateable="false"' in attrs:
+                continue
+            want = set(_PH.findall(m.group("body")))
+            got = set(_PH.findall(extra[nm.group(1)]))
+            if want != got:
+                print("aviso: %s: placeholders %s != %s, sem tradução" % (nm.group(1), sorted(got), sorted(want)))
+                continue
+            blocks.append((attrs, m.group("body")))
+            names.append(nm.group(1))
+    if not blocks:
+        return None
+    have = set(m.group(2) for m in _XTB.finditer(xtb_txt))
+    add, seen = [], set()
+    for name, i in zip(names, ids.ids(blocks)):
+        if i and i not in have and i not in seen:
+            seen.add(i)
+            add.append('<translation id="%s">%s</translation>\n' % (i, xtb_text(extra[name])))
+    stats["extra_found"] += len(set(names))
+    if not add:
+        return None
+    end = xtb_txt.rindex("</translationbundle>")
+    print("  extra %-6s +%d traduções  %s" % (EXTRA_LANG, len(add), os.path.relpath(xtb_path, src)))
+    stats["extra_added"] += len(add)
+    return xtb_txt[:end] + "".join(add) + xtb_txt[end:]
+
+
+def process_root(root, ids, check, stats, src, backup, listing=False, extra=None):
     files = collect_files(root)
     if not files:
         return
+    contents = {}  # path -> conteúdo atual (pós-troca)
     new_text = {}  # path -> novo conteúdo
     affected = []  # (path, attrs, old_body, new_body, name)
     for p in files:
@@ -169,75 +236,89 @@ def process_root(root, ids, check, stats, src, backup, listing=False):
             if m.group("msg") is None:
                 return m.group(0)
             attrs, body = m.group("attrs"), m.group("body")
+            nm = re.search(r'\bname="([^"]*)"', attrs)
+            if nm and nm.group(1) in KEEP_NAMES:
+                return m.group(0)
             nb, n = rebrand_markup(body, True)
             if not n:
                 return m.group(0)
-            nm = re.search(r'\bname="([^"]*)"', attrs)
             affected.append((p, attrs, body, nb, nm.group(1) if nm else "?"))
             return m.group(0)[: m.start("body") - m.start(0)] + nb + "</message>"
 
         out = _MSG.sub(repl, txt)
+        contents[p] = out
         if out != txt:
             new_text[p] = out
-    if not affected:
-        stats["roots_noop"] += 1
-        return
 
-    # ids: antigos e novos, em lote; use_name_for_id/translateable=false não têm xtb
-    movable = [i for i, a in enumerate(affected)
-               if 'use_name_for_id="true"' not in a[1] and 'translateable="false"' not in a[1]]
-    old_ids = ids.ids([(affected[i][1], affected[i][2]) for i in movable])
-    new_ids = ids.ids([(affected[i][1], affected[i][3]) for i in movable])
-    idmap = {}
-    for i, o, n in zip(movable, old_ids, new_ids):
-        if o and n and o != n:
-            idmap[o] = n
-    per_file = Counter()
-    for p, *_ in affected:
-        per_file[p] += 1
-    for p, c in sorted(per_file.items()):
-        print("  msgs %-4d %s" % (c, p))
-    stats["messages"] += len(affected)
-    stats["ids"] += len(idmap)
-
-    # xtb
     grd_txt = open(root, encoding="utf-8").read()
     xtbs = [(os.path.normpath(os.path.join(os.path.dirname(root), rel)), lang)
             for rel, lang in _TFILE.findall(grd_txt)]
     new_xtb = {}
-    for xp, lang in xtbs:
-        if not os.path.isfile(xp):
-            continue
-        xtxt = open(xp, encoding="utf-8", newline="").read()
-        english = lang.lower().startswith("en")
-        have = set(m.group(2) for m in _XTB.finditer(xtxt))
-        renamed = literal = dups = 0
-        emitted = set()
 
-        def xrepl(m):
-            nonlocal renamed, literal, dups
-            old = m.group(2)
-            if old not in idmap:
-                return m.group(0)
-            new = idmap[old]
-            if new in have or new in emitted:  # colisão: mantém a primeira, descarta esta
-                dups += 1
-                return ""
-            emitted.add(new)
-            body, n = rebrand_markup(m.group(5), english)
-            literal += 1 if n else 0
-            renamed += 1
-            return m.group(1) + new + m.group(3) + m.group(4) + body + m.group(6)
+    if not affected:
+        stats["roots_noop"] += 1
+    else:
+        # ids: antigos e novos, em lote; use_name_for_id/translateable=false não têm xtb
+        movable = [i for i, a in enumerate(affected)
+                   if 'use_name_for_id="true"' not in a[1] and 'translateable="false"' not in a[1]]
+        old_ids = ids.ids([(affected[i][1], affected[i][2]) for i in movable])
+        new_ids = ids.ids([(affected[i][1], affected[i][3]) for i in movable])
+        idmap = {}
+        for i, o, n in zip(movable, old_ids, new_ids):
+            if o and n and o != n:
+                idmap[o] = n
+        per_file = Counter()
+        for p, *_ in affected:
+            per_file[p] += 1
+        for p, c in sorted(per_file.items()):
+            print("  msgs %-4d %s" % (c, p))
+        stats["messages"] += len(affected)
+        stats["ids"] += len(idmap)
 
-        xout = _XTB.sub(xrepl, xtxt)
-        if renamed or dups:
-            new_xtb[xp] = xout
-            stats["xtb_entries"] += renamed
-            stats["xtb_literal"] += literal
-            stats["xtb_dups"] += dups
-        if lang in ("pt-BR", "en-GB") or check:
+        for xp, lang in xtbs:
+            if not os.path.isfile(xp):
+                continue
+            xtxt = open(xp, encoding="utf-8", newline="").read()
+            english = lang.lower().startswith("en")
+            have = set(m.group(2) for m in _XTB.finditer(xtxt))
+            renamed = literal = dups = 0
+            emitted = set()
+
+            def xrepl(m):
+                nonlocal renamed, literal, dups
+                old = m.group(2)
+                if old not in idmap:
+                    return m.group(0)
+                new = idmap[old]
+                if new in have or new in emitted:  # colisão: mantém a primeira, descarta esta
+                    dups += 1
+                    return ""
+                emitted.add(new)
+                body, n = rebrand_markup(m.group(5), english)
+                literal += 1 if n else 0
+                renamed += 1
+                return m.group(1) + new + m.group(3) + m.group(4) + body + m.group(6)
+
+            xout = _XTB.sub(xrepl, xtxt)
             if renamed or dups:
-                print("  xtb %-6s renomeados=%-4d com_nome_literal=%-4d duplicados=%d  %s" % (lang, renamed, literal, dups, xp))
+                new_xtb[xp] = xout
+                stats["xtb_entries"] += renamed
+                stats["xtb_literal"] += literal
+                stats["xtb_dups"] += dups
+            if lang in ("pt-BR", "en-GB") or check:
+                if renamed or dups:
+                    print("  xtb %-6s renomeados=%-4d com_nome_literal=%-4d duplicados=%d  %s" % (lang, renamed, literal, dups, xp))
+
+    if extra:
+        for xp, lang in xtbs:
+            if lang != EXTRA_LANG or not os.path.isfile(xp):
+                continue
+            cur = new_xtb.get(xp)
+            if cur is None:
+                cur = open(xp, encoding="utf-8", newline="").read()
+            out = inject_extra(files, contents, xp, cur, extra, ids, stats, src)
+            if out is not None:
+                new_xtb[xp] = out
     stats["xtb_files"] += len(new_xtb)
 
     if check:
@@ -264,20 +345,26 @@ def main():
     ap.add_argument("--root", action="append", help="grd raiz (relativo a --src); padrão: lista embutida")
     ap.add_argument("--list", action="store_true", help="com --check, imprime cada mensagem afetada")
     ap.add_argument("--backup", help="copia aqui cada arquivo (caminho relativo a --src) antes de reescrevê-lo")
+    ap.add_argument("--extra", default=EXTRA_DEFAULT, help="JSON nome IDS -> tradução pt-BR (padrão: %(default)s)")
+    ap.add_argument("--no-extra", action="store_true", help="não injeta traduções extras")
     a = ap.parse_args()
     src = os.path.abspath(a.src)
     ids = Ids(src)
     stats = Counter()
+    extra = {} if a.no_extra else load_extra(a.extra)
     for rel in a.root or DEFAULT_ROOTS:
         root = os.path.join(src, rel)
         if not os.path.isfile(root):
             print("== %s: ausente, ignorado" % rel)
             continue
         print("== %s" % rel)
-        process_root(root, ids, a.check, stats, src, a.backup, a.list)
+        process_root(root, ids, a.check, stats, src, a.backup, a.list, extra)
     print("== total: mensagens=%d ids_novos=%d xtb_arquivos=%d xtb_entradas=%d (com nome literal=%d, duplicadas descartadas=%d)%s"
           % (stats["messages"], stats["ids"], stats["xtb_files"], stats["xtb_entries"],
              stats["xtb_literal"], stats["xtb_dups"], " [--check: nada escrito]" if a.check else ""))
+    if extra:
+        print("== extras %s: nomes no JSON=%d encontrados=%d traduções_novas=%d"
+              % (EXTRA_LANG, len(extra), stats["extra_found"], stats["extra_added"]))
 
 
 if __name__ == "__main__":

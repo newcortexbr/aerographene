@@ -53,6 +53,24 @@ class Unit(unittest.TestCase):
         s = self.t("Chromium is a Chrome")
         self.assertEqual(self.t(s), s)
 
+    def test_helium(self):
+        self.assertEqual(self.t("Meet Helium"), "Meet aerographene")
+        self.assertEqual(self.t("a Helium window"), "an aerographene window")
+        for s in ["helium://settings", "HeliumX", "chrome/helium.cc"]:
+            self.assertEqual(self.t(s), s, s)
+
+    def test_xtb_text(self):
+        self.assertEqual(bs.xtb_text('A & B <ph name="X"/> <b>'), 'A &amp; B <ph name="X"/> &lt;b&gt;')
+
+    def test_extra_json(self):
+        extra = bs.load_extra(bs.EXTRA_DEFAULT)
+        self.assertIn("IDS_SETTINGS_APPEARANCE_AND_BEHAVIOR", extra)
+        self.assertFalse(any(k.startswith("_") for k in extra))
+        for k, v in extra.items():
+            self.assertTrue(k.startswith("IDS_"), k)
+            if k not in bs.KEEP_NAMES:
+                self.assertNotIn("Helium", v, k)
+
 
 @unittest.skipUnless(SRC and os.path.isdir(os.path.join(SRC, "tools/grit")), "AERO_TEST_SRC não definido")
 class Integration(unittest.TestCase):
@@ -98,11 +116,26 @@ class Integration(unittest.TestCase):
         out2 = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout  # idempotência
         self.assertIn("mensagens=0 ids_novos=0", out2)
         self.assertIn("mensagens=", out)
+        self.assertIn("traduções_novas=0", out2)
+        extra = bs.load_extra(bs.EXTRA_DEFAULT)
         for (r, l), b in before.items():
             a = self.count(r, l)
             self.assertEqual(set(a), set(b), r)
-            self.assertEqual(sum(a.values()), sum(b.values()), "traduções perdidas em %s %s" % (r, l))
             self.assertGreater(sum(a.values()), 0, "sem traduções carregadas em %s %s" % (r, l))
+            # nenhuma tradução existente se perde; em pt-BR as do JSON passam a existir
+            lost = [n for n in a if b[n] and not a[n]]
+            self.assertEqual(lost, [], "traduções perdidas em %s %s" % (r, l))
+            gained = {n for n in a if a[n] and not b[n]}
+            if l == bs.EXTRA_LANG:
+                self.assertEqual(gained, {n for n in a if n in extra and not b[n]}, r)
+            else:
+                self.assertEqual(gained, set(), r)
+        if os.path.isfile(os.path.join(self.tmp, "chrome/app/settings_strings.grdp")) and \
+                "IDS_SETTINGS_APPEARANCE_AND_BEHAVIOR" in self.count("chrome/app/generated_resources.grd", "pt-BR"):
+            pt = self.count("chrome/app/generated_resources.grd", "pt-BR")
+            self.assertTrue(pt["IDS_SETTINGS_APPEARANCE_AND_BEHAVIOR"])
+            g = open(os.path.join(self.tmp, "chrome/app/settings_strings.grdp"), encoding="utf-8").read()
+            self.assertNotRegex(g, r">[^<]*\bHelium\b[^<]*</message>")
         # o texto inglês mudou de fato
         s = open(os.path.join(self.tmp, "chrome/app/chromium_strings.grd"), encoding="utf-8").read()
         self.assertIn("aerographene", s)
