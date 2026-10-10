@@ -58,16 +58,17 @@ PinnedModelFactory, alvo ui/tabs:tabs).
  #include "chrome/browser/bookmarks/bookmark_model_factory.h"
  #include "chrome/browser/favicon/favicon_service_factory.h"
  #include "chrome/browser/first_run/first_run.h"
-@@ -22,6 +28,8 @@
+@@ -22,6 +28,9 @@
  #include "chrome/browser/password_manager/factories/profile_password_store_factory.h"
  #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/profiles/profile_observer.h"
  #include "chrome/browser/search_engines/template_url_service_factory.h"
 +#include "chrome/browser/ui/tabs/aerographene/pinned_model.h"
 +#include "chrome/browser/ui/tabs/aerographene/pinned_model_factory.h"
  #include "chrome/browser/webdata_services/web_data_service_factory.h"
  #include "chrome/common/pref_names.h"
  #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
-@@ -38,6 +46,7 @@
+@@ -38,6 +47,7 @@
  #include "components/search_engines/template_url.h"
  #include "components/search_engines/template_url_service.h"
  #include "components/user_data_importer/common/imported_bookmark_entry.h"
@@ -75,7 +76,7 @@ PinnedModelFactory, alvo ui/tabs:tabs).
  
  using bookmarks::BookmarkModel;
  using bookmarks::BookmarkNode;
-@@ -76,6 +85,104 @@
+@@ -76,6 +86,131 @@
    profile->GetPrefs()->SetBoolean(bookmarks::prefs::kShowBookmarkBar, true);
  }
  
@@ -90,6 +91,7 @@ PinnedModelFactory, alvo ui/tabs:tabs).
 +// are ignored.
 +void WritePinnedEntries(
 +    aerographene::PinnedModel* model,
++    BookmarkModel* bookmark_model,
 +    const std::vector<user_data_importer::ImportedBookmarkEntry>& entries) {
 +  struct Drawer {
 +    base::Uuid uuid;
@@ -112,6 +114,11 @@ PinnedModelFactory, alvo ui/tabs:tabs).
 +    }
 +  }
 +
++  // One extensive-changes batch around the whole import (same pattern as the
++  // bookmarks importer below).
++  if (bookmark_model) {
++    bookmark_model->BeginExtensiveChanges();
++  }
 +  constexpr size_t kAtEnd = std::numeric_limits<size_t>::max();
 +  for (const user_data_importer::ImportedBookmarkEntry& entry : entries) {
 +    if (entry.is_folder || !entry.url.is_valid()) {
@@ -136,17 +143,26 @@ PinnedModelFactory, alvo ui/tabs:tabs).
 +      model->AddPinned(entry.url, entry.title, parent, kAtEnd);
 +    }
 +  }
++  if (bookmark_model) {
++    bookmark_model->EndExtensiveChanges();
++  }
 +}
 +
 +// Waits until the PinnedModel has its space folder (IsLoaded()), writes the
-+// entries once and deletes itself. If the model is destroyed first (profile
-+// shutdown) nothing is written and the object leaks until process exit.
-+class PendingPinnedWrite : public aerographene::PinnedModel::Observer {
++// entries once and deletes itself. It also observes the Profile: if the
++// profile is destroyed first (shutdown) nothing is written and the object
++// deletes itself in OnProfileWillBeDestroyed, which runs before the keyed
++// services (PinnedModel, BookmarkModel) shut down, so the PinnedModel
++// observation is dropped while the model is still alive.
++class PendingPinnedWrite : public aerographene::PinnedModel::Observer,
++                           public ProfileObserver {
 + public:
 +  PendingPinnedWrite(
++      Profile* profile,
 +      aerographene::PinnedModel* model,
 +      std::vector<user_data_importer::ImportedBookmarkEntry> entries)
-+      : model_(model), entries_(std::move(entries)) {
++      : profile_(profile), model_(model), entries_(std::move(entries)) {
++    profile_observation_.Observe(profile_);
 +    observation_.Observe(model_);
 +  }
 +
@@ -159,6 +175,13 @@ PinnedModelFactory, alvo ui/tabs:tabs).
 +  // OnPinnedModelLoaded.
 +  void OnPinnedChanged() override { WriteIfLoaded(); }
 +
++  // ProfileObserver:
++  void OnProfileWillBeDestroyed(Profile* profile) override {
++    observation_.Reset();
++    profile_observation_.Reset();
++    delete this;
++  }
++
 + private:
 +  void WriteIfLoaded() {
 +    if (!model_->IsLoaded()) {
@@ -166,21 +189,26 @@ PinnedModelFactory, alvo ui/tabs:tabs).
 +    }
 +    // Stop observing first: writing notifies this observer again.
 +    observation_.Reset();
-+    WritePinnedEntries(model_, entries_);
++    profile_observation_.Reset();
++    WritePinnedEntries(model_,
++                       BookmarkModelFactory::GetForBrowserContext(profile_),
++                       entries_);
 +    delete this;
 +  }
 +
++  raw_ptr<Profile> profile_;
 +  raw_ptr<aerographene::PinnedModel> model_;
 +  std::vector<user_data_importer::ImportedBookmarkEntry> entries_;
 +  base::ScopedObservation<aerographene::PinnedModel,
 +                          aerographene::PinnedModel::Observer>
 +      observation_{this};
++  base::ScopedObservation<Profile, ProfileObserver> profile_observation_{this};
 +};
 +
  }  // namespace
  
  ProfileWriter::ProfileWriter(Profile* profile) : profile_(profile) {}
-@@ -129,6 +236,33 @@
+@@ -129,6 +264,34 @@
    BookmarkModel* model = BookmarkModelFactory::GetForBrowserContext(profile_);
    DCHECK(model->loaded());
  
@@ -198,10 +226,11 @@ PinnedModelFactory, alvo ui/tabs:tabs).
 +    }
 +    if (!pinned_entries.empty()) {
 +      if (pinned_model->IsLoaded()) {
-+        WritePinnedEntries(pinned_model, pinned_entries);
++        WritePinnedEntries(pinned_model, model, pinned_entries);
 +      } else {
 +        // Self-owned; see PendingPinnedWrite.
-+        new PendingPinnedWrite(pinned_model, std::move(pinned_entries));
++        new PendingPinnedWrite(profile_, pinned_model,
++                               std::move(pinned_entries));
 +      }
 +    }
 +    if (regular_entries.empty()) {
@@ -214,7 +243,7 @@ PinnedModelFactory, alvo ui/tabs:tabs).
    // If the bookmark bar is currently empty, we should import directly to it.
    // Otherwise, we should import everything to a subfolder.
    const BookmarkNode* bookmark_bar = model->account_bookmark_bar_node()
-@@ -139,7 +273,7 @@
+@@ -139,7 +302,7 @@
    // Reorder bookmarks so that the toolbar entries come first.
    std::vector<user_data_importer::ImportedBookmarkEntry> toolbar_bookmarks;
    std::vector<user_data_importer::ImportedBookmarkEntry> reordered_bookmarks;

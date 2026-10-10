@@ -2,9 +2,12 @@ aerographene: tokens de cor do tema lidos de JSON, sem rebuild.
 
 Origem: aerographene (original). Licença: GPL-3.0.
 Propósito: lê uma vez por processo ${XDG_CONFIG_HOME:-~/.config}/aerographene/
-theme.json (ou --aerographene-theme=<path>), formato {"tokens": {"frame":
+theme.json (ou --aerographene-theme=<path>), formato {"mode": "dark"|"light"
+(opcional, padrão dark), "tokens": {"frame":
 "#0A0A0A", ...}}, e adiciona um ColorMixer no fim de AddChromeColorMixers que
-sobrescreve um conjunto curado de ColorIds. Arquivo ausente/inválido: nada
+sobrescreve um conjunto curado de ColorIds, só nos providers do color_mode do
+arquivo e nunca no incógnito (escuro + grayscale sem tema custom). Leitura
+única por processo (cache). Arquivo ausente/inválido: nada
 muda. Feature kAerographeneThemeTokens (ligada por padrão; desligar com
 --disable-features=AerographeneThemeTokens). WebUI recebe as cores via
 chrome://theme/colors.css.
@@ -12,7 +15,7 @@ chrome://theme/colors.css.
 
 --- /dev/null
 +++ b/chrome/browser/ui/color/aerographene_theme_tokens.cc
-@@ -0,0 +1,214 @@
+@@ -0,0 +1,237 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -51,7 +54,13 @@ chrome://theme/colors.css.
 +constexpr char kThemeSwitch[] = "aerographene-theme";
 +constexpr size_t kMaxFileSize = 64 * 1024;
 +
-+using TokenOverrides = std::vector<std::pair<ui::ColorId, SkColor>>;
++struct TokenOverrides {
++  // Color mode the tokens were written for ("mode" in theme.json; default
++  // dark). The mixer is only added to providers of this mode.
++  ui::ColorProviderKey::ColorMode mode =
++      ui::ColorProviderKey::ColorMode::kDark;
++  std::vector<std::pair<ui::ColorId, SkColor>> colors;
++};
 +
 +struct TokenSpec {
 +  const char* name;
@@ -188,6 +197,13 @@ chrome://theme/colors.css.
 +  if (!tokens) {
 +    return result;
 +  }
++  if (const std::string* mode = root->FindString("mode")) {
++    if (*mode == "light") {
++      result.mode = ui::ColorProviderKey::ColorMode::kLight;
++    } else if (*mode != "dark") {
++      return result;  // Unknown mode: ignore the file.
++    }
++  }
 +  for (const TokenSpec& spec : kTokens) {
 +    const std::string* value = tokens->FindString(spec.name);
 +    if (!value) {
@@ -199,13 +215,15 @@ chrome://theme/colors.css.
 +    }
 +    for (ui::ColorId id : spec.ids) {
 +      if (id != 0) {
-+        result.emplace_back(id, *color);
++        result.colors.emplace_back(id, *color);
 +      }
 +    }
 +  }
 +  return result;
 +}
 +
++// Loaded once, on the first ColorProvider build (UI thread); later calls
++// reuse the cached result.
 +const TokenOverrides& GetOverrides() {
 +  static const base::NoDestructor<TokenOverrides> overrides(LoadOverrides());
 +  return *overrides;
@@ -218,12 +236,20 @@ chrome://theme/colors.css.
 +  if (!base::FeatureList::IsEnabled(kAerographeneThemeTokens)) {
 +    return;
 +  }
++  // Incognito (dark + grayscale, no custom theme; see
++  // ThemeService::GetColorProviderKey) never takes the user's theme.
++  if (key.color_mode == ui::ColorProviderKey::ColorMode::kDark &&
++      key.user_color_source ==
++          ui::ColorProviderKey::UserColorSource::kGrayscale &&
++      !key.custom_theme) {
++    return;
++  }
 +  const TokenOverrides& overrides = GetOverrides();
-+  if (overrides.empty()) {
++  if (overrides.colors.empty() || overrides.mode != key.color_mode) {
 +    return;
 +  }
 +  ui::ColorMixer& mixer = provider->AddMixer();
-+  for (const auto& [id, color] : overrides) {
++  for (const auto& [id, color] : overrides.colors) {
 +    mixer[id] = ui::ColorTransform(color);
 +  }
 +}

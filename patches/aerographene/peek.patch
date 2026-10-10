@@ -9,8 +9,11 @@ TYPE_POPUP (sem tabstrip, omnibox só leitura), sem criar aba, e recebe
 uma marca (user data com chave &features::kAerographenePeek). Popups com
 features já abriam assim e não recebem a marca.
 Fechar: BrowserView::OnWidgetActivationChanged fecha a popup marcada
-quando ela perde a ativação, salvo se um widget próprio (diálogo modal,
-bolha) ficou ativo; a checagem roda num PostTask.
+quando ela perde a ativação para outra janela do próprio navegador; ativação
+indo para outro app (Alt+Tab, gerenciador de senhas, 2FA) não fecha, nem um
+widget próprio (diálogo modal, bolha) ativo; a checagem roda num PostTask.
+Não vira peek conteúdo com opener (window.open, fluxo OAuth/postMessage):
+abre como antes. Só link target=_blank sem opener é convertido.
 Promover: atalho Ctrl+Shift+Y (livre no upstream 154 e na série Helium)
 ligado ao comando upstream IDC_SHOW_AS_TAB, que só é habilitado fora de
 janelas normais; "Show as tab" do menu de sistema continua valendo.
@@ -36,8 +39,8 @@ helium/ui/multi-contents-drop-target.patch tocam os mesmos arquivos antes.
      // ui
 +    {"aerographene-peek", "Peek",
 +     "Opens target=_blank links in a light popup window instead of a new tab. "
-+     "Closes when it loses focus; Ctrl+Shift+Y or \"Show as tab\" in the "
-+     "window menu promotes it to a tab. aerographene flag.",
++     "Closes when another browser window gets focus; Ctrl+Shift+Y or \"Show "
++     "as tab\" in the window menu promotes it to a tab. aerographene flag.",
 +     kOsDesktop, FEATURE_VALUE_TYPE(features::kAerographenePeek)},
      // platform
  #endif  // CHROME_BROWSER_HELIUM_FLAG_ENTRIES_H_
@@ -76,7 +79,7 @@ helium/ui/multi-contents-drop-target.patch tocam os mesmos arquivos antes.
    FullscreenController* fullscreen_controller =
        exclusive_access_manager_->fullscreen_controller();
  #if BUILDFLAG(IS_MAC)
-@@ -689,6 +692,34 @@
+@@ -689,6 +692,37 @@
    }
  #endif
  
@@ -87,6 +90,9 @@ helium/ui/multi-contents-drop-target.patch tocam os mesmos arquivos antes.
 +  // tab" promovem; perder o foco fecha (BrowserView).
 +  if (base::FeatureList::IsEnabled(features::kAerographenePeek) &&
 +      !app_browser_controller_ && user_gesture &&
++      // window.open mantém opener (OAuth/postMessage precisa dele) e link
++      // target=_blank sem opener é o caso do peek; com opener abre normal.
++      !new_contents->HasOpener() &&
 +      disposition == WindowOpenDisposition::NEW_FOREGROUND_TAB &&
 +      browser_->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL) {
 +    disposition = WindowOpenDisposition::NEW_POPUP;
@@ -128,7 +134,7 @@ helium/ui/multi-contents-drop-target.patch tocam os mesmos arquivos antes.
  
 +// aerographene: peek. Links com target=_blank (e window.open sem features)
 +// abertos por gesto do usuário numa janela normal vão para uma janela popup
-+// leve em vez de uma aba nova. Fecha ao perder o foco; Ctrl+Shift+Y ou
++// leve em vez de uma aba nova. Fecha ao outra janela ganhar foco; Ctrl+Shift+Y ou
 +// "Show as tab" no menu da janela promovem a aba.
 +BASE_DECLARE_FEATURE(kAerographenePeek);
 +
@@ -137,15 +143,17 @@ helium/ui/multi-contents-drop-target.patch tocam os mesmos arquivos antes.
  #endif  // CHROME_BROWSER_UI_UI_FEATURES_H_
 --- a/chrome/browser/ui/views/frame/browser_view.cc
 +++ b/chrome/browser/ui/views/frame/browser_view.cc
-@@ -4261,6 +4261,38 @@ void BrowserView::OnWidgetActivationChan
+@@ -4261,6 +4261,55 @@ void BrowserView::OnWidgetActivationChan
    browser_->GetFeatures()
        .extension_keybinding_registry()
        ->OnHostActivationChanged(active);
 +
 +  // aerographene: peek. A popup aberta pelo peek (marcada em
-+  // BrowserWebContentsDelegate::AddNewContents) fecha ao perder a ativação,
-+  // salvo se o foco foi para um widget dela (diálogo, bolha, menu). A checagem
-+  // é adiada para a ativação do novo widget já ter sido aplicada.
++  // BrowserWebContentsDelegate::AddNewContents) fecha quando outra janela do
++  // próprio navegador ganha a ativação. Perder a ativação para outro app
++  // (Alt+Tab, gerenciador de senhas, 2FA) não fecha. Também não fecha se o
++  // foco foi para um widget dela (diálogo, bolha, menu). A checagem é adiada
++  // para a ativação do novo widget já ter sido aplicada.
 +  if (!active &&
 +      browser_->GetType() == BrowserWindowInterface::Type::TYPE_POPUP &&
 +      base::FeatureList::IsEnabled(features::kAerographenePeek) &&
@@ -169,7 +177,22 @@ helium/ui/multi-contents-drop-target.patch tocam os mesmos arquivos antes.
 +                             return;
 +                           }
 +                         }
-+                         widget->Close();
++                         // Só fecha se outra janela deste navegador está
++                         // ativa; se a ativação foi para outro app, mantém.
++                         bool other_browser_active = false;
++                         GlobalBrowserCollection::GetInstance()->ForEach(
++                             [&](BrowserWindowInterface* other) {
++                               if (other != view->browser() &&
++                                   other->GetWindow() &&
++                                   other->GetWindow()->IsActive()) {
++                                 other_browser_active = true;
++                                 return false;
++                               }
++                               return true;
++                             });
++                         if (other_browser_active) {
++                           widget->Close();
++                         }
 +                       },
 +                       weak_ptr_factory_.GetWeakPtr()));
 +  }

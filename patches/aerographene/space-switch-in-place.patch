@@ -17,7 +17,7 @@ janela existente do destino. Só Linux.
  #include "base/metrics/user_metrics.h"
  #include "base/strings/escape.h"
  #include "base/strings/string_number_conversions.h"
-@@ -219,10 +220,50 @@
+@@ -219,10 +220,57 @@
        path, base::BindOnce(&ProfileLoadedCallback, std::move(callback)));
  }
  
@@ -35,14 +35,21 @@ janela existente do destino. Só Linux.
 +    ui::BaseWindow* to = target->GetWindow();
 +    if (from && to && !from->IsMinimized()) {
 +      const bool maximized = from->IsMaximized() || from->IsFullscreen();
-+      // Position is only honored on X11/Xwayland; on Wayland the compositor
-+      // places the window and only the size applies.
-+      to->SetBounds(from->GetRestoredBounds());
 +      if (maximized) {
-+        to->Maximize();
++        // SetBounds before Maximize() can unmaximize and flicker: skip it.
++        if (!to->IsMaximized()) {
++          to->Maximize();
++        }
++      } else if (!to->IsMaximized()) {
++        // Position is only honored on X11/Xwayland; on Wayland the compositor
++        // places the window and only the size applies. A maximized target
++        // keeps its state (SetBounds would unmaximize it).
++        to->SetBounds(from->GetRestoredBounds());
 +      }
-+      to->Activate();
++      // Minimize the source first so the target's activation is not stolen
++      // back and the user never sees both windows.
 +      from->Minimize();
++      to->Activate();
 +    }
 +  }
 +  if (callback) {
