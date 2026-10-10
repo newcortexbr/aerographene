@@ -38,3 +38,50 @@ runners (`dasher`) para ler `_diag/` e falar com o docker.
 ```
 python3 tools/cezanne/test_aero_top.py
 ```
+
+# aero-poweroff
+
+Encerra os runners com aviso e reinicia o cezanne direto no Windows (só nesse boot; o padrão continua o Ubuntu).
+
+```
+aero-poweroff --dry-run     # mostra o que faria
+aero-poweroff               # pede confirmação
+aero-poweroff --yes --off   # desliga em vez de reiniciar
+aero-poweroff --no-reboot   # só encerra os runners
+```
+
+1. runners ociosos: `systemctl stop` na unit (saem do pool na hora).
+2. runners ocupados: o job é localizado pela API (`runner_name` nos jobs `in_progress` dos repos da org, paginado), recebe um comentário no PR da run (ou no commit, se não houver PR) e a run é cancelada, uma vez por run. O Listener é parado logo em seguida (o `Runner.Worker` sobrevive por `KillMode=process` e conclui o cancelamento), para o runner não pegar job novo. Espera o Worker sair por até `--grace` s (180); depois `force-cancel` e SIGKILL no Worker e filhos. Falha de API vira aviso. Garantia final: antes de reiniciar/desligar (ou retornar em `--no-reboot`) confere de novo; se ainda houver Worker vivo, o script aborta com rc 1 sem reiniciar.
+3. containers docker ainda rodando: `docker stop -t 20`.
+4. `efibootmgr --bootnext <Windows Boot Manager>` e `systemctl reboot`. `grub-reboot` não serve aqui (`GRUB_DEFAULT=0`).
+
+Roda como root (reexecuta com `sudo`); o `gh` roda como `dasher`, que precisa estar logado (escopos `repo`, `workflow`). Cancelar a run cancela os jobs dela em outros runners também.
+
+```
+sudo install -m755 tools/cezanne/aero-poweroff /usr/local/bin/aero-poweroff
+```
+
+# runners no Windows (WSL2) a partir do disco do Ubuntu
+
+O Ubuntu ocupa um disco só dele (ProDrive 240GB, `sdc`), então o Windows consegue entregá-lo inteiro ao WSL2 com `wsl --mount`. Uma distro leve `aero-runners` liga `/home/dasher` (runners, `_work`, cache da build) e `/var/lib/docker` do disco e sobe as mesmas units dos runners: mesmos registros, mesmo cache. Só um sistema usa o disco por vez.
+
+Setup único no Windows (PowerShell admin), com o repo clonado:
+
+```
+wsl --install -d Ubuntu-24.04 --name aero-runners --no-launch
+wsl -d aero-runners -u root -- bash tools/cezanne/wsl/setup.sh   # a partir da pasta do repo
+wsl --terminate aero-runners
+```
+
+Uso:
+
+```
+.\tools\cezanne\wsl\aero-wsl.ps1 up      # monta o disco e sobe docker + runners
+.\tools\cezanne\wsl\aero-wsl.ps1 down    # aero-poweroff --no-reboot, desfaz binds, desmonta
+```
+
+- rode sempre `down` antes de desligar o Windows; desligar com o disco montado deixa o ext4 sujo (o journal recupera no boot do Ubuntu, mas não conte com isso).
+- o WSL2 usa por padrão metade da RAM; para builds, ponha em `%UserProfile%\.wslconfig`: `[wsl2]` com `memory=12GB`, `processors=12`, `swap=16GB`.
+- o `cpu-quota-manager` não roda no WSL; os runners ficam sem CPUQuota.
+- desempenho menor que o bare metal (virtualização e disco via Hyper-V); não comparar tempos de build entre os dois.
+- não testado num Windows real até agora.
