@@ -41,15 +41,17 @@ o patch não toca este arquivo).
   private:
    // DraggedTabsContainer:
    views::ScrollView* GetScrollViewForContainer() const override;
-@@ -82,6 +90,8 @@
+@@ -79,6 +87,10 @@
+   void ResetCollectionNode();
+   void OnCollapseStateChanged(tabs::VerticalTabStripCollapseState state);
+ 
++  // Declared before layout_manager_: SetLayoutManager() runs the layout
++  // during construction, and the layout reads these members.
++  std::map<const views::View*, int> tab_spans_;
++
    raw_ptr<TabCollectionNode> collection_node_;
    const raw_ref<TabCollectionAnimatingLayoutManager> layout_manager_;
  
-+  std::map<const views::View*, int> tab_spans_;
-+
-   base::CallbackListSubscription node_destroyed_subscription_;
-   base::CallbackListSubscription collapsed_state_changed_subscription_;
- };
 --- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
 +++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
 @@ -383,9 +383,7 @@

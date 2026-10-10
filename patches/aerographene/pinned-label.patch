@@ -512,15 +512,15 @@ pinned-model.patch, pinned-model-tabstrip.patch e pinned-closed.patch.
    InvalidateLayout();
 --- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h
 +++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h
-@@ -153,6 +153,8 @@
+@@ -167,6 +167,8 @@
    std::vector<views::View*> GetGridChildren() const;
    // Click on a placeholder: reopens the entry as a pinned tab in this window.
    void OpenClosedPinned(const base::Uuid& uuid);
 +  // Placeholder context menu: edits the label of the entry.
 +  void RenameClosedPinned(const base::Uuid& uuid);
  
-   // Placeholders of closed pinned entries, in model order. Not tab collection
-   // nodes: they take no part in tab drags, link drops or span resize.
+   base::CallbackListSubscription node_destroyed_subscription_;
+   base::CallbackListSubscription collapsed_state_changed_subscription_;
 --- a/chrome/browser/ui/views/tabs/common/tab_strip_collection_controller.cc
 +++ b/chrome/browser/ui/views/tabs/common/tab_strip_collection_controller.cc
 @@ -16,6 +16,9 @@

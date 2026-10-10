@@ -846,7 +846,25 @@ pinned-closed.patch e pinned-label.patch.
  class TabCollectionNode;
  
  // The view class that represents the pinned tab region for the
-@@ -147,21 +148,38 @@
+@@ -140,10 +141,15 @@
+ 
+   // Placeholders of closed pinned entries, in model order. Not tab collection
+   // nodes: they take no part in tab drags, link drops or span resize.
++  // Includes placeholders inside drawers (of open and closed folders).
+   std::vector<raw_ptr<AerographeneClosedPinnedView>> closed_views_;
+-  // Model order of the entries, refreshed with `closed_views_` on every model
+-  // change so layout does not copy the model.
++  // Rows of drawer folders, in model order. Not tab collection nodes either.
++  std::vector<raw_ptr<AerographenePinnedFolderView>> folder_views_;
++  // Model position of every entry (top-level index, or child index inside a
++  // drawer) and drawer of each drawer child, refreshed with `closed_views_`
++  // on every model change so layout does not copy the model.
+   std::map<base::Uuid, int> model_index_;
++  std::map<base::Uuid, base::Uuid> parent_folder_;
+ 
+   // Started with the first tab child; spans come from its profile's model.
+   base::ScopedObservation<aerographene::PinnedModel,
+@@ -161,14 +167,26 @@
    // Syncs `closed_views_` with the closed top-level entries of the model
    // (vertical orientation only) and relayouts.
    void RefreshClosedPinned();
@@ -875,22 +893,8 @@ pinned-closed.patch e pinned-label.patch.
 +  // Click on a folder row: opens or closes the drawer (aerographene.expanded).
 +  void ToggleFolder(const base::Uuid& uuid);
  
-   // Placeholders of closed pinned entries, in model order. Not tab collection
-   // nodes: they take no part in tab drags, link drops or span resize.
-+  // Includes placeholders inside drawers (of open and closed folders).
-   std::vector<raw_ptr<AerographeneClosedPinnedView>> closed_views_;
--  // Model order of the entries, refreshed with `closed_views_` on every model
--  // change so layout does not copy the model.
-+  // Rows of drawer folders, in model order. Not tab collection nodes either.
-+  std::vector<raw_ptr<AerographenePinnedFolderView>> folder_views_;
-+  // Model position of every entry (top-level index, or child index inside a
-+  // drawer) and drawer of each drawer child, refreshed with `closed_views_`
-+  // on every model change so layout does not copy the model.
-   std::map<base::Uuid, int> model_index_;
-+  std::map<base::Uuid, base::Uuid> parent_folder_;
- 
-   // Started with the first tab child; spans come from its profile's model.
-   base::ScopedObservation<aerographene::PinnedModel,
+   base::CallbackListSubscription node_destroyed_subscription_;
+   base::CallbackListSubscription collapsed_state_changed_subscription_;
 --- a/chrome/browser/ui/views/tabs/common/tab_strip_collection_controller.cc
 +++ b/chrome/browser/ui/views/tabs/common/tab_strip_collection_controller.cc
 @@ -537,6 +537,19 @@

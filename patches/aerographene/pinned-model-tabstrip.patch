@@ -891,17 +891,20 @@ pinned-span-drag.patch.
   private:
    // DraggedTabsContainer:
    views::ScrollView* GetScrollViewForContainer() const override;
-@@ -126,6 +136,14 @@
+@@ -125,9 +135,17 @@
    int resize_pitch_ = 1;
    int resize_max_span_ = 1;
  
-+  // Re-reads persisted spans into the TabViews and relayouts.
-+  void RefreshPersistedSpans();
-+
 +  // Started with the first tab child; spans come from its profile's model.
 +  base::ScopedObservation<aerographene::PinnedModel,
 +                          aerographene::PinnedModel::Observer>
 +      pinned_model_observation_{this};
++
+   raw_ptr<TabCollectionNode> collection_node_;
+   const raw_ref<TabCollectionAnimatingLayoutManager> layout_manager_;
+ 
++  // Re-reads persisted spans into the TabViews and relayouts.
++  void RefreshPersistedSpans();
 +
    base::CallbackListSubscription node_destroyed_subscription_;
    base::CallbackListSubscription collapsed_state_changed_subscription_;

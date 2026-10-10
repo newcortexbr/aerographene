@@ -426,10 +426,10 @@ Depende de aerographene/pinned-grid-span.patch e helium/ui/layout/vertical.patch
    // While in horizontal orientation, the x-coordinate of the single row is
    // used to determine the drop index.
    std::optional<BrowserRootView::DropIndex> GetLinkDropIndexForHorizontal(
-@@ -90,7 +118,13 @@
-   raw_ptr<TabCollectionNode> collection_node_;
-   const raw_ref<TabCollectionAnimatingLayoutManager> layout_manager_;
+@@ -89,7 +117,13 @@
  
+   // Declared before layout_manager_: SetLayoutManager() runs the layout
+   // during construction, and the layout reads these members.
 -  std::map<const views::View*, int> tab_spans_;
 +  std::map<tabs::TabCollectionNodeHandle, int> tab_spans_;
 +
@@ -439,8 +439,8 @@ Depende de aerographene/pinned-grid-span.patch e helium/ui/layout/vertical.patch
 +  int resize_pitch_ = 1;
 +  int resize_max_span_ = 1;
  
-   base::CallbackListSubscription node_destroyed_subscription_;
-   base::CallbackListSubscription collapsed_state_changed_subscription_;
+   raw_ptr<TabCollectionNode> collection_node_;
+   const raw_ref<TabCollectionAnimatingLayoutManager> layout_manager_;
 --- a/chrome/browser/ui/views/tabs/common/tab_view.cc
 +++ b/chrome/browser/ui/views/tabs/common/tab_view.cc
 @@ -1282,6 +1282,18 @@

@@ -546,7 +546,21 @@ pinned-model.patch e pinned-model-tabstrip.patch.
  
    // views::ViewTargeterDelegate:
    views::View* TargetForRect(views::View* root, const gfx::Rect& rect) override;
-@@ -139,6 +142,25 @@ class PinnedTabContainerView
+@@ -135,6 +138,13 @@ class PinnedTabContainerView
+   int resize_pitch_ = 1;
+   int resize_max_span_ = 1;
+ 
++  // Placeholders of closed pinned entries, in model order. Not tab collection
++  // nodes: they take no part in tab drags, link drops or span resize.
++  std::vector<raw_ptr<AerographeneClosedPinnedView>> closed_views_;
++  // Model order of the entries, refreshed with `closed_views_` on every model
++  // change so layout does not copy the model.
++  std::map<base::Uuid, int> model_index_;
++
+   // Started with the first tab child; spans come from its profile's model.
+   base::ScopedObservation<aerographene::PinnedModel,
+                           aerographene::PinnedModel::Observer>
+@@ -146,6 +156,18 @@ class PinnedTabContainerView
    // Re-reads persisted spans into the TabViews and relayouts.
    void RefreshPersistedSpans();
  
@@ -562,13 +576,6 @@ pinned-model.patch e pinned-model-tabstrip.patch.
 +  // Click on a placeholder: reopens the entry as a pinned tab in this window.
 +  void OpenClosedPinned(const base::Uuid& uuid);
 +
-+  // Placeholders of closed pinned entries, in model order. Not tab collection
-+  // nodes: they take no part in tab drags, link drops or span resize.
-+  std::vector<raw_ptr<AerographeneClosedPinnedView>> closed_views_;
-+  // Model order of the entries, refreshed with `closed_views_` on every model
-+  // change so layout does not copy the model.
-+  std::map<base::Uuid, int> model_index_;
-+
-   // Started with the first tab child; spans come from its profile's model.
-   base::ScopedObservation<aerographene::PinnedModel,
-                           aerographene::PinnedModel::Observer>
+   base::CallbackListSubscription node_destroyed_subscription_;
+   base::CallbackListSubscription collapsed_state_changed_subscription_;
+ };
