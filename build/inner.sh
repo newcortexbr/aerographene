@@ -363,6 +363,12 @@ for n in 16 24 32 48 64 128 256; do
     mkdir -p "$stage/icons/hicolor/${n}x${n}/apps"
     cp "/aero/branding/png/aerographene-icon-${n}.png" "$stage/icons/hicolor/${n}x${n}/apps/aerographene.png"
 done
+# uBlock: o Chromium lê o schema de storage.managed do disco, em resources/ublock/ ao lado do binário
+# (sem isso o log traz "Failed to parse schema for extension blockjmkbacgjkknlgpkjjiijinjdanf").
+if [ -f "${_src_dir}/third_party/ublock/managed_storage.json" ]; then
+    mkdir -p "$stage/resources/ublock"
+    cp "${_src_dir}/third_party/ublock/managed_storage.json" "$stage/resources/ublock/"
+fi
 # tabela de símbolos fora do pacote (~234 MB no chrome; o Helium distribui sem).
 # Não muda código executado: .symtab/.strtab não são carregadas em runtime.
 strip_tool=""
