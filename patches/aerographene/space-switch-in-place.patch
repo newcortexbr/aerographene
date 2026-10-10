@@ -1,0 +1,70 @@
+aerographene: trocar de space mantém a janela no lugar (SCOPE item 5, fatia S2).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: em profiles::SwitchToProfile (menu do avatar, profile picker),
+sem always_create, a janela do space de destino recebe os bounds restaurados
+e o estado maximizado da janela ativa de outro space; a janela de origem é
+minimizada (não fechada). Sem janela extra: o fluxo upstream já reutiliza a
+janela existente do destino. Só Linux.
+
+--- a/chrome/browser/profiles/profile_window.cc
++++ b/chrome/browser/profiles/profile_window.cc
+@@ -12,6 +12,7 @@
+ #include "base/functional/bind.h"
+ #include "base/functional/callback.h"
+ #include "base/location.h"
++#include "base/memory/weak_ptr.h"
+ #include "base/metrics/user_metrics.h"
+ #include "base/strings/escape.h"
+ #include "base/strings/string_number_conversions.h"
+@@ -219,10 +220,50 @@
+       path, base::BindOnce(&ProfileLoadedCallback, std::move(callback)));
+ }
+ 
++// aerographene: switching spaces (profiles) keeps the window in place. The
++// target window takes the bounds and maximized state of the source window,
++// which is then minimized (not closed, so its tabs survive). Tolerant: does
++// nothing without a source window of another profile.
++void AerographeneSwitchInPlace(
++    base::WeakPtr<BrowserWindowInterface> source,
++    base::OnceCallback<void(BrowserWindowInterface*)> callback,
++    BrowserWindowInterface* target) {
++  if (source && target && source.get() != target &&
++      source->GetProfile() != target->GetProfile()) {
++    ui::BaseWindow* from = source->GetWindow();
++    ui::BaseWindow* to = target->GetWindow();
++    if (from && to && !from->IsMinimized()) {
++      const bool maximized = from->IsMaximized() || from->IsFullscreen();
++      // Position is only honored on X11/Xwayland; on Wayland the compositor
++      // places the window and only the size applies.
++      to->SetBounds(from->GetRestoredBounds());
++      if (maximized) {
++        to->Maximize();
++      }
++      to->Activate();
++      from->Minimize();
++    }
++  }
++  if (callback) {
++    std::move(callback).Run(target);
++  }
++}
++
+ void SwitchToProfile(const base::FilePath& path,
+                      bool always_create,
+                      base::OnceCallback<void(BrowserWindowInterface*)> callback,
+                      bool open_command_line_urls) {
++#if BUILDFLAG(IS_LINUX)
++  if (!always_create) {
++    BrowserWindowInterface* source =
++        GlobalBrowserCollection::GetInstance()->GetLastActiveBrowser();
++    if (source && source->GetType() == BrowserWindowInterface::TYPE_NORMAL &&
++        source->GetProfile()->GetPath() != path) {
++      callback = base::BindOnce(&AerographeneSwitchInPlace,
++                                source->GetWeakPtr(), std::move(callback));
++    }
++  }
++#endif  // BUILDFLAG(IS_LINUX)
+   base::OnceCallback<void(Profile*)> open_browser_callback =
+       base::BindOnce(&profiles::OpenBrowserWindowForProfile,
+                      std::move(callback), always_create,
