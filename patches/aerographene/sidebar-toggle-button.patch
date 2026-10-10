@@ -99,11 +99,14 @@ aerographene/toolbar-compact-width.patch, aerographene/omnibox-centered.patch
    UpdateGlicButtonVisibility();
    UpdateGlicActorVisibility();
    // Invalidate the layout cache so responsive buttons (forward, home, split,
-@@ -1869,6 +1882,22 @@
+@@ -1869,6 +1882,25 @@
    InvalidateLayout();
  }
  
 +void ToolbarView::UpdateSidebarToggle() {
++  if (!sidebar_toggle_) {
++    return;
++  }
 +  auto* layout = HeliumLayoutStateController::From(browser_view_->browser());
 +  auto* state = tabs::VerticalTabStripStateController::From(browser_);
 +  sidebar_toggle_->SetVisible(layout && layout->IsVerticalLayout() && state);
