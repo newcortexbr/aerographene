@@ -14,7 +14,7 @@ python3 bench/harness.py --quick --tabs 10   # rodada rápida do dia a dia (~3x 
 
 O harness aborta se o perfil de energia não for `performance` (`--require-profile ''` desliga). Cada linha do resultado grava perfil, governor, EPP e se está na tomada; só compare resultados com o mesmo estado. Não rode junto com build ou outra carga pesada (são só 4 threads).
 
-Não rode no runner do Cezanne: é outra CPU, dentro do WSL2, e a máquina-alvo da medição é o Comet Lake.
+Não rode no runner do Cezanne: é outra CPU (Ryzen 5600G, Ubuntu bare metal) e a máquina-alvo da medição é o Comet Lake.
 
 Resultados em `bench/out/results-*.jsonl` (fora do git), com resumo pela mediana no fim.
 
