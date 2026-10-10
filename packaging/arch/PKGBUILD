@@ -31,6 +31,11 @@ prepare() {
 package() {
   install -d "$pkgdir/opt/$pkgname" "$pkgdir/usr/bin"
   cp -a app/. "$pkgdir/opt/$pkgname/"
+  # sandbox setuid (build/inner.sh copia out/Default/chrome_sandbox): o Chromium só o usa se for
+  # root:root 4755 ao lado do binário; sem ele vale o sandbox de user namespaces do kernel
+  if [ -f app/chrome-sandbox ]; then
+    install -m4755 app/chrome-sandbox "$pkgdir/opt/$pkgname/chrome-sandbox"
+  fi
   install -Dm755 "$pkgname-wrapper" "$pkgdir/usr/bin/aerographene"
   install -Dm644 initial_preferences "$pkgdir/opt/$pkgname/initial_preferences"
   install -Dm644 "$pkgname.desktop" "$pkgdir/usr/share/applications/$pkgname.desktop"

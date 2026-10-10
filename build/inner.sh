@@ -13,6 +13,18 @@ AERO_STATE="${_src_dir}/.aero-applied"          # cópia da série aplicada + BU
 DOMSUB_CACHE="${_root}/build/domsub-cache.tar.gz"  # originais da domain substitution (permite revert)
 MTIME_SNAP="${_root}/build/aero-mtimes.tsv"
 GNFILE_REL=build/config/compiler/BUILD.gn
+# helium-onboarding (deps.ini do Helium, sha256 fixado); a versão entra no hash da série porque
+# build/branding_strings.py reescreve o .grdp dele (Helium -> aerographene, traduções pt-BR)
+ob_ver=202609160835
+ob_sha=35ce782dc9534b5bff59af7937f22c90179ca9610883acb2e0d698cc6f799366
+
+_memmon=""
+_ccache_on=0
+on_exit() {  # monitor de memória morre mesmo se o ninja falhar (set -e)
+    if [ -n "${_memmon}" ]; then kill "${_memmon}" 2>/dev/null || true; fi
+    if [ "${_ccache_on}" = 1 ]; then echo "== ccache -s"; ccache -s || true; fi
+}
+trap on_exit EXIT
 
 series_list() {  # $1 = dir com series; imprime os patches em ordem
     grep -v '^\s*#' "$1/series" | sed '/^\s*$/d' | while read -r p _; do echo "$p"; done
@@ -24,7 +36,8 @@ patch_hash() {
         cat "${AERO_PATCHES}/series"
         series_list "${AERO_PATCHES}" | while read -r p; do cat "${AERO_PATCHES}/${p}"; done
         echo "march=${MARCH}"
-        cat /aero/build/branding_strings.py
+        cat /aero/build/branding_strings.py /aero/build/strings_ptbr_extra.json
+        echo "onboarding=${ob_ver}"
     } | sha256sum | cut -d' ' -f1
 }
 
@@ -182,6 +195,21 @@ PY
     touch "${_src_dir}/.aero-ublock-${ub_ver}"  # fora de ub_dir: generate_file_list empacota tudo lá
 fi
 
+echo "== helium-onboarding ${ob_ver} (deps.ini do Helium, sha256 fixado)"
+# antes dos patches e do branding_strings.py: o .grdp dele é parte de generated_resources.grd.
+# No re-patch incremental o backup de strings-orig já restaurou o .grdp original; se a versão
+# mudou, o diretório é recriado aqui antes da troca.
+ob_dir="${_src_dir}/components/helium_onboarding"
+if [ ! -f "${ob_dir}/.aero-onboarding-${ob_ver}" ]; then
+    ob_tgz="${_root}/build/helium-onboarding-${ob_ver}.tar.gz"
+    [ -s "$ob_tgz" ] || curl -fL --retry 3 -o "$ob_tgz" \
+        "https://github.com/imputnet/helium-onboarding/releases/download/${ob_ver}/helium-onboarding-${ob_ver}.tar.gz"
+    echo "${ob_sha}  ${ob_tgz}" | sha256sum -c -
+    rm -rf "$ob_dir"; mkdir -p "$ob_dir"
+    tar -xzf "$ob_tgz" -C "$ob_dir"
+    touch "${ob_dir}/.aero-onboarding-${ob_ver}"
+fi
+
 echo "== patches aerographene (${AERO_PATCHES}/series)"
 if [ ! -f "${_src_dir}/.aero-patches.hash" ]; then
     if grep -qv '^\s*\(#.*\)\?$' "${AERO_PATCHES}/series" 2>/dev/null; then
@@ -201,9 +229,6 @@ if [ ! -f "${_src_dir}/.aero-patches.hash" ]; then
     done
     cp -p "$gnfile" "${AERO_STATE}/BUILD.gn.orig"
 
-    # versão do produto: chrome/common/aero_version.h (branding-version.patch) deve coincidir com build/config.sh
-    grep -q "kVersion = \"${AERO_VERSION}\";" "${_src_dir}/chrome/common/aero_version.h" \
-        || { echo "erro: AERO_VERSION=${AERO_VERSION} (build/config.sh) != chrome/common/aero_version.h; atualize patches/aerographene/branding-version.patch" >&2; exit 1; }
     # strings da UI: Chrome/Chromium -> aerographene, com ids GRIT e .xtb reescritos (ver docs/BUILD.md)
     python3 /aero/build/branding_strings.py --src "${_src_dir}" --backup "${AERO_STATE}/strings-orig"
     python3 - "$gnfile" "$MARCH" <<'PY'
@@ -226,6 +251,11 @@ open(path, 'w').write(src)
 PY
     echo "${want_hash}" > "${_src_dir}/.aero-patches.hash"
 fi
+
+# versão do produto: chrome/common/aero_version.h (branding-version.patch) deve coincidir com build/config.sh
+# (sempre, mesmo sem re-patch: config.sh pode mudar sem a série mudar)
+grep -q "kVersion = \"${AERO_VERSION}\";" "${_src_dir}/chrome/common/aero_version.h" \
+    || { echo "erro: AERO_VERSION=${AERO_VERSION} (build/config.sh) != chrome/common/aero_version.h; atualize patches/aerographene/branding-version.patch" >&2; exit 1; }
 
 echo "== domain substitution (com cache para revert)"
 if [ ! -f "${_src_dir}/.domsub.stamp" ]; then
@@ -256,7 +286,7 @@ if [ "${AEROGRAPHENE_CCACHE:-1}" = 1 ] && command -v ccache >/dev/null; then
     ccache --set-config "compiler_check=%compiler% -v"   # clang re-baixado muda mtime, não a versão
     ccache -z >/dev/null
     cc_line='cc_wrapper="ccache"'
-    trap 'echo "== ccache -s"; ccache -s || true' EXIT
+    _ccache_on=1   # ccache -s em on_exit
     echo "ccache $(ccache --version | head -1), dir=${CCACHE_DIR}, max_size=${AEROGRAPHENE_CCACHE_SIZE:-40G}"
 else
     echo "ccache desligado ou ausente"
@@ -266,6 +296,8 @@ echo "== args.gn"
 mkdir -p "${_out_dir}"
 pgo_lines="chrome_pgo_phase=0"
 if [ "${AEROGRAPHENE_PGO:-1}" = 1 ]; then
+    [ -s "${_src_dir}/chrome/build/linux.pgo.txt" ] \
+        || { echo "erro: PGO pedido e chrome/build/linux.pgo.txt ausente; use pgo=0 para build sem PGO" >&2; exit 1; }
     prof="$(tr -d '[:space:]' < "${_src_dir}/chrome/build/linux.pgo.txt")"
     pdir="${_root}/build/pgo"; mkdir -p "$pdir"
     if [ -s "${pdir}/${prof}" ] || curl -fL --retry 3 -o "${pdir}/${prof}.part" \
@@ -275,7 +307,8 @@ if [ "${AEROGRAPHENE_PGO:-1}" = 1 ]; then
 pgo_data_path=\"${pdir}/${prof}\""
         echo "PGO: perfil oficial ${prof}"
     else
-        echo "PGO: perfil indisponível, chrome_pgo_phase=0"
+        echo "erro: PGO pedido (AEROGRAPHENE_PGO=1) e perfil ${prof:-?} indisponível; use pgo=0 para build sem PGO" >&2
+        exit 1
     fi
 fi
 {
@@ -307,20 +340,6 @@ if [ -e "$_esb" ] || [ -L "$_esb" ]; then
 fi
 setup_toolchain
 
-echo "== helium-onboarding (deps.ini do Helium, sha256 fixado)"
-ob_ver=202609160835
-ob_sha=35ce782dc9534b5bff59af7937f22c90179ca9610883acb2e0d698cc6f799366
-ob_dir="${_src_dir}/components/helium_onboarding"
-if [ ! -f "${ob_dir}/.aero-onboarding-${ob_ver}" ]; then
-    ob_tgz="${_root}/build/helium-onboarding-${ob_ver}.tar.gz"
-    [ -s "$ob_tgz" ] || curl -fL --retry 3 -o "$ob_tgz" \
-        "https://github.com/imputnet/helium-onboarding/releases/download/${ob_ver}/helium-onboarding-${ob_ver}.tar.gz"
-    echo "${ob_sha}  ${ob_tgz}" | sha256sum -c -
-    rm -rf "$ob_dir"; mkdir -p "$ob_dir"
-    tar -xzf "$ob_tgz" -C "$ob_dir"
-    touch "${ob_dir}/.aero-onboarding-${ob_ver}"
-fi
-
 echo "== ícones (branding/)"
 bash /aero/build/apply_branding_assets.sh "${_src_dir}" /aero/branding
 
@@ -328,6 +347,12 @@ echo "== gn gen"
 cd "${_src_dir}"
 [ -x out/Default/gn ] || ./tools/gn/bootstrap/bootstrap.py -o out/Default/gn --skip-generate-buildfiles
 ./out/Default/gn gen out/Default --fail-on-unused-args
+if [ "${AEROGRAPHENE_PGO:-1}" = 1 ]; then  # valor efetivo (no merge a última definição vence)
+    pgo_eff="$(./out/Default/gn args out/Default --list=chrome_pgo_phase --short)"
+    [ "${pgo_eff}" = "chrome_pgo_phase = 2" ] \
+        || { echo "erro: PGO pedido mas o gn resolveu '${pgo_eff}'" >&2; exit 1; }
+    echo "PGO: ${pgo_eff}"
+fi
 
 if [ -z "${JOBS:-}" ] || [ "${JOBS}" = auto ]; then JOBS="$(nproc)"; fi
 case "${JOBS}" in ''|*[!0-9]*|0) echo "erro: JOBS inválido: ${JOBS}" >&2; exit 1;; esac
@@ -343,6 +368,7 @@ target="${NINJA_TARGET:-chrome}"
 read -r -a targets <<<"${target}"   # aceita vários alvos separados por espaço
 ninja -C out/Default -j "${JOBS}" "${targets[@]}"
 kill "${_memmon}" 2>/dev/null || true
+_memmon=""
 
 if [ "${target}" != chrome ]; then
     echo "== alvo parcial ${target} compilado; sem pacote"
@@ -358,6 +384,14 @@ for f in chrome chrome_100_percent.pak chrome_200_percent.pak chrome_crashpad_ha
          vk_swiftshader_icd.json xdg-mime xdg-settings; do
     [ -e "out/Default/$f" ] && cp -r "out/Default/$f" "$stage/"
 done
+# sandbox setuid: alvo GN sandbox/linux:chrome_sandbox, data_dep do chrome. O Chromium procura
+# <dir do binário>/chrome-sandbox e só o usa se for root:root 4755 (o PKGBUILD instala assim);
+# sem ele vale o sandbox de user namespaces do kernel. O portablelinux não empacota.
+if [ -f out/Default/chrome_sandbox ]; then
+    cp out/Default/chrome_sandbox "$stage/chrome-sandbox"
+else
+    echo "== aviso: out/Default/chrome_sandbox ausente; pacote sem chrome-sandbox" >&2
+fi
 # ícones hicolor do tema do app (PKGBUILD instala em /usr/share/icons/hicolor/<n>x<n>/apps/aerographene.png)
 for n in 16 24 32 48 64 128 256; do
     mkdir -p "$stage/icons/hicolor/${n}x${n}/apps"
@@ -379,7 +413,7 @@ for t in "${_src_dir}/third_party/llvm-build/Release+Asserts/bin/llvm-strip" \
 done
 if [ -n "$strip_tool" ]; then
     echo "== strip com $(basename "$strip_tool")"
-    for f in "$stage"/chrome "$stage"/chrome_crashpad_handler; do
+    for f in "$stage"/chrome "$stage"/chrome_crashpad_handler "$stage"/chrome-sandbox; do
         [ -f "$f" ] && "$strip_tool" --strip-all "$f"
     done
     for f in "$stage"/*.so "$stage"/*.so.*; do
