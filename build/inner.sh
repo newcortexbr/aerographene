@@ -364,13 +364,15 @@ echo "== ninja -j ${JOBS} (nproc=$(nproc), MemAvailable=$(awk '/MemAvailable/{pr
   done ) &
 _memmon=$!
 export NINJA_STATUS="[%f/%t %es] "
-target="${NINJA_TARGET:-chrome}"
+target="${NINJA_TARGET:-chrome chrome_sandbox}"
+# "chrome" sozinho é a build completa com pacote: inclui chrome_sandbox (não é dependência do chrome)
+if [ "${target}" = chrome ]; then target="chrome chrome_sandbox"; fi
 read -r -a targets <<<"${target}"   # aceita vários alvos separados por espaço
 ninja -C out/Default -j "${JOBS}" "${targets[@]}"
 kill "${_memmon}" 2>/dev/null || true
 _memmon=""
 
-if [ "${target}" != chrome ]; then
+if [ "${target}" != "chrome chrome_sandbox" ]; then
     echo "== alvo parcial ${target} compilado; sem pacote"
     exit 0
 fi
