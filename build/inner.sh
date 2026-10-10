@@ -201,9 +201,9 @@ if [ ! -f "${_src_dir}/.aero-patches.hash" ]; then
     done
     cp -p "$gnfile" "${AERO_STATE}/BUILD.gn.orig"
 
-    # versão do produto: o BRANDING (branding-version.patch) deve coincidir com build/config.sh
-    grep -qx "AERO_VERSION=${AERO_VERSION}" "${_src_dir}/chrome/app/theme/chromium/BRANDING" \
-        || { echo "erro: AERO_VERSION=${AERO_VERSION} (build/config.sh) != BRANDING; atualize patches/aerographene/branding-version.patch" >&2; exit 1; }
+    # versão do produto: chrome/common/aero_version.h (branding-version.patch) deve coincidir com build/config.sh
+    grep -q "kVersion = \"${AERO_VERSION}\";" "${_src_dir}/chrome/common/aero_version.h" \
+        || { echo "erro: AERO_VERSION=${AERO_VERSION} (build/config.sh) != chrome/common/aero_version.h; atualize patches/aerographene/branding-version.patch" >&2; exit 1; }
     # strings da UI: Chrome/Chromium -> aerographene, com ids GRIT e .xtb reescritos (ver docs/BUILD.md)
     python3 /aero/build/branding_strings.py --src "${_src_dir}" --backup "${AERO_STATE}/strings-orig"
     python3 - "$gnfile" "$MARCH" <<'PY'

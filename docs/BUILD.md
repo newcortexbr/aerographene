@@ -37,7 +37,7 @@ Para forçar do zero: apagar `portablelinux/build/src`.
 
 ## release e pacote
 
-Item 12 do `SCOPE.md`. A versão `vX.Y.Z` do aerographene (v0.x.x enquanto não houver release estável; primeira `v0.1.0`) é independente da do Chromium. Fonte única: `AERO_VERSION` em `build/config.sh`; `patches/aerographene/branding-version.patch` (linha `AERO_VERSION=` do BRANDING) e `pkgver` do PKGBUILD acompanham à mão, e o `inner.sh` aborta se o BRANDING divergir do `config.sh`. Para subir a versão: mudar os três, a tag do `release` e o `.SRCINFO`.
+Item 12 do `SCOPE.md`. A versão `vX.Y.Z` do aerographene (v0.x.x enquanto não houver release estável; primeira `v0.1.0`) é independente da do Chromium. Fonte única: `AERO_VERSION` em `build/config.sh`; `patches/aerographene/branding-version.patch` (`kVersion` em `chrome/common/aero_version.h`) e `pkgver` do PKGBUILD acompanham à mão, e o `inner.sh` aborta se o header divergir do `config.sh`. Subir a versão só recompila `chrome_main_delegate.cc` e `version_ui.cc` (+ link), não a árvore. Para subir a versão: mudar os três, a tag do `release` e o `.SRCINFO`.
 
 1. rodar o workflow `build` e anotar o `run_id`.
 2. disparar `release` (`workflow_dispatch`) com `run_id` e `tag` (`vX.Y.Z`): baixa o artifact `aerographene-linux-x86_64`, renomeia para `aerographene-X.Y.Z-x86_64_linux.tar.zst`, gera `SHA256SUMS` e cria a release como draft. Publicar à mão depois de conferir.
@@ -47,7 +47,7 @@ Não testado: `makepkg` completo e `namcap` (não há release ainda).
 
 ## branding: versão e strings da UI
 
-Versão: `patches/aerographene/branding-version.patch` (depois de `branding.patch`) acrescenta `AERO_VERSION=0.1.0` ao BRANDING (lido por `version.py` como `@AERO_VERSION@`, sem comentários no arquivo), `GetAeroVersionNumber()` em `base/version_info`, e usa em `--version` (`aerographene 0.1.0 (Chromium 154.0.8037.97)`), `--product-version`, chrome://version e Sobre (`0.1.0 (Chromium 154.0.8037.97)` no campo de versão). Não altera mensagens GRIT nem HTML (diferente do `add-helium-versioning.patch`, que muda a mensagem `IDS_SETTINGS_ABOUT_PAGE_BROWSER_VERSION` e perderia as traduções). `GetVersionNumber()`, UA e extensões continuam em 154.0.8037.97.
+Versão: `patches/aerographene/branding-version.patch` cria `chrome/common/aero_version.h` (`aero::kVersion = "0.1.0"`, header estático em `non_code_constants`, incluído só por `chrome_main_delegate.cc` e `version_ui.cc`; não toca BRANDING nem `base/version_info`, que são incluídos em toda a árvore e forçariam recompilação total a cada bump), e usa em `--version` (`aerographene 0.1.0 (Chromium 154.0.8037.97)`), `--product-version`, chrome://version e Sobre (`0.1.0 (Chromium 154.0.8037.97)` no campo de versão). Não altera mensagens GRIT nem HTML (diferente do `add-helium-versioning.patch`, que muda a mensagem `IDS_SETTINGS_ABOUT_PAGE_BROWSER_VERSION` e perderia as traduções). `GetVersionNumber()`, UA e extensões continuam em 154.0.8037.97.
 
 Strings: `build/branding_strings.py` roda no `inner.sh` depois dos patches e antes do `gn gen` (parte do hash da série; o original de cada arquivo tocado vai para `.aero-applied/strings-orig` e é restaurado antes do `patch -R` do re-patch incremental). Troca "Chrome"/"Chromium"/"Google Chrome" por "aerographene" no texto das mensagens dos grds raiz `chrome/app/{chromium_strings,generated_resources}.grd`, `components/components_{chromium_,}strings.grd`, `extensions/strings/extensions_strings.grd`, `ui/strings/ui_strings.grd` e suas partes `.grdp`.
 

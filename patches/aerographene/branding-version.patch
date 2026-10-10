@@ -1,50 +1,32 @@
-aerographene: versão do produto v0.x.x (AERO_VERSION) sem alterar a versão do Chromium.
+aerographene: versão do produto v0.x.x (aero::kVersion) sem alterar a versão do Chromium.
 
 Origem: aerographene (original; ideia de versão própria como helium/core/add-helium-versioning.patch,
 sem alterar mensagens GRIT nem HTML/TS). Licença: GPL-3.0.
 Efeito: `--version` imprime "aerographene 0.1.0 (Chromium 154.0.8037.97)"; `--product-version`
 imprime 0.1.0; chrome://version e a página Sobre mostram "0.1.0 (Chromium 154.0.8037.97)" no lugar do
 número de versão. UA, extensões e PRODUCT_VERSION seguem com a versão do Chromium.
-AERO_VERSION no BRANDING é lido por version.py (sem comentários: o parser exige KEY=VALUE por linha);
+A versão fica em chrome/common/aero_version.h (header pequeno, incluído só por chrome_main_delegate.cc e
+version_ui.cc), não no BRANDING nem em base/version_info: subir a versão não recompila a árvore.
 build/inner.sh confere se coincide com AERO_VERSION de build/config.sh.
-Depende de aerographene/branding.patch (contexto do BRANDING).
+Independente de branding.patch.
 
-diff --git a/base/version_info/version_info.h b/base/version_info/version_info.h
---- a/base/version_info/version_info.h
-+++ b/base/version_info/version_info.h
-@@ -25,6 +25,12 @@ constexpr std::string_view GetProductName() {
-   return PRODUCT_NAME;
- }
- 
-+// aerographene: versão do produto (v0.x.x), e.g. "0.1.0". A versão do Chromium
-+// (GetVersionNumber) segue inalterada: UA, extensões e feature checks.
-+constexpr std::string_view GetAeroVersionNumber() {
-+  return AERO_PRODUCT_VERSION;
-+}
-+
- // Returns the version number, e.g. "6.0.490.1".
- constexpr std::string_view GetVersionNumber() {
-   return PRODUCT_VERSION;
-diff --git a/base/version_info/version_info_values.h.version b/base/version_info/version_info_values.h.version
---- a/base/version_info/version_info_values.h.version
-+++ b/base/version_info/version_info_values.h.version
-@@ -7,6 +7,7 @@
- 
- #define PRODUCT_NAME "@PRODUCT_FULLNAME@"
- #define PRODUCT_VERSION "@MAJOR@.@MINOR@.@BUILD@.@PATCH@"
-+#define AERO_PRODUCT_VERSION "@AERO_VERSION@"
- #define LAST_CHANGE "@LASTCHANGE@"
- #define IS_OFFICIAL_BUILD @OFFICIAL_BUILD@
- 
 diff --git a/chrome/app/chrome_main_delegate.cc b/chrome/app/chrome_main_delegate.cc
 --- a/chrome/app/chrome_main_delegate.cc
 +++ b/chrome/app/chrome_main_delegate.cc
-@@ -412,16 +412,17 @@ bool HandleCreditsSwitch(const base::CommandLine& command_line) {
+@@ -38,6 +38,7 @@
+ #include "base/time/time.h"
+ #include "base/timer/timer.h"
+ #include "build/build_config.h"
++#include "chrome/common/aero_version.h"
+ #include "chrome/common/buildflags.h"
+ #include "chrome/common/channel_info.h"
+ #include "chrome/common/chrome_constants.h"
+@@ -412,16 +413,17 @@
  bool HandleVersionSwitches(const base::CommandLine& command_line) {
  #if !BUILDFLAG(IS_MAC)
    if (command_line.HasSwitch(switches::kProductVersion)) {
 -    UNSAFE_TODO(printf("%s\n", version_info::GetVersionNumber().data()));
-+    UNSAFE_TODO(printf("%s\n", version_info::GetAeroVersionNumber().data()));
++    UNSAFE_TODO(printf("%s\n", aero::kVersion.data()));
      return true;
    }
  #endif
@@ -57,19 +39,11 @@ diff --git a/chrome/app/chrome_main_delegate.cc b/chrome/app/chrome_main_delegat
 +    // aerographene: "aerographene 0.1.0 (Chromium 154.0.8037.97)".
 +    UNSAFE_TODO(printf("%s %s (Chromium %s)\n",
 +                       version_info::GetProductName().data(),
-+                       version_info::GetAeroVersionNumber().data(),
++                       aero::kVersion.data(),
 +                       version_info::GetVersionNumber().data()));
      return true;
    }
  
-diff --git a/chrome/app/theme/chromium/BRANDING b/chrome/app/theme/chromium/BRANDING
---- a/chrome/app/theme/chromium/BRANDING
-+++ b/chrome/app/theme/chromium/BRANDING
-@@ -8,3 +8,4 @@ COPYRIGHT=Copyright @LASTCHANGE_YEAR@ The aerographene Authors. All rights reser
- MAC_BUNDLE_ID=org.aerographene.aerographene
- MAC_CREATOR_CODE=Cr24
- MAC_TEAM_ID=
-+AERO_VERSION=0.1.0
 diff --git a/chrome/browser/ui/webui/version/version_ui.cc b/chrome/browser/ui/webui/version/version_ui.cc
 --- a/chrome/browser/ui/webui/version/version_ui.cc
 +++ b/chrome/browser/ui/webui/version/version_ui.cc
@@ -81,7 +55,15 @@ diff --git a/chrome/browser/ui/webui/version/version_ui.cc b/chrome/browser/ui/w
  #include "base/strings/string_number_conversions.h"
  #include "base/strings/string_util.h"
  #include "base/strings/utf_string_conversions.h"
-@@ -73,6 +74,14 @@ using content::WebUIDataSource;
+@@ -22,6 +23,7 @@
+ #include "chrome/browser/browser_process_impl.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/ui/webui/version/version_handler.h"
++#include "chrome/common/aero_version.h"
+ #include "chrome/common/channel_info.h"
+ #include "chrome/common/url_constants.h"
+ #include "chrome/grit/branded_strings.h"
+@@ -73,6 +75,14 @@
  
  namespace {
  
@@ -89,14 +71,14 @@ diff --git a/chrome/browser/ui/webui/version/version_ui.cc b/chrome/browser/ui/w
 +// de versão em chrome://version e na página Sobre; a versão do Chromium
 +// continua em version_info::GetVersionNumber() (UA, extensões).
 +std::string AeroVersionForUi() {
-+  return base::StrCat({version_info::GetAeroVersionNumber(), " (Chromium ",
++  return base::StrCat({aero::kVersion, " (Chromium ",
 +                       version_info::GetVersionNumber(), ")"});
 +}
 +
  void CreateAndAddVersionUIDataSource(Profile* profile) {
    WebUIDataSource* html_source =
        WebUIDataSource::CreateAndAdd(profile, chrome::kChromeUIVersionHost);
-@@ -247,8 +256,7 @@ void VersionUI::AddVersionDetailStrings(content::WebUIDataSource* html_source) {
+@@ -247,8 +257,7 @@
                                    VersionProcessorVariation());
  
    // Data strings.
@@ -106,7 +88,7 @@ diff --git a/chrome/browser/ui/webui/version/version_ui.cc b/chrome/browser/ui/w
    html_source->AddString(version_ui::kVersionSuffix,
                           GetVersionInformationalSuffix());
  
-@@ -340,7 +348,7 @@ void VersionUI::AddVersionDetailStrings(content::WebUIDataSource* html_source) {
+@@ -340,7 +349,7 @@
  std::u16string VersionUI::GetAnnotatedVersionStringForUi() {
    return l10n_util::GetStringFUTF16(
        IDS_SETTINGS_ABOUT_PAGE_BROWSER_VERSION,
@@ -115,3 +97,39 @@ diff --git a/chrome/browser/ui/webui/version/version_ui.cc b/chrome/browser/ui/w
        base::UTF8ToUTF16(GetVersionInformationalSuffix()),
        l10n_util::GetStringUTF16(version_info::IsOfficialBuild()
                                      ? IDS_VERSION_UI_OFFICIAL
+diff --git a/chrome/common/BUILD.gn b/chrome/common/BUILD.gn
+--- a/chrome/common/BUILD.gn
++++ b/chrome/common/BUILD.gn
+@@ -464,6 +464,7 @@
+ # so that they can be used without adding any binary bloat.
+ static_library("non_code_constants") {
+   sources = [
++    "aero_version.h",
+     "chrome_constants.cc",
+     "chrome_constants.h",
+     "chrome_switches.h",
+diff --git a/chrome/common/aero_version.h b/chrome/common/aero_version.h
+new file mode 100644
+--- /dev/null
++++ b/chrome/common/aero_version.h
+@@ -0,0 +1,20 @@
++// Copyright 2026 The aerographene Authors. All rights reserved.
++// Use of this source code is governed by a GPL-3.0 license.
++
++#ifndef CHROME_COMMON_AERO_VERSION_H_
++#define CHROME_COMMON_AERO_VERSION_H_
++
++#include <string_view>
++
++namespace aero {
++
++// aerographene: versão do produto (v0.x.x). Header pequeno e próprio, incluído
++// só por chrome_main_delegate.cc e version_ui.cc: mudar a versão não recompila
++// a árvore (base/version_info e o BRANDING, incluídos em toda parte, ficam
++// intactos). Mantido igual a AERO_VERSION de build/config.sh (checado em
++// build/inner.sh).
++inline constexpr std::string_view kVersion = "0.1.0";
++
++}  // namespace aero
++
++#endif  // CHROME_COMMON_AERO_VERSION_H_
