@@ -96,9 +96,9 @@ depends (conferidos com `readelf -d aerographene` do pacote 46f2308, sem executa
 - `ttf-liberation`: inferência (fontes padrão); `hicolor-icon-theme`: o ícone vai em `hicolor/`.
 - nomes de pacotes Arch não conferidos com `pacman`/namcap.
 
-Sandbox: o pacote extraído não contém `chrome_sandbox` (suid); o binário referencia `CHROME_DEVEL_SANDBOX`. O PKGBUILD não instala helper suid, então o sandbox depende de user namespaces não privilegiados do kernel. Não testado em execução.
+Sandbox: a partir do branch `fix/branding-gaps`, `build/inner.sh` copia `out/Default/chrome_sandbox` (alvo GN `sandbox/linux:chrome_sandbox`, data_dep do `chrome`) para `chrome-sandbox` no tarball (aviso, não erro, se faltar) e o PKGBUILD instala com `install -m4755` (root:root via fakeroot). O Chromium procura `<dir do binário>/chrome-sandbox` e só usa o helper setuid se o dono e o modo estiverem certos; sem ele, ou em tarballs antigos, o sandbox depende de user namespaces não privilegiados do kernel. O portablelinux não empacota o helper. Não testado em execução.
 
-StartupWMClass: `aerographene` (nome do desktop file). NÃO verificado: o binário contém `CHROME_DESKTOP`, mas o app_id/WM_CLASS real só aparece com a janela aberta. Verificar: `xprop WM_CLASS` (X11), `swaymsg -t get_tree` ou `hyprctl clients` (Wayland); ajuste o valor se diferir.
+StartupWMClass: `aerographene` (nome do desktop file; padrão do binário desde `patches/aerographene/branding-desktop.patch`, ver abaixo). NÃO verificado: o app_id/WM_CLASS real só aparece com a janela aberta. Verificar: `xprop WM_CLASS` (X11), `swaymsg -t get_tree` ou `hyprctl clients` (Wayland); ajuste o valor se diferir.
 
 Pendências:
 - checksums todos `SKIP` (release inexistente; rodar `updpkgsums`).
@@ -126,6 +126,8 @@ Mapa (destino em `chrome/app/theme/`, tamanho original conferido na tag 154.0.80
 - `default_100_percent/chromium/{,linux/}product_logo_{16,32}.png` (16², 32²) e `default_200_percent/chromium/product_logo_{16,32}.png` (32², 64²): `IDR_PRODUCT_LOGO_16/32`.
 - `default_{100,200}_percent/chromium/product_logo_name_22{,_white}.png` (97×22 / 194×44): `IDR_PRODUCT_LOGO_NAME_22[_WHITE]`.
 - `chromium/product_logo.svg` (256×256): `IDR_PRODUCT_LOGO_SVG`, substituído pelo SVG do ícone.
+- `components/resources/default_{100,200}_percent/chromium/product_logo{,_white}.png` (171×32 / 342×64, `IDR_PRODUCT_LOGO[_WHITE]`, cabeçalho de chrome://version) pelo logotipo com nome (`logo-name-32-{black,white}-{1,2}x.png`, gerado de `branding/src/logo-*.png` por `render.sh`), e `favicon_product.png` (16² / 32², `IDR_PRODUCT_FAVICON`) pelo ícone.
+- `ui/webui/resources/images/chrome_logo_dark.svg` (24×24): anel branco do Chrome que o `cr-toolbar` (history, downloads, extensions, settings) mostra no tema escuro; trocado por `aerographene-mark-white.svg`. No tema claro o `cr-toolbar` usa `chrome://theme/current-channel-logo` = `IDR_PRODUCT_LOGO_32`, já no mapa.
 
 Fora do mapa: `product_logo_animation.svg`; `win/` (`*.ico`, `tiles/`) e `mac/` (`app.icns`, `AppIcon.appiconset`), que não entram numa build Linux; `chromeos/`. `branding/png/aerographene-icon.ico` já está pronto (16–256) para uma eventual substituição de `win/chromium.ico`, mas esse arquivo tem só 16×16 originalmente e não foi mapeado.
 
@@ -136,4 +138,4 @@ Fora do mapa: `product_logo_animation.svg`; `win/` (`*.ico`, `tiles/`) e `mac/` 
 
 ### WM_CLASS / StartupWMClass
 
-Sem patch. `shell_integration_linux.cc:426-468` (154.0.8037.97) deriva a classe da variável `CHROME_DESKTOP` (nome do `.desktop` sem extensão); `aerographene-wrapper` exporta `CHROME_DESKTOP=aerographene.desktop`, então o nome da instância é `aerographene` (igual ao `StartupWMClass=aerographene`; o Wayland usa o mesmo valor como app_id) e a classe X11 é `Aerographene` (primeira letra maiúscula). O valor `Chromium-browser` só aparece quando o binário roda sem o wrapper (padrão `chromium-browser.desktop`). Nada a mudar enquanto o lançador for `/usr/bin/aerographene`; `--class` não é necessário. Não verificado em execução (sem build): conferir com `xprop WM_CLASS` / `hyprctl clients` e, se o shell casar só pela classe, trocar para `StartupWMClass=Aerographene`.
+`shell_integration_linux.cc:426-468` (154.0.8037.97) deriva a classe de `chrome::GetDesktopName()` (`chrome/common/channel_info_posix.cc:121-153`): `CHROME_DESKTOP` se definida, senão o padrão embutido. `aerographene-wrapper` exporta `CHROME_DESKTOP=aerographene.desktop`; sem o wrapper (binário executado direto) o padrão do upstream era `chromium-browser.desktop` (WM_CLASS `chromium-browser`/`Chromium-browser`, observado no teste do pacote 0.1.0). `patches/aerographene/branding-desktop.patch` troca o padrão para `aerographene.desktop` e o ícone de `GetIconName()` para `aerographene`, então com ou sem wrapper o nome da instância é `aerographene` (igual ao `StartupWMClass=aerographene`; o Wayland usa o mesmo valor como app_id) e a classe X11 é `Aerographene`. `--class` não é necessário. Não verificado em execução (sem build): conferir com `xprop WM_CLASS` / `hyprctl clients` e, se o shell casar só pela classe, trocar para `StartupWMClass=Aerographene`.
