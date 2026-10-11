@@ -1,0 +1,65 @@
+aerographene: URL de início que duplica um pinned já aberto ativa o pinned, sem aba comum.
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: SCOPE item 4. Corrige "a URL de início (ou passada na linha de
+comando) que bate com um pinned da grade abre como aba comum em vez de
+destacar o pinned".
+Causa: o BookmarkModel carrega depois de o startup decidir as abas
+(pinned-startup-load). Nesse intervalo o pinned vem do fallback do pref
+kPinnedTabs e a URL de início entra como aba comum. Ao carregar, o mirror
+associa o pinned por URL (AssociateAllPinnedTabs) e AdoptStartupTabs ignorava
+entradas já mapeadas ("mapped -> continue"): a aba comum duplicada ficava, e
+era a ativa, então a grade não destacava o pinned. Hipótese de causa; confirmada
+por leitura de código, não por log em runtime.
+Correção: em AdoptStartupTabs, para entrada já mapeada a uma aba pinned, procura
+aba comum "fresca" (no máximo 1 entrada de histórico) com a mesma origem+path
+(URL exata inclusa), fecha-a e, se era a ativa, ativa antes a aba pinned
+mapeada (mesmo estado de um clique no pinned). Uma só aba por entrada. Roda uma
+vez por carga do modelo, dentro do mesmo ScopedBatch (sem notificação extra) e
+sem custo no caminho sem duplicata: um laço sobre as abas comuns por entrada
+mapeada. Ativar uma pinned diferida (kDeferUntilActivation) a carrega, como
+antes para a aba que ficaria ativa.
+Limites: caso em que o modelo já está carregado no startup e há pinned open=1
+antes da URL de início na lista (a URL casada é descartada por
+AdoptStartupTabsIntoPinned e a primeira pinned da lista é a ativa) não muda;
+sem teste em runtime.
+Depende de aerographene/pinned-startup-load.patch e perf-pinned-batch.patch
+(aplica por último; diff sobre a série completa).
+
+--- a/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc
++++ b/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc
+@@ -345,6 +345,34 @@
+         tab_nodes_,
+         [&](const auto& entry) { return entry.second == candidate.uuid; });
+     if (mapped) {
++      // The pinned tab already exists (e.g. restored from the pref fallback
++      // while the model was loading) and was just mapped by URL. A startup URL
++      // that opened an ordinary tab for the same page is a duplicate: drop it
++      // and make the pinned tab the active one if the duplicate was.
++      int pinned_index = -1;
++      for (int i = 0; i < strip->IndexOfFirstNonPinnedTab(); ++i) {
++        if (GetEntryForTab(strip->GetTabAtIndex(i)) == candidate.uuid) {
++          pinned_index = i;
++          break;
++        }
++      }
++      for (int i = strip->count() - 1; pinned_index >= 0 &&
++                                       i >= strip->IndexOfFirstNonPinnedTab();
++           --i) {
++        tabs::TabInterface* tab = strip->GetTabAtIndex(i);
++        const GURL url = GetTabURL(tab);
++        content::WebContents* contents = tab->GetContents();
++        // Only fresh startup tabs: a tab with history is the user's own.
++        if (!contents || contents->GetController().GetEntryCount() > 1 ||
++            !url.is_valid() || !SameOriginAndPath(candidate.url, url)) {
++          continue;
++        }
++        if (strip->active_index() == i) {
++          strip->ActivateTabAt(pinned_index);
++        }
++        strip->CloseWebContentsAt(i, TabCloseTypes::CLOSE_NONE);
++        break;
++      }
+       continue;
+     }
+     // An ordinary tab already showing the entry (startup URL, command line):
