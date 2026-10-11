@@ -325,7 +325,7 @@ diff -ruN a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc b/c
 -        tab ? GetPinnedTabMirror(tab) : nullptr;
 +    if (tab && !mirror_looked_up) {
 +      mirror = GetPinnedTabMirror(tab);
-+      mirror_looked_up = true;
++      mirror_looked_up = mirror != nullptr;
 +    }
      const std::optional<base::Uuid> uuid =
 -        mirror ? mirror->GetEntryForTab(tab) : std::nullopt;
