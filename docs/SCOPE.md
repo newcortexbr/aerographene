@@ -39,10 +39,15 @@ Regra de desempenho: nenhuma mudança piora mais de 2% a linha de base; uma muda
 
 ## decisões do dono (11/10/2026)
 
-- item 8: os temas da v0.1 são o default e o pixelized (substituem nebula e high-contrast). Meta objetiva: seguir exatamente os mockups em `theming/1/design-language/` (default e pixelized).
+- item 8: os temas da v0.1 são o default e o pixelized (substituem nebula e high-contrast). Meta objetiva: seguir exatamente os mockups em `theming/design-language/` (default e pixelized).
 - item 11: uBlock sempre ligado por padrão. Ícone da extensão acompanha o pacote de ícones do tema ativo.
 - temas são claros ou escuros por natureza: cada tema define o próprio esquema e não há alternância claro/escuro nem "seguir o sistema". Os dois temas da v0.1 são escuros; o navegador abre no escuro.
 - teste de uso real de spaces, command bar, peek e split view fica para a transição v0.1 → v0.2.
+- fidelidade aos mockups (11/10/2026, decisão do dono): seguir R-r01a/b, M, E, F e os guias default/pixelized onde possível. Fora: notas, terminal/board, mcode e miao. Exceções aceitas: sem letter-spacing no chrome nativo (só em HTML); menus sem blur, fundo quase opaco; favicons vêm dos sites.
+- barra de URL: ajustes do site e copiar link dentro da barra, numa das extremidades; sem estrela. Clique na URL abre a command bar (estilo Zen/Arc), dentro da v0.1.
+- botões de janela (minimizar, maximizar/restaurar, fechar) ficam na própria toolbar, sem barra extra vazia, com glifos do pacote de ícones do tema ativo.
+- página de nova aba: HTML e CSS puros, wallpaper estático (sem animação); clima opt-in, desligado por padrão.
+- modo topbar na v0.1: abas normais com uma linha acima para pinned e pastas; o resto do R-r01b é refinamento.
 
 ## em aberto
 
