@@ -1,0 +1,1210 @@
+aerographene: modo topbar (abas horizontais) como no mockup R-r01b, decisão de 11/10/2026 (docs/SCOPE.md).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/sidebar-mockup.patch (AerographeneSpaceRow, lado
+vertical dos pinned), aerographene/pinned-model-tabstrip.patch,
+aerographene/pinned-closed.patch, aerographene/pinned-folder.patch,
+aerographene/theme-builtin.patch, aerographene/theme-radius.patch,
+helium/ui/layout/*.
+Propósito:
+(1) Linha 1 (AerographeneTopbarRow, 40 px, views/frame/aerographene_topbar_row.*):
+linha do space (AerographeneSpaceRow, reaproveitada), pinned como botões 30x30
+(favicon 16 px; aberto = marcador accent 6x6 no canto superior direito, aba
+ativa = contorno accent 1 px, fechado = opacidade .62 e contorno tracejado) e
+pastas como "ícone + nome + ›" que abrem a gaveta num menu simples
+(SimpleMenuModel + MenuRunner; ícone = favicon). Lê o PinnedModel e o
+PinnedTabMirror existentes, sem modelo novo. Clique = ativa a aba aberta nesta
+janela ou reabre a entrada fechada (OpenClosedEntry); botão direito num pinned
+aberto = menu normal da aba (desafixar, renomear, fechar). Reconstruída de
+forma adiada (PostTask) a cada OnPinnedChanged. A linha some (altura 0) sem
+entradas no modelo.
+(2) HorizontalTabStripRegionViewOld: a linha é filha com
+kViewIgnoredByLayoutKey, posicionada em Layout() dentro de uma borda vazia de
+40 px no topo (o FlexLayout só vê a linha das abas); GetMinimumSize soma o
+inset (a altura com exclusão dos botões de janela vem do mínimo). Os botões de
+janela do frame custom ficam à direita da região, ao lado da linha 1, sem barra
+extra; a linha das abas não passa por baixo deles. Arrastar a janela pela área
+vazia da linha 1 continua valendo (IsPositionInWindowCaption).
+(3) Pinned fora da faixa de abas: ShouldTabBeVisible falsa para pinned,
+Tab::GetTabSizeInfo com largura de pinned 0 e CalculateTabBounds ignora
+largura 0 (não avança nem soma overlap). Os Tab pinned continuam existindo
+(menu de contexto, ativação).
+(4) Geometria das abas: aba visível 196x30 (kTabWidth 196, raio inferior 4 =
+raio de extensão do caminho destacado; view com 8 px a mais), 2 px entre abas
+(GetTabOverlap = 2*raio - 2), padding interno 12/6 px, kTabHeight 33+1 e
+kTabStripPadding 3 (faixa de 37 px, 36 após a sobreposição de 1 px da
+toolbar). Total 40 + 36 + 44 = 120 (guia de dimensões).
+(5) Pintura (PaintAeroHorizontalTab, só abas não pinned): inativa sem fundo,
+hover na cor tab_hover, separador de 1 px no vão (escondido junto da ativa/hover);
+ativa default = gradiente rgba(108,182,255,.14)->rgba(10,16,32,.78), contorno
+1 px no topo e laterais (sem linha inferior) e barra accent de 2 px no topo com
+8 px de recuo; ativa pixelized = bloco preto, contorno accent 1 px, rampa Bayer
+4x4 nos 96 px finais e chips atrás do nome e dos botões.
+Fora do escopo / não feito: arrastar pinned entre a linha 1 e a faixa;
+reordenar pinned na linha 1; menu de contexto de pinned fechado; layout
+Windows/macOS; aba pinned de PWA (fica escondida); HorizontalTabStripRegionViewNew
+(kTabStripUnification, desligada por padrão); testes unitários do Chromium
+(tab_style, tab_strip_layout) que assumem larguras e overlaps antigos.
+Não verificado em runtime: tudo acima (só compilação dos .cc tocados).
+
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -2550,6 +2550,8 @@
+       "views/frame/custom_floating_corner.h",
+       "views/frame/find_bar_owner_views.cc",
+       "views/frame/find_bar_owner_views.h",
++      "views/frame/aerographene_topbar_row.cc",
++      "views/frame/aerographene_topbar_row.h",
+       "views/frame/horizontal_tab_strip_region_view.cc",
+       "views/frame/horizontal_tab_strip_region_view.h",
+       "views/frame/immersive_mode_controller_factory_views.cc",
+--- a/chrome/browser/ui/layout_constants.cc
++++ b/chrome/browser/ui/layout_constants.cc
+@@ -103,12 +103,15 @@
+     case LayoutConstant::kTabCloseButtonSize:
+       return touch_ui ? 24 : (features::IsRoundedIconsEnabled() ? 14 : 16);
+     case LayoutConstant::kTabHeight:
+-      return 34 + GetLayoutConstant(LayoutConstant::kTabstripToolbarOverlap);
++      // aerographene: topbar mode, visible tab is 30 px (33 + overlap 1 - 3 of
++      // padding on top - 1 of overlap).
++      return 33 + GetLayoutConstant(LayoutConstant::kTabstripToolbarOverlap);
+     case LayoutConstant::kTabStripHeight:
+       return GetLayoutConstant(LayoutConstant::kTabHeight) +
+              GetLayoutConstant(LayoutConstant::kTabStripPadding);
+     case LayoutConstant::kTabStripPadding:
+-      return 6;
++      // aerographene: topbar mode, 3 px above the tabs (mockup R-r01b).
++      return 3;
+     case LayoutConstant::kTabSeparatorHeight:
+       return touch_ui ? 24 : 20;
+     case LayoutConstant::kTabPreTitlePadding:
+--- a/chrome/browser/ui/tabs/tab_style.cc
++++ b/chrome/browser/ui/tabs/tab_style.cc
+@@ -24,8 +24,11 @@
+ constexpr int kSeparatorHeight = 16;
+ 
+ 
+-// The standard tab width is 190 DIP, excluding separators and overlap.
+-constexpr int kTabWidth = 190;
++// aerographene: topbar mode (mockup R-r01b). The visible tab is 196 DIP wide
++// (the view is 2 * the bottom corner radius wider, see
++// HorizontalTabStyleViews::GetPath), and visible tabs are 2 DIP apart.
++constexpr int kTabWidth = 196;
++constexpr int kTabGap = 2;
+ 
+ // Split tabs need more space to be readable.
+ constexpr int kSplitTabWidth = 250;
+@@ -108,14 +111,13 @@
+ }
+ 
+ int TabStyle::GetBottomCornerRadius() const {
+-  return 8;
++  // aerographene: equals the extension radius of the detached tab path.
++  return 4;
+ }
+ 
+ int TabStyle::GetTabOverlap() const {
+-  // The overlap removes the width and the margins of the separator.
+-  const float total_separator_width =
+-      GetSeparatorMargins().width() + GetSeparatorSize().width();
+-  return 2 * GetBottomCornerRadius() - total_separator_width;
++  // aerographene: the views overlap so that the visible tabs are kTabGap apart.
++  return 2 * GetBottomCornerRadius() - kTabGap;
+ }
+ 
+ gfx::Size TabStyle::GetPreviewImageSize() const {
+@@ -314,13 +316,13 @@
+ }
+ 
+ gfx::Insets TabStyle::GetContentsInsets() const {
++  // aerographene: mockup R-r01b, padding 12 (leading) and 6 (trailing)
++  // measured from the visible tab edge.
+   return gfx::Insets::TLBR(
+       GetLayoutConstant(LayoutConstant::kTabVerticalPadding),
+-      GetBottomCornerRadius() +
+-          kTabHorizontalPadding,
++      GetBottomCornerRadius() + 12,
+       GetLayoutConstant(LayoutConstant::kTabVerticalPadding),
+-      GetBottomCornerRadius() +
+-          kTabHorizontalPadding);
++      GetBottomCornerRadius() + 6);
+ }
+ 
+ float TabStyle::GetSelectedTabOpacity() const {
+--- /dev/null
++++ b/chrome/browser/ui/views/frame/aerographene_topbar_row.cc
+@@ -0,0 +1,538 @@
++// Copyright 2026 The Aerographene Authors
++// You can use, redistribute, and/or modify this source code under
++// the terms of the GPL-3.0 license that can be found in the LICENSE file.
++
++#include "chrome/browser/ui/views/frame/aerographene_topbar_row.h"
++
++#include <algorithm>
++#include <optional>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/strings/utf_string_conversions.h"
++#include "base/task/single_thread_task_runner.h"
++#include "cc/paint/paint_flags.h"
++#include "cc/paint/path_effect.h"
++#include "chrome/browser/themes/aerographene_theme.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/color/chrome_color_id.h"
++#include "chrome/browser/ui/tabs/aerographene/pinned_model_factory.h"
++#include "chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "chrome/browser/ui/views/tabs/tab_strip.h"
++#include "chrome/browser/ui/views/tabs/vertical/aerographene_space_row.h"
++#include "components/tabs/public/tab_interface.h"
++#include "components/vector_icons/vector_icons.h"
++#include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/base/models/image_model.h"
++#include "ui/base/mojom/menu_source_type.mojom.h"
++#include "ui/color/color_id.h"
++#include "ui/color/color_provider.h"
++#include "ui/gfx/canvas.h"
++#include "ui/gfx/font_list.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/gfx/image/image.h"
++#include "ui/gfx/image/image_skia.h"
++#include "ui/gfx/paint_vector_icon.h"
++#include "ui/gfx/text_utils.h"
++#include "ui/views/accessibility/view_accessibility.h"
++#include "ui/views/context_menu_controller.h"
++#include "ui/views/controls/button/button.h"
++#include "ui/views/controls/menu/menu_runner.h"
++#include "ui/views/layout/layout_provider.h"
++#include "ui/views/view_utils.h"
++#include "ui/views/widget/widget.h"
++
++namespace {
++
++constexpr int kLeadingPadding = 8;
++constexpr int kSpaceRowWidth = 148;
++constexpr int kSpaceRowHeight = 32;
++constexpr int kPinSize = 30;
++constexpr int kPinGap = 2;
++constexpr int kGroupGap = 8;
++constexpr int kFaviconSize = 16;
++constexpr int kMarkerSize = 6;
++constexpr int kMarkerInset = 2;
++// Closed pinned: opacity .62 and dashed outline (same as the sidebar).
++constexpr uint8_t kClosedAlpha = 0x9E;
++constexpr float kDash = 3.0f;
++constexpr int kFolderHeight = 30;
++constexpr int kFolderPadding = 8;
++constexpr int kFolderIconSize = 16;
++constexpr int kFolderIconGap = 6;
++constexpr int kFolderMaxTextWidth = 120;
++
++int GetRadius() {
++  const int radius = views::LayoutProvider::GetAerographeneControlRadius();
++  return radius >= 0 ? radius : 4;
++}
++
++bool IsPixelized() {
++  return aerographene::GetBuiltinTheme() ==
++         aerographene::BuiltinTheme::kPixelized;
++}
++
++std::u16string GetDisplayName(const aerographene::PinnedItem& item) {
++  if (!item.label.empty()) {
++    return base::UTF8ToUTF16(item.label);
++  }
++  return item.title.empty() ? base::UTF8ToUTF16(item.url.spec()) : item.title;
++}
++
++// Pinned entry: 30x30 button with the favicon. Live = accent marker on the top
++// right corner; closed = opacity .62 and dashed outline; active tab = accent
++// outline.
++class TopbarPinButton : public views::Button,
++                        public views::ContextMenuController {
++  METADATA_HEADER(TopbarPinButton, views::Button)
++
++ public:
++  using MenuCallback =
++      base::RepeatingCallback<void(const gfx::Point&,
++                                   ui::mojom::MenuSourceType)>;
++
++  TopbarPinButton(PressedCallback callback, MenuCallback menu_callback)
++      : views::Button(std::move(callback)),
++        menu_callback_(std::move(menu_callback)) {
++    set_context_menu_controller(this);
++  }
++  TopbarPinButton(const TopbarPinButton&) = delete;
++  TopbarPinButton& operator=(const TopbarPinButton&) = delete;
++  ~TopbarPinButton() override = default;
++
++  void Update(const aerographene::PinnedItem& item,
++              const gfx::Image& favicon,
++              bool active) {
++    uuid_ = item.uuid;
++    open_ = item.open;
++    active_ = active;
++    favicon_ = favicon.IsEmpty() ? gfx::ImageSkia() : favicon.AsImageSkia();
++    const std::u16string name = GetDisplayName(item);
++    SetTooltipText(name);
++    GetViewAccessibility().SetName(name);
++    SchedulePaint();
++  }
++
++  const base::Uuid& uuid() const { return uuid_; }
++
++  void SetActive(bool active) {
++    if (active_ != active) {
++      active_ = active;
++      SchedulePaint();
++    }
++  }
++
++  // views::Button:
++  gfx::Size CalculatePreferredSize(
++      const views::SizeBounds& available_size) const override {
++    return gfx::Size(kPinSize, kPinSize);
++  }
++
++  void PaintButtonContents(gfx::Canvas* canvas) override {
++    const ui::ColorProvider* const colors = GetColorProvider();
++    if (!colors) {
++      return;
++    }
++    const gfx::Rect bounds = GetLocalBounds();
++    const int radius = GetRadius();
++    const SkColor accent = colors->GetColor(ui::kColorSysPrimary);
++    const SkColor line = colors->GetColor(kColorToolbarSeparator);
++
++    cc::PaintFlags flags;
++    flags.setAntiAlias(true);
++    if (GetState() == STATE_HOVERED || GetState() == STATE_PRESSED) {
++      flags.setColor(colors->GetColor(kColorToolbarInkDropHover));
++      canvas->DrawRoundRect(bounds, radius, flags);
++    }
++
++    gfx::RectF outline_bounds(bounds);
++    outline_bounds.Inset(0.5f);
++    if (active_) {
++      cc::PaintFlags stroke;
++      stroke.setAntiAlias(true);
++      stroke.setStyle(cc::PaintFlags::kStroke_Style);
++      stroke.setStrokeWidth(1);
++      stroke.setColor(accent);
++      canvas->DrawRoundRect(outline_bounds, radius, stroke);
++    } else if (!open_) {
++      cc::PaintFlags stroke;
++      stroke.setAntiAlias(true);
++      stroke.setStyle(cc::PaintFlags::kStroke_Style);
++      stroke.setStrokeWidth(1);
++      stroke.setColor(SkColorSetA(line, kClosedAlpha));
++      const float dashes[] = {kDash, kDash};
++      stroke.setPathEffect(cc::PathEffect::MakeDash(dashes, 2, 0));
++      canvas->DrawRoundRect(outline_bounds, radius, stroke);
++    }
++
++    const uint8_t alpha = open_ ? SK_AlphaOPAQUE : kClosedAlpha;
++    const gfx::Point center = bounds.CenterPoint();
++    if (!favicon_.isNull()) {
++      canvas->DrawImageInt(favicon_, center.x() - favicon_.width() / 2,
++                           center.y() - favicon_.height() / 2, alpha);
++    } else {
++      cc::PaintFlags dot;
++      dot.setAntiAlias(true);
++      dot.setColor(SkColorSetA(colors->GetColor(ui::kColorIcon), alpha));
++      canvas->DrawCircle(center, kFaviconSize / 4, dot);
++    }
++
++    if (open_) {
++      // Live marker: 6x6 accent square at the top right corner.
++      flags.setColor(accent);
++      canvas->DrawRoundRect(
++          gfx::Rect(bounds.width() - kMarkerInset - kMarkerSize, kMarkerInset,
++                    kMarkerSize, kMarkerSize),
++          IsPixelized() ? 0 : 1, flags);
++    }
++  }
++
++  // views::ContextMenuController:
++  void ShowContextMenuForViewImpl(
++      views::View* source,
++      const gfx::Point& point,
++      ui::mojom::MenuSourceType source_type) override {
++    menu_callback_.Run(point, source_type);
++  }
++
++ private:
++  base::Uuid uuid_;
++  bool open_ = false;
++  bool active_ = false;
++  gfx::ImageSkia favicon_;
++  MenuCallback menu_callback_;
++};
++
++BEGIN_METADATA(TopbarPinButton)
++END_METADATA
++
++// Drawer folder: theme folder glyph in the accent, name, chevron › at the end.
++class TopbarFolderButton : public views::Button {
++  METADATA_HEADER(TopbarFolderButton, views::Button)
++
++ public:
++  explicit TopbarFolderButton(PressedCallback callback)
++      : views::Button(std::move(callback)) {}
++  TopbarFolderButton(const TopbarFolderButton&) = delete;
++  TopbarFolderButton& operator=(const TopbarFolderButton&) = delete;
++  ~TopbarFolderButton() override = default;
++
++  void Update(const aerographene::PinnedItem& item) {
++    text_ = GetDisplayName(item);
++    text_width_ = std::min(kFolderMaxTextWidth,
++                           gfx::GetStringWidth(text_, gfx::FontList()));
++    SetTooltipText(text_);
++    GetViewAccessibility().SetName(text_);
++    GetViewAccessibility().SetIsCollapsed();
++    PreferredSizeChanged();
++    SchedulePaint();
++  }
++
++  // views::Button:
++  gfx::Size CalculatePreferredSize(
++      const views::SizeBounds& available_size) const override {
++    return gfx::Size(2 * kFolderPadding + 2 * kFolderIconSize +
++                         2 * kFolderIconGap + text_width_,
++                     kFolderHeight);
++  }
++
++  void PaintButtonContents(gfx::Canvas* canvas) override {
++    const ui::ColorProvider* const colors = GetColorProvider();
++    if (!colors) {
++      return;
++    }
++    const gfx::Rect bounds = GetLocalBounds();
++    const bool hovered =
++        GetState() == STATE_HOVERED || GetState() == STATE_PRESSED;
++    if (hovered) {
++      cc::PaintFlags fill;
++      fill.setAntiAlias(true);
++      fill.setColor(colors->GetColor(kColorToolbarInkDropHover));
++      canvas->DrawRoundRect(bounds, GetRadius(), fill);
++    }
++    const SkColor text_color = colors->GetColor(
++        hovered ? kColorTabForegroundActiveFrameActive
++                : kColorTabForegroundInactiveFrameActive);
++    const int icon_y = bounds.y() + (bounds.height() - kFolderIconSize) / 2;
++    const int icon_x = bounds.x() + kFolderPadding;
++    canvas->DrawImageInt(
++        gfx::CreateVectorIcon(vector_icons::kFolderFlippableIcon,
++                              kFolderIconSize,
++                              colors->GetColor(ui::kColorSysPrimary)),
++        GetMirroredXWithWidthInView(icon_x, kFolderIconSize), icon_y);
++    const int chevron_x = bounds.right() - kFolderPadding - kFolderIconSize;
++    canvas->DrawImageInt(
++        gfx::CreateVectorIcon(vector_icons::kKeyboardArrowRightFlippableIcon,
++                              kFolderIconSize, text_color),
++        GetMirroredXWithWidthInView(chevron_x, kFolderIconSize), icon_y);
++    const int text_x = icon_x + kFolderIconSize + kFolderIconGap;
++    canvas->DrawStringRect(
++        text_, gfx::FontList(), text_color,
++        GetMirroredRect(gfx::Rect(
++            text_x, bounds.y(),
++            std::max(0, chevron_x - kFolderIconGap - text_x),
++            bounds.height())));
++  }
++
++ private:
++  std::u16string text_;
++  int text_width_ = 0;
++};
++
++BEGIN_METADATA(TopbarFolderButton)
++END_METADATA
++
++}  // namespace
++
++AerographeneTopbarRow::AerographeneTopbarRow(
++    BrowserWindowInterface* browser,
++    TabStrip* tab_strip,
++    base::RepeatingClosure on_content_changed)
++    : browser_(browser),
++      tab_strip_(tab_strip),
++      on_content_changed_(std::move(on_content_changed)) {
++  space_row_ = AddChildView(std::make_unique<AerographeneSpaceRow>(browser));
++  model_ = aerographene::PinnedModelFactory::GetForProfile(
++      browser->GetProfile());
++  if (model_) {
++    model_observation_.Observe(model_);
++  }
++  if (TabStripModel* const tab_strip_model = browser->GetTabStripModel()) {
++    tab_strip_model_observation_.Observe(tab_strip_model);
++  }
++  // The owner reads has_content() after construction; no notification yet.
++  Rebuild(/*notify=*/false);
++}
++
++AerographeneTopbarRow::~AerographeneTopbarRow() = default;
++
++bool AerographeneTopbarRow::IsInteractiveAt(const gfx::Point& point) const {
++  for (const views::View* child : children()) {
++    if (child->GetVisible() && child->bounds().Contains(point)) {
++      return true;
++    }
++  }
++  return false;
++}
++
++gfx::Size AerographeneTopbarRow::CalculatePreferredSize(
++    const views::SizeBounds& available_size) const {
++  return gfx::Size(0, has_content_ ? kHeight : 0);
++}
++
++void AerographeneTopbarRow::Layout(PassKey) {
++  const int height = this->height();
++  int x = kLeadingPadding;
++  if (space_row_->GetVisible()) {
++    const int width = std::min(kSpaceRowWidth, std::max(0, this->width() - x));
++    space_row_->SetBounds(x, (height - kSpaceRowHeight) / 2, width,
++                          kSpaceRowHeight);
++    x += width + kGroupGap;
++  }
++  for (size_t i = 0; i < item_views_.size(); ++i) {
++    views::View* const view = item_views_[i];
++    const gfx::Size size = view->GetPreferredSize();
++    if (i == pin_count_ && i > 0) {
++      x += kGroupGap - kPinGap;
++    }
++    // Entries that do not fit stay reachable through the sidebar mode.
++    const bool fits = x + size.width() <= this->width();
++    view->SetVisible(fits);
++    if (fits) {
++      view->SetBounds(x, (height - size.height()) / 2, size.width(),
++                      size.height());
++    }
++    x += size.width() + kPinGap;
++  }
++  LayoutSuperclass<views::View>(this);
++}
++
++void AerographeneTopbarRow::OnPinnedModelLoaded() {
++  OnPinnedChanged();
++}
++
++void AerographeneTopbarRow::OnPinnedChanged() {
++  // Deferred: a click on an entry can itself change the model, and the button
++  // being pressed must not be destroyed under its own callback.
++  if (rebuild_pending_) {
++    return;
++  }
++  rebuild_pending_ = true;
++  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
++      FROM_HERE, base::BindOnce(&AerographeneTopbarRow::RebuildDeferred,
++                                weak_factory_.GetWeakPtr()));
++}
++
++void AerographeneTopbarRow::RebuildDeferred() {
++  rebuild_pending_ = false;
++  Rebuild(/*notify=*/true);
++}
++
++void AerographeneTopbarRow::OnTabStripModelChanged(
++    TabStripModel* tab_strip_model,
++    const TabStripModelChange& change,
++    const TabStripSelectionChange& selection) {
++  RefreshActive();
++}
++
++void AerographeneTopbarRow::OnTabStripModelDestroyed(
++    TabStripModel* tab_strip_model) {
++  tab_strip_model_observation_.Reset();
++}
++
++void AerographeneTopbarRow::ExecuteCommand(int command_id, int event_flags) {
++  const size_t index = static_cast<size_t>(command_id - 1);
++  if (index < menu_entries_.size()) {
++    ActivateEntry(menu_entries_[index]);
++  }
++}
++
++void AerographeneTopbarRow::Rebuild(bool notify) {
++  for (views::View* view : item_views_) {
++    RemoveChildViewT(view);
++  }
++  item_views_.clear();
++
++  std::vector<aerographene::PinnedItem> items;
++  if (model_ && model_->IsLoaded()) {
++    items = model_->GetPinned();
++  }
++  const base::Uuid active = GetActiveEntry();
++  for (const aerographene::PinnedItem& item : items) {
++    if (item.is_folder || !item.url.is_valid()) {
++      continue;
++    }
++    auto* const pin = AddChildView(std::make_unique<TopbarPinButton>(
++        base::BindRepeating(
++            [](AerographeneTopbarRow* row, base::Uuid uuid,
++               const ui::Event&) { row->ActivateEntry(uuid); },
++            base::Unretained(this), item.uuid),
++        base::BindRepeating(&AerographeneTopbarRow::ShowPinContextMenu,
++                            base::Unretained(this), item.uuid)));
++    pin->Update(item, model_->GetFavicon(item.uuid), item.uuid == active);
++    item_views_.push_back(pin);
++  }
++  pin_count_ = item_views_.size();
++  for (const aerographene::PinnedItem& item : items) {
++    if (!item.is_folder) {
++      continue;
++    }
++    auto* const folder = AddChildView(std::make_unique<TopbarFolderButton>(
++        views::Button::PressedCallback()));
++    folder->SetCallback(base::BindRepeating(
++        [](AerographeneTopbarRow* row, base::Uuid uuid, views::View* anchor,
++           const ui::Event&) { row->ShowFolderMenu(uuid, anchor); },
++        base::Unretained(this), item.uuid, base::Unretained(folder)));
++    folder->Update(item);
++    item_views_.push_back(folder);
++  }
++
++  const bool has_content = !items.empty();
++  SetVisible(has_content);
++  InvalidateLayout();
++  if (has_content != has_content_) {
++    has_content_ = has_content;
++    if (notify && on_content_changed_) {
++      on_content_changed_.Run();
++    }
++  }
++}
++
++void AerographeneTopbarRow::RefreshActive() {
++  const base::Uuid active = GetActiveEntry();
++  for (views::View* view : item_views_) {
++    if (auto* const pin = views::AsViewClass<TopbarPinButton>(view)) {
++      pin->SetActive(pin->uuid() == active);
++    }
++  }
++}
++
++base::Uuid AerographeneTopbarRow::GetActiveEntry() const {
++  TabStripModel* const tab_strip_model = browser_->GetTabStripModel();
++  aerographene::PinnedTabMirror* const mirror =
++      model_ ? model_->tab_mirror() : nullptr;
++  if (!tab_strip_model || !mirror) {
++    return base::Uuid();
++  }
++  const tabs::TabInterface* const tab = tab_strip_model->GetActiveTab();
++  const std::optional<base::Uuid> entry =
++      tab ? mirror->GetEntryForTab(tab) : std::nullopt;
++  return entry ? *entry : base::Uuid();
++}
++
++void AerographeneTopbarRow::ActivateEntry(const base::Uuid& uuid) {
++  TabStripModel* const tab_strip_model = browser_->GetTabStripModel();
++  aerographene::PinnedTabMirror* const mirror =
++      model_ ? model_->tab_mirror() : nullptr;
++  if (!tab_strip_model || !mirror) {
++    return;
++  }
++  for (int i = 0; i < tab_strip_model->count(); ++i) {
++    const std::optional<base::Uuid> entry =
++        mirror->GetEntryForTab(tab_strip_model->GetTabAtIndex(i));
++    if (entry && *entry == uuid) {
++      tab_strip_model->ActivateTabAt(i);
++      return;
++    }
++  }
++  // Closed entry (no-op when it is open in another window).
++  mirror->OpenClosedEntry(browser_, uuid);
++}
++
++void AerographeneTopbarRow::ShowPinContextMenu(
++    const base::Uuid& uuid,
++    const gfx::Point& screen_point,
++    ui::mojom::MenuSourceType source_type) {
++  TabStripModel* const tab_strip_model = browser_->GetTabStripModel();
++  aerographene::PinnedTabMirror* const mirror =
++      model_ ? model_->tab_mirror() : nullptr;
++  if (!tab_strip_model || !mirror || !tab_strip_) {
++    return;
++  }
++  // Open entries only: the regular tab menu (unpin, rename, close...) of the
++  // hidden pinned tab. Closed entries have no menu in this row.
++  for (int i = 0; i < tab_strip_model->count(); ++i) {
++    const std::optional<base::Uuid> entry =
++        mirror->GetEntryForTab(tab_strip_model->GetTabAtIndex(i));
++    if (entry && *entry == uuid) {
++      if (Tab* const tab = tab_strip_->tab_at(i)) {
++        tab_strip_->ShowContextMenuForTab(tab, screen_point, source_type);
++      }
++      return;
++    }
++  }
++}
++
++void AerographeneTopbarRow::ShowFolderMenu(const base::Uuid& uuid,
++                                           views::View* anchor) {
++  if (!model_ || !anchor || !GetWidget()) {
++    return;
++  }
++  const std::optional<aerographene::PinnedItem> folder = model_->Find(uuid);
++  if (!folder || folder->children.empty()) {
++    return;
++  }
++  menu_entries_.clear();
++  menu_model_ = std::make_unique<ui::SimpleMenuModel>(this);
++  for (const aerographene::PinnedItem& child : folder->children) {
++    menu_model_->AddItem(static_cast<int>(menu_entries_.size()) + 1,
++                         GetDisplayName(child));
++    const gfx::Image favicon = model_->GetFavicon(child.uuid);
++    if (!favicon.IsEmpty()) {
++      menu_model_->SetIcon(menu_model_->GetItemCount() - 1,
++                           ui::ImageModel::FromImage(favicon));
++    }
++    menu_entries_.push_back(child.uuid);
++  }
++  // Below the folder button.
++  const gfx::Rect anchor_rect = anchor->GetBoundsInScreen();
++  menu_runner_ = std::make_unique<views::MenuRunner>(
++      menu_model_.get(), views::MenuRunner::NO_FLAGS);
++  menu_runner_->RunMenuAt(GetWidget(), nullptr, anchor_rect,
++                          views::MenuAnchorPosition::kTopLeft,
++                          ui::mojom::MenuSourceType::kMouse);
++}
++
++BEGIN_METADATA(AerographeneTopbarRow)
++END_METADATA
+--- /dev/null
++++ b/chrome/browser/ui/views/frame/aerographene_topbar_row.h
+@@ -0,0 +1,115 @@
++// Copyright 2026 The Aerographene Authors
++// You can use, redistribute, and/or modify this source code under
++// the terms of the GPL-3.0 license that can be found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_FRAME_AEROGRAPHENE_TOPBAR_ROW_H_
++#define CHROME_BROWSER_UI_VIEWS_FRAME_AEROGRAPHENE_TOPBAR_ROW_H_
++
++#include <memory>
++#include <vector>
++
++#include "base/functional/callback.h"
++#include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
++#include "base/scoped_observation.h"
++#include "base/uuid.h"
++#include "chrome/browser/ui/tabs/aerographene/pinned_model.h"
++#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
++#include "ui/base/metadata/metadata_header_macros.h"
++#include "ui/base/mojom/menu_source_type.mojom-forward.h"
++#include "ui/menus/simple_menu_model.h"
++#include "ui/views/view.h"
++
++class AerographeneSpaceRow;
++class BrowserWindowInterface;
++class TabStrip;
++class TabStripModel;
++
++namespace views {
++class MenuRunner;
++}  // namespace views
++
++// First row of the topbar mode (horizontal tabs), mockup R-r01b: space row,
++// pinned entries as 30x30 buttons and drawer folders as "icon name ›" buttons
++// that open the drawer as a menu. Reads the same PinnedModel and tab mirror
++// as the sidebar (no model of its own); the pinned tabs themselves are hidden
++// in the tab strip. The row has no content (and the owner collapses it) when
++// the model has no entries.
++class AerographeneTopbarRow : public views::View,
++                              public aerographene::PinnedModel::Observer,
++                              public TabStripModelObserver,
++                              public ui::SimpleMenuModel::Delegate {
++  METADATA_HEADER(AerographeneTopbarRow, views::View)
++
++ public:
++  static constexpr int kHeight = 40;
++
++  // `on_content_changed` runs when `has_content()` changes.
++  AerographeneTopbarRow(BrowserWindowInterface* browser,
++                        TabStrip* tab_strip,
++                        base::RepeatingClosure on_content_changed);
++  AerographeneTopbarRow(const AerographeneTopbarRow&) = delete;
++  AerographeneTopbarRow& operator=(const AerographeneTopbarRow&) = delete;
++  ~AerographeneTopbarRow() override;
++
++  bool has_content() const { return has_content_; }
++
++  // Whether `point` (in this view's coordinates) is over a button, as opposed
++  // to the empty area that drags the window.
++  bool IsInteractiveAt(const gfx::Point& point) const;
++
++  // views::View:
++  gfx::Size CalculatePreferredSize(
++      const views::SizeBounds& available_size) const override;
++  void Layout(PassKey) override;
++
++  // aerographene::PinnedModel::Observer:
++  void OnPinnedModelLoaded() override;
++  void OnPinnedChanged() override;
++
++  // TabStripModelObserver:
++  void OnTabStripModelChanged(
++      TabStripModel* tab_strip_model,
++      const TabStripModelChange& change,
++      const TabStripSelectionChange& selection) override;
++  void OnTabStripModelDestroyed(TabStripModel* tab_strip_model) override;
++
++  // ui::SimpleMenuModel::Delegate:
++  void ExecuteCommand(int command_id, int event_flags) override;
++
++ private:
++  void Rebuild(bool notify);
++  void RebuildDeferred();
++  void RefreshActive();
++  base::Uuid GetActiveEntry() const;
++  // Activates the open tab of the entry in this window, or opens it.
++  void ActivateEntry(const base::Uuid& uuid);
++  void ShowPinContextMenu(const base::Uuid& uuid,
++                          const gfx::Point& screen_point,
++                          ui::mojom::MenuSourceType source_type);
++  void ShowFolderMenu(const base::Uuid& uuid, views::View* anchor);
++
++  const raw_ptr<BrowserWindowInterface> browser_;
++  const raw_ptr<TabStrip> tab_strip_;
++  raw_ptr<aerographene::PinnedModel> model_ = nullptr;
++  raw_ptr<AerographeneSpaceRow> space_row_ = nullptr;
++  // Pin buttons first, then folder buttons; owned by the view hierarchy.
++  std::vector<raw_ptr<views::View>> item_views_;
++  size_t pin_count_ = 0;
++  bool has_content_ = false;
++  bool rebuild_pending_ = false;
++  base::RepeatingClosure on_content_changed_;
++
++  std::unique_ptr<ui::SimpleMenuModel> menu_model_;
++  std::unique_ptr<views::MenuRunner> menu_runner_;
++  std::vector<base::Uuid> menu_entries_;
++
++  base::ScopedObservation<aerographene::PinnedModel,
++                          aerographene::PinnedModel::Observer>
++      model_observation_{this};
++  base::ScopedObservation<TabStripModel, TabStripModelObserver>
++      tab_strip_model_observation_{this};
++  base::WeakPtrFactory<AerographeneTopbarRow> weak_factory_{this};
++};
++
++#endif  // CHROME_BROWSER_UI_VIEWS_FRAME_AEROGRAPHENE_TOPBAR_ROW_H_
+--- a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc
+@@ -23,6 +23,7 @@
+ #include "chrome/browser/ui/layout_constants.h"
+ #include "chrome/browser/ui/tabs/features.h"
+ #include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "chrome/browser/ui/views/frame/aerographene_topbar_row.h"
+ #include "chrome/browser/ui/tabs/tab_strip_prefs.h"
+ #include "chrome/browser/ui/ui_features.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+@@ -229,6 +230,18 @@
+                                views::MaximumFlexSizeRule::kPreferred);
+   tab_strip_->SetProperty(views::kFlexBehaviorKey, tab_strip_flex_spec);
+ 
++  // aerographene: topbar mode. First row above the tabs (space, pinned
++  // entries, folders); laid out by Layout() inside the top inset reserved by
++  // OnTopbarContentChanged(), so the FlexLayout only sees the tab row.
++  if (browser && browser->GetType() == BrowserWindowInterface::TYPE_NORMAL) {
++    topbar_row_ = AddChildView(std::make_unique<AerographeneTopbarRow>(
++        browser, tab_strip_,
++        base::BindRepeating(
++            &HorizontalTabStripRegionViewOld::OnTopbarContentChanged,
++            base::Unretained(this))));
++    topbar_row_->SetProperty(views::kViewIgnoredByLayoutKey, true);
++  }
++
+   if (ShouldShowNewTabButton(browser)) {
+     std::unique_ptr<TabStripControlButton> tab_strip_control_button =
+         std::make_unique<NewTabButton>(
+@@ -267,10 +280,14 @@
+     tab_strip_action_container_ =
+         AddChildView(std::move(tab_strip_action_container));
+   }
++  OnTopbarContentChanged();
+   UpdateTabStripMargin();
+ }
+ 
+ HorizontalTabStripRegionViewOld::~HorizontalTabStripRegionViewOld() {
++  if (topbar_row_) {
++    RemoveChildViewT(std::exchange(topbar_row_, nullptr));
++  }
+   // These objects have pointers to TabStripController, which is also destoroyed
+   // by this class. Remove child views that hold raw_ptr to TabStripController.
+   if (tab_strip_action_container_) {
+@@ -312,10 +329,18 @@
+         gfx::ToEnclosingRect(rect_in_target_coords_f));
+   }
+ 
++  // aerographene: the topbar row drags the window except over its buttons.
++  if (topbar_row_ && topbar_row_->GetVisible() &&
++      topbar_row_->IsInteractiveAt(
++          point - topbar_row_->bounds().OffsetFromOrigin())) {
++    return false;
++  }
++
+   // The child could have a non-rectangular shape, so if the rect is not in the
+   // visual portions of the child view we treat it as a click to the caption.
+   for (View* const child : children()) {
+     if (child != tab_strip_ && child != reserved_grab_handle_space_ &&
++        child != topbar_row_ &&
+         child->GetVisible() && IsHitInView(child, point)) {
+       return false;
+     }
+@@ -351,6 +376,10 @@
+     children.emplace_back(reserved_grab_handle_space_.get());
+   }
+ 
++  if (topbar_row_) {
++    children.emplace_back(topbar_row_.get());
++  }
++
+   return children;
+ }
+ 
+@@ -365,6 +394,14 @@
+   UpdateTabStripMargin();
+   LayoutSuperclass<views::AccessiblePaneView>(this);
+ 
++  // aerographene: topbar row in the top inset (collapsed when empty).
++  if (topbar_row_) {
++    topbar_row_->SetBoundsRect(
++        gfx::Rect(0, 0, width(),
++                  topbar_row_->has_content() ? AerographeneTopbarRow::kHeight
++                                             : 0));
++  }
++
+   int leading_offset = 0;
+   if (unfocus_button_ && unfocus_button_->GetVisible()) {
+     AdjustViewBoundsRect(unfocus_button_, leading_offset);
+@@ -445,6 +482,8 @@
+ 
+ gfx::Size HorizontalTabStripRegionViewOld::GetMinimumSize() const {
+   gfx::Size tab_strip_min_size = tab_strip_->GetMinimumSize();
++  // aerographene: the topbar row is part of the top inset.
++  tab_strip_min_size.Enlarge(0, GetInsets().top());
+   // Cap the tabstrip minimum width to a reasonable value so browser windows
+   // aren't forced to grow arbitrarily wide.
+   const int max_min_width = 520;
+@@ -545,6 +584,17 @@
+                                      old_focused_group_id);
+ }
+ 
++void HorizontalTabStripRegionViewOld::OnTopbarContentChanged() {
++  const int top = topbar_row_ && topbar_row_->has_content()
++                      ? AerographeneTopbarRow::kHeight
++                      : 0;
++  if (GetInsets().top() != top) {
++    SetBorder(views::CreateEmptyBorder(gfx::Insets::TLBR(top, 0, 0, 0)));
++  }
++  InvalidateLayout();
++  PreferredSizeChanged();
++}
++
+ void HorizontalTabStripRegionViewOld::OnUnfocusButtonVisibilityChanged() {
+   UpdateTabStripMargin();
+   InvalidateLayout();
+--- a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h
++++ b/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h
+@@ -17,6 +17,7 @@
+ #include "ui/base/pointer/touch_ui_controller.h"
+ #include "ui/views/accessible_pane_view.h"
+ 
++class AerographeneTopbarRow;
+ class BrowserView;
+ 
+ namespace views {
+@@ -116,6 +117,9 @@
+ 
+   void OnUnfocusButtonVisibilityChanged();
+ 
++  // aerographene: reserves/collapses the topbar row above the tabs.
++  void OnTopbarContentChanged();
++
+   // Gets called on `Layout` and adjusts the x-axis position of the `view` based
+   // on `offset`. This should only used for views that show before tab strip.
+   void AdjustViewBoundsRect(View* view, int offset);
+@@ -131,6 +135,8 @@
+   raw_ptr<TabStripComboButton> combo_button_ = nullptr;
+   raw_ptr<views::Button> new_tab_button_ = nullptr;
+   raw_ptr<TabStripControlButton> unfocus_button_ = nullptr;
++  // aerographene: pinned entries, folders and space (topbar mode).
++  raw_ptr<AerographeneTopbarRow> topbar_row_ = nullptr;
+ 
+   std::unique_ptr<views::ActionViewController> action_view_controller_;
+   base::CallbackListSubscription unfocus_button_subscription_;
+--- a/chrome/browser/ui/views/tabs/horizontal_tab_style_views.cc
++++ b/chrome/browser/ui/views/tabs/horizontal_tab_style_views.cc
+@@ -10,8 +10,10 @@
+ 
+ #include "base/i18n/rtl.h"
+ #include "base/memory/raw_ptr.h"
++#include "base/no_destructor.h"
+ #include "base/numerics/safe_conversions.h"
+ #include "cc/paint/paint_flags.h"
++#include "chrome/browser/themes/aerographene_theme.h"
+ #include "chrome/browser/themes/theme_properties.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/color/chrome_color_id.h"
+@@ -26,16 +28,26 @@
+ #include "chrome/browser/ui/views/tabs/tab/glow_hover_controller.h"
+ #include "chrome/browser/ui/views/tabs/tab_group_underline.h"
+ #include "chrome/grit/theme_resources.h"
++#include "third_party/skia/include/core/SkBitmap.h"
+ #include "third_party/skia/include/core/SkPath.h"
+ #include "third_party/skia/include/core/SkPathBuilder.h"
+ #include "third_party/skia/include/core/SkRRect.h"
+ #include "ui/base/theme_provider.h"
++#include "ui/color/color_id.h"
++#include "ui/color/color_provider.h"
+ #include "ui/gfx/animation/tween.h"
+ #include "ui/gfx/canvas.h"
+ #include "ui/gfx/favicon_size.h"
+ #include "ui/gfx/geometry/insets.h"
++#include "ui/gfx/geometry/outsets.h"
+ #include "ui/gfx/geometry/skia_conversions.h"
++#include "ui/gfx/image/image_skia.h"
++#include "ui/gfx/skia_paint_util.h"
+ #include "ui/gfx/scoped_canvas.h"
++#include "ui/views/controls/button/button.h"
++#include "ui/views/controls/label.h"
++#include "ui/views/layout/layout_provider.h"
++#include "ui/views/view_utils.h"
+ #include "ui/views/widget/widget.h"
+ 
+ HorizontalTabStyleViews::HorizontalTabStyleViews(
+@@ -309,7 +321,180 @@
+   return path.detach();
+ }
+ 
++namespace {
++
++// aerographene: horizontal (topbar) tab look of the mockup R-r01b, default and
++// pixelized themes. Same vocabulary as the sidebar tab (tab_view.cc): painted
++// with a few rects and one cached bitmap, nothing allocated per frame.
++constexpr int kAeroExtension = 4;  // Same as the detached tab path.
++constexpr int kAeroIndicatorHeight = 2;
++constexpr int kAeroIndicatorInset = 8;
++constexpr int kAeroSeparatorInset = 8;
++constexpr int kAeroRampWidth = 96;
++constexpr int kAeroRampHeight = 32;
++constexpr int kAeroDotSize = 2;
++constexpr int kAeroChipPaddingH = 6;
++constexpr int kAeroChipPaddingV = 2;
++
++bool IsAeroPixelized() {
++  return aerographene::GetBuiltinTheme() ==
++         aerographene::BuiltinTheme::kPixelized;
++}
++
++int GetAeroRadius() {
++  const int radius = views::LayoutProvider::GetAerographeneControlRadius();
++  return radius >= 0 ? radius : 4;
++}
++
++// Bayer 4x4 ordered dither with 2px dots; density grows to the right.
++const gfx::ImageSkia& GetAeroRamp() {
++  static const base::NoDestructor<gfx::ImageSkia> ramp([] {
++    static constexpr uint8_t kBayer[4][4] = {
++        {0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
++    constexpr int kCols = kAeroRampWidth / kAeroDotSize;
++    SkBitmap bitmap;
++    bitmap.allocN32Pixels(kAeroRampWidth, kAeroRampHeight);
++    bitmap.eraseColor(SK_ColorTRANSPARENT);
++    for (int y = 0; y < kAeroRampHeight; ++y) {
++      for (int x = 0; x < kAeroRampWidth; ++x) {
++        const int cx = x / kAeroDotSize;
++        const int cy = y / kAeroDotSize;
++        const float density = (cx + 1.0f) / kCols;
++        const float threshold = (kBayer[cy & 3][cx & 3] + 0.5f) / 16.0f;
++        if (threshold < density) {
++          *bitmap.getAddr32(x, y) = SkColorSetRGB(0xF2, 0xF2, 0xF2);
++        }
++      }
++    }
++    return gfx::ImageSkia::CreateFrom1xBitmap(bitmap);
++  }());
++  return *ramp;
++}
++
++// Draws a topbar tab: inactive has no fill (hover: theme hover color) and a
++// 1px separator in the gap after it; active default = tenuous gradient, 1px
++// outline on top and sides (no bottom line) and a 2px accent bar on top;
++// active pixelized = black block, 1px outline, Bayer ramp at the end and chips
++// behind the name and buttons.
++void PaintAeroHorizontalTab(gfx::Canvas* canvas,
++                            const TabStyleViewDelegate* delegate) {
++  const views::View* const view = delegate->GetView();
++  const ui::ColorProvider* const colors = view->GetColorProvider();
++  if (!colors) {
++    return;
++  }
++  const bool pixelized = IsAeroPixelized();
++  const bool active = delegate->IsActive();
++  const bool hovered = delegate->IsHovering();
++  const int radius = GetAeroRadius();
++  const SkColor line = colors->GetColor(kColorToolbarSeparator);
++  const SkColor accent = colors->GetColor(ui::kColorSysPrimary);
++
++  // Visible tab: 196x30 inside the view (see TabStyle).
++  const int top = GetLayoutConstant(LayoutConstant::kTabStripPadding);
++  const int height = GetLayoutConstant(LayoutConstant::kTabHeight) - top -
++                     GetLayoutConstant(LayoutConstant::kTabstripToolbarOverlap);
++  const gfx::Rect bounds(kAeroExtension, top,
++                         std::max(0, view->width() - 2 * kAeroExtension),
++                         height);
++
++  cc::PaintFlags flags;
++  flags.setAntiAlias(true);
++
++  if (active) {
++    if (pixelized) {
++      flags.setColor(colors->GetColor(ui::kColorFrameActive));
++      canvas->DrawRoundRect(bounds, radius, flags);
++      canvas->DrawImageInt(
++          GetAeroRamp(), 0, 0, std::min(bounds.width(), kAeroRampWidth),
++          bounds.height(),
++          bounds.x() + std::max(0, bounds.width() - kAeroRampWidth),
++          bounds.y(), std::min(bounds.width(), kAeroRampWidth),
++          bounds.height(), /*filter=*/false);
++      // Chips: name and buttons never sit on the texture.
++      flags.setColor(colors->GetColor(ui::kColorFrameActive));
++      for (const views::View* child : view->children()) {
++        if (!child->GetVisible()) {
++          continue;
++        }
++        gfx::Rect chip;
++        if (const auto* label = views::AsViewClass<views::Label>(child)) {
++          chip = label->bounds();
++          chip.set_width(
++              std::min(chip.width(), label->GetPreferredSize().width()));
++          chip.Outset(gfx::Outsets::VH(kAeroChipPaddingV, kAeroChipPaddingH));
++        } else if (views::Button::AsButton(child)) {
++          chip = child->bounds();
++        } else {
++          continue;
++        }
++        chip.Intersect(bounds);
++        canvas->DrawRect(chip, flags);
++      }
++      cc::PaintFlags stroke;
++      stroke.setAntiAlias(true);
++      stroke.setStyle(cc::PaintFlags::kStroke_Style);
++      stroke.setStrokeWidth(1);
++      stroke.setColor(accent);
++      gfx::RectF outline(bounds);
++      outline.Inset(0.5f);
++      canvas->DrawRoundRect(outline, radius, stroke);
++    } else {
++      flags.setShader(gfx::CreateGradientShader(
++          gfx::Point(0, bounds.y()), gfx::Point(0, bounds.bottom()),
++          SkColorSetARGB(0x24, 0x6C, 0xB6, 0xFF),
++          SkColorSetARGB(0xC7, 0x0A, 0x10, 0x20)));
++      canvas->DrawRoundRect(bounds, radius, flags);
++      flags.setShader(nullptr);
++      // 1px outline on top and sides only.
++      flags.setColor(line);
++      canvas->DrawRect(gfx::Rect(bounds.x(), bounds.y(), bounds.width(), 1),
++                       flags);
++      canvas->DrawRect(gfx::Rect(bounds.x(), bounds.y(), 1, bounds.height()),
++                       flags);
++      canvas->DrawRect(
++          gfx::Rect(bounds.right() - 1, bounds.y(), 1, bounds.height()),
++          flags);
++      // Accent bar on top, inset 8px.
++      flags.setColor(accent);
++      canvas->DrawRect(
++          gfx::Rect(bounds.x() + kAeroIndicatorInset, bounds.y(),
++                    std::max(0, bounds.width() - 2 * kAeroIndicatorInset),
++                    kAeroIndicatorHeight),
++          flags);
++    }
++    return;
++  }
++
++  if (hovered || delegate->IsSelected()) {
++    flags.setColor(
++        colors->GetColor(kColorTabBackgroundInactiveHoverFrameActive));
++    canvas->DrawRoundRect(bounds, radius, flags);
++    return;
++  }
++
++  // Separator in the gap after the tab, hidden next to the active or hovered
++  // tab (mockup: `.tab.sel::after`, `.tab:has(+.tab.sel)::after`, hover).
++  const TabStyleViewDelegate* const next = delegate->GetAdjacentTab(false);
++  if (next && (next->IsActive() || next->IsHovering() || next->IsSelected())) {
++    return;
++  }
++  flags.setColor(line);
++  canvas->DrawRect(
++      gfx::Rect(bounds.right() + 1, bounds.y() + kAeroSeparatorInset, 1,
++                std::max(0, bounds.height() - 2 * kAeroSeparatorInset)),
++      flags);
++}
++
++}  // namespace
++
+ void HorizontalTabStyleViews::PaintTab(gfx::Canvas* canvas) const {
++  // aerographene: pinned tabs are hidden (topbar row); anything else uses the
++  // topbar look.
++  if (!delegate_->IsPinned()) {
++    PaintAeroHorizontalTab(canvas, delegate_.get());
++    return;
++  }
+   std::optional<int> active_tab_fill_id;
+   if (delegate_->GetView()->GetThemeProvider()->HasCustomImage(
+           IDR_THEME_TOOLBAR)) {
+--- a/chrome/browser/ui/views/tabs/tab.cc
++++ b/chrome/browser/ui/views/tabs/tab.cc
+@@ -958,7 +958,9 @@
+ }
+ 
+ TabSizeInfo Tab::GetTabSizeInfo() const {
+-  return {tab_style()->GetPinnedWidth(split().has_value()),
++  // aerographene: topbar mode, pinned tabs live in the topbar row and take no
++  // room in the strip.
++  return {0,
+           tab_style()->GetMinimumActiveWidth(split().has_value()),
+           tab_style()->GetMinimumInactiveWidth(),
+           tab_style()->GetStandardWidth(split().has_value())};
+--- a/chrome/browser/ui/views/tabs/tab_container_impl.cc
++++ b/chrome/browser/ui/views/tabs/tab_container_impl.cc
+@@ -1616,6 +1616,11 @@
+     return false;
+   }
+ 
++  // aerographene: pinned tabs are shown in the topbar row, not in the strip.
++  if (tab->data().pinned) {
++    return false;
++  }
++
+   // If the tab would be clipped by the trailing edge of the strip, even if the
+   // tabstrip were resized to its greatest possible width, it shouldn't be
+   // visible.
+--- a/chrome/browser/ui/views/tabs/tab_strip_layout.cc
++++ b/chrome/browser/ui/views/tabs/tab_strip_layout.cc
+@@ -31,6 +31,10 @@
+   float crossover_width = 0;
+   float preferred_width = 0;
+   for (const TabWidthConstraints& tab : tabs) {
++    // aerographene: zero-width (pinned) tabs take no room.
++    if (tab.GetMinimumWidth() == 0) {
++      continue;
++    }
+     // Add the tab's width, less the width of its trailing foot (which would
+     // be double counting).
+     minimum_width += tab.GetMinimumWidth() - tab_overlap;
+@@ -152,7 +156,10 @@
+     const int tab_width = tab_sizer.CalculateTabWidth(tab);
+     bounds.emplace_back(next_x, 0, tab_width,
+                         TabStyle::Get()->GetStandardHeight());
+-    next_x += tab_width - TabStyle::Get()->GetTabOverlap();
++    // aerographene: zero-width (pinned) tabs do not advance.
++    if (tab_width > 0) {
++      next_x += tab_width - TabStyle::Get()->GetTabOverlap();
++    }
+   }
+ 
+   const std::optional<int> calculated_extra_space =
