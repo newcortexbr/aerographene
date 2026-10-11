@@ -1,0 +1,540 @@
+aerographene: banco History-Cold e pref aerographene.cold_after_days (ADR 0007, fatia 1).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: ADR 0007 fatia 1, sem efeito no produto. ColdHistoryDatabase
+(components/history/core/browser/cold_history_database.{h,cc}): SQLite por
+perfil "History-Cold" com urls, visits, visit_source e keyword_search_terms
+criadas pelos mesmos helpers do quente (URLDatabase/VisitDatabase), sem
+compressão nem teto; inserções mantêm os ids do quente e ignoram duplicata
+(url por URL, visita por id); apagar por intervalo/URL, por id e arquivo
+inteiro; erro catastrófico tenta sql::Recovery e desliga o frio na sessão,
+sem tocar no quente. Pref de perfil aerographene.cold_after_days (int, padrão
+30, mínimo 1), registrada em HistoryServiceFactory::RegisterProfilePrefs e
+passada ao backend em HistoryDatabaseParams::cold_after_days.
+Nada abre o banco nesta fatia.
+
+
+--- a/chrome/browser/history/history_service_factory.cc
++++ b/chrome/browser/history/history_service_factory.cc
+@@ -4,6 +4,8 @@
+ 
+ #include "chrome/browser/history/history_service_factory.h"
+ 
++#include <algorithm>
++
+ #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+ #include "chrome/browser/history/chrome_history_client.h"
+ #include "chrome/browser/profiles/profile.h"
+@@ -14,10 +16,16 @@
+ #include "components/history/core/browser/history_service.h"
+ #include "components/history/core/common/pref_names.h"
+ #include "components/keyed_service/core/service_access_type.h"
++#include "components/pref_registry/pref_registry_syncable.h"
+ #include "components/prefs/pref_service.h"
+ 
+ namespace {
+ 
++// aerographene: days without use before history moves to History-Cold
++// (ADR 0007). Read once when the service is built.
++constexpr char kAerographeneColdAfterDays[] = "aerographene.cold_after_days";
++constexpr int kAerographeneColdAfterDaysDefault = 30;
++
+ std::unique_ptr<KeyedService> BuildHistoryService(
+     content::BrowserContext* context) {
+   auto history_service = std::make_unique<history::HistoryService>(
+@@ -25,8 +33,12 @@ std::unique_ptr<KeyedService> BuildHistoryService(
+           BookmarkModelFactory::GetForBrowserContext(context)),
+       std::make_unique<history::ContentVisitDelegate>(context),
+       /*device_info_tracker=*/nullptr, /*local_device_info_provider=*/nullptr);
+-  if (!history_service->Init(history::HistoryDatabaseParamsForPath(
+-          context->GetPath(), chrome::GetChannel()))) {
++  history::HistoryDatabaseParams params = history::HistoryDatabaseParamsForPath(
++      context->GetPath(), chrome::GetChannel());
++  params.cold_after_days =
++      std::max(1, Profile::FromBrowserContext(context)->GetPrefs()->GetInteger(
++                      kAerographeneColdAfterDays));
++  if (!history_service->Init(params)) {
+     return nullptr;
+   }
+   return history_service;
+@@ -111,6 +123,12 @@ HistoryServiceFactory::BuildServiceInstanceForBrowserContext(
+   return BuildHistoryService(context);
+ }
+ 
++void HistoryServiceFactory::RegisterProfilePrefs(
++    user_prefs::PrefRegistrySyncable* registry) {
++  registry->RegisterIntegerPref(kAerographeneColdAfterDays,
++                                kAerographeneColdAfterDaysDefault);
++}
++
+ bool HistoryServiceFactory::ServiceIsNULLWhileTesting() const {
+   return true;
+ }
+--- a/chrome/browser/history/history_service_factory.h
++++ b/chrome/browser/history/history_service_factory.h
+@@ -48,6 +48,8 @@ class HistoryServiceFactory : public ProfileKeyedServiceFactory {
+   // BrowserContextKeyedServiceFactory:
+   std::unique_ptr<KeyedService> BuildServiceInstanceForBrowserContext(
+       content::BrowserContext* context) const override;
++  void RegisterProfilePrefs(
++      user_prefs::PrefRegistrySyncable* registry) override;
+   bool ServiceIsNULLWhileTesting() const override;
+ };
+ 
+--- a/components/history/core/browser/BUILD.gn
++++ b/components/history/core/browser/BUILD.gn
+@@ -21,6 +21,8 @@ static_library("browser") {
+     "browsing_history_driver.h",
+     "browsing_history_service.cc",
+     "browsing_history_service.h",
++    "cold_history_database.cc",
++    "cold_history_database.h",
+     "download_constants.h",
+     "download_database.cc",
+     "download_database.h",
+--- /dev/null
++++ b/components/history/core/browser/cold_history_database.cc
+@@ -0,0 +1,316 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "components/history/core/browser/cold_history_database.h"
++
++#include <tuple>
++
++#include "base/files/file_util.h"
++#include "base/functional/bind.h"
++#include "base/logging.h"
++#include "components/database_utils/url_converter.h"
++#include "sql/recovery.h"
++#include "sql/statement.h"
++#include "sql/transaction.h"
++#include "url/gurl.h"
++
++namespace history {
++
++namespace {
++
++constexpr int kColdVersionNumber = 1;
++constexpr int kColdCompatibleVersionNumber = 1;
++
++}  // namespace
++
++ColdHistoryDatabase::ColdHistoryDatabase(const base::FilePath& path)
++    : path_(path),
++      db_(sql::DatabaseOptions().set_exclusive_locking(true).set_cache_size(
++              250),
++          // Reuses the History tag (the tag list is generated from the
++          // histogram metadata); only metrics are shared.
++          /*tag=*/"History") {}
++
++ColdHistoryDatabase::~ColdHistoryDatabase() = default;
++
++bool ColdHistoryDatabase::Exists() const {
++  return base::PathExists(path_);
++}
++
++bool ColdHistoryDatabase::Open(bool create) {
++  if (open_) {
++    return true;
++  }
++  if (failed_ || (!create && !Exists())) {
++    return false;
++  }
++  db_.set_error_callback(base::BindRepeating(
++      &ColdHistoryDatabase::OnDatabaseError, base::Unretained(this)));
++  if (!db_.Open(path_) || !InitTables()) {
++    LOG(ERROR) << "History-Cold unavailable: " << db_.GetErrorMessage();
++    db_.Close();
++    failed_ = true;
++    return false;
++  }
++  open_ = true;
++  return true;
++}
++
++bool ColdHistoryDatabase::InitTables() {
++  sql::Transaction transaction(&db_);
++  if (!transaction.Begin()) {
++    return false;
++  }
++  if (!meta_table_.Init(&db_, kColdVersionNumber,
++                        kColdCompatibleVersionNumber)) {
++    return false;
++  }
++  if (meta_table_.GetCompatibleVersionNumber() > kColdVersionNumber) {
++    return false;
++  }
++  if (!CreateURLTable(/*is_temporary=*/false) || !CreateMainURLIndex() ||
++      !InitKeywordSearchTermsTable() || !InitVisitTable()) {
++    return false;
++  }
++  return transaction.Commit();
++}
++
++void ColdHistoryDatabase::OnDatabaseError(int error, sql::Statement* stmt) {
++  // Corruption stays isolated here: the hot History is never touched. The
++  // handle is recovered (or razed by sql::Recovery if unrecoverable) and the
++  // cold store is disabled until the next session.
++  if (sql::Recovery::ShouldAttemptRecovery(&db_, error)) {
++    db_.reset_error_callback();
++    std::ignore = sql::Recovery::RecoverIfPossible(
++        &db_, error, sql::Recovery::Strategy::kRecoverWithMetaVersionOrRaze);
++    open_ = false;
++    failed_ = true;
++  }
++}
++
++sql::Database& ColdHistoryDatabase::GetDB() {
++  return db_;
++}
++
++bool ColdHistoryDatabase::BeginTransaction() {
++  return open_ && db_.BeginTransactionDeprecated();
++}
++
++bool ColdHistoryDatabase::CommitTransaction() {
++  return open_ && db_.CommitTransactionDeprecated();
++}
++
++void ColdHistoryDatabase::RollbackTransaction() {
++  if (open_) {
++    db_.RollbackTransactionDeprecated();
++  }
++}
++
++bool ColdHistoryDatabase::AddURLRowKeepingID(const URLRow& row) {
++  if (!open_) {
++    return false;
++  }
++  // INSERT OR IGNORE by URL: a URL lives in one row.
++  if (GetRowForURL(row.url(), nullptr)) {
++    return true;
++  }
++  sql::Statement statement(db_.GetCachedStatement(
++      SQL_FROM_HERE,
++      "INSERT OR IGNORE INTO urls "
++      "(id, url, title, visit_count, typed_count, last_visit_time, hidden) "
++      "VALUES (?, ?, ?, ?, ?, ?, ?)"));
++  statement.BindInt64(0, row.id());
++  statement.BindString(1, database_utils::GurlToDatabaseUrl(row.url()));
++  statement.BindString16(2, row.title());
++  statement.BindInt(3, row.visit_count());
++  statement.BindInt(4, row.typed_count());
++  statement.BindTime(5, row.last_visit());
++  statement.BindBool(6, row.hidden());
++  return statement.Run();
++}
++
++bool ColdHistoryDatabase::AddVisitRowKeepingID(const VisitRow& visit) {
++  if (!open_) {
++    return false;
++  }
++  sql::Statement statement(db_.GetCachedStatement(
++      SQL_FROM_HERE,
++      "INSERT OR IGNORE INTO visits "
++      "(id, url, visit_time, from_visit, external_referrer_url, transition, "
++      "segment_id, visit_duration, incremented_omnibox_typed_score,"
++      "opener_visit, originator_cache_guid, originator_visit_id, "
++      "originator_from_visit, originator_opener_visit, is_known_to_sync, "
++      "consider_for_ntp_most_visited, visited_link_id, app_id) "
++      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
++  statement.BindInt64(0, visit.visit_id);
++  statement.BindInt64(1, visit.url_id);
++  statement.BindTime(2, visit.visit_time);
++  statement.BindInt64(3, visit.referring_visit);
++  statement.BindString(4, visit.external_referrer_url.spec());
++  statement.BindInt64(5, visit.transition);
++  statement.BindInt64(6, visit.segment_id);
++  statement.BindTimeDelta(7, visit.visit_duration);
++  statement.BindBool(8, visit.incremented_omnibox_typed_score);
++  statement.BindInt64(9, visit.opener_visit);
++  statement.BindString(10, visit.originator_cache_guid);
++  statement.BindInt64(11, visit.originator_visit_id);
++  statement.BindInt64(12, visit.originator_referring_visit);
++  statement.BindInt64(13, visit.originator_opener_visit);
++  statement.BindBool(14, visit.is_known_to_sync);
++  statement.BindBool(15, visit.consider_for_ntp_most_visited);
++  statement.BindInt64(16, visit.visited_link_id);
++  statement.BindString(17, visit.app_id ? *visit.app_id : "");
++  if (!statement.Run()) {
++    return false;
++  }
++
++  const VisitSource source = visit.source.value_or(SOURCE_BROWSED);
++  if (source == SOURCE_BROWSED) {
++    return true;
++  }
++  sql::Statement source_statement(db_.GetCachedStatement(
++      SQL_FROM_HERE,
++      "INSERT OR IGNORE INTO visit_source (id, source) VALUES (?,?)"));
++  source_statement.BindInt64(0, visit.visit_id);
++  source_statement.BindInt64(1, source);
++  return source_statement.Run();
++}
++
++bool ColdHistoryDatabase::AddKeywordSearchTerm(
++    const KeywordSearchTermRow& row) {
++  if (!open_) {
++    return false;
++  }
++  sql::Statement exists(db_.GetCachedStatement(
++      SQL_FROM_HERE,
++      "SELECT 1 FROM keyword_search_terms WHERE keyword_id = ? AND url_id = ?"));
++  exists.BindInt64(0, row.keyword_id);
++  exists.BindInt64(1, row.url_id);
++  if (exists.Step()) {
++    return true;
++  }
++  sql::Statement statement(db_.GetCachedStatement(
++      SQL_FROM_HERE,
++      "INSERT INTO keyword_search_terms "
++      "(keyword_id, url_id, term, normalized_term) VALUES (?,?,?,?)"));
++  statement.BindInt64(0, row.keyword_id);
++  statement.BindInt64(1, row.url_id);
++  statement.BindString16(2, row.term);
++  statement.BindString16(3, row.normalized_term);
++  return statement.Run();
++}
++
++bool ColdHistoryDatabase::DeleteURLRowsByID(const std::set<URLID>& ids) {
++  if (!open_) {
++    return false;
++  }
++  bool ok = true;
++  for (URLID id : ids) {
++    sql::Statement statement(
++        db_.GetCachedStatement(SQL_FROM_HERE, "DELETE FROM urls WHERE id = ?"));
++    statement.BindInt64(0, id);
++    ok = statement.Run() && ok;
++    sql::Statement terms(db_.GetCachedStatement(
++        SQL_FROM_HERE, "DELETE FROM keyword_search_terms WHERE url_id = ?"));
++    terms.BindInt64(0, id);
++    ok = terms.Run() && ok;
++  }
++  return ok;
++}
++
++bool ColdHistoryDatabase::DeleteOrphans() {
++  return db_.Execute(
++             "DELETE FROM visit_source WHERE id NOT IN "
++             "(SELECT id FROM visits)") &&
++         db_.Execute(
++             "DELETE FROM urls WHERE id NOT IN (SELECT url FROM visits)") &&
++         db_.Execute(
++             "DELETE FROM keyword_search_terms WHERE url_id NOT IN "
++             "(SELECT id FROM urls)");
++}
++
++bool ColdHistoryDatabase::DeleteVisitsBetween(
++    const std::set<GURL>& urls,
++    const std::optional<std::string>& app_id,
++    base::Time begin,
++    base::Time end) {
++  if (!open_) {
++    return false;
++  }
++  if (end.is_null()) {
++    end = base::Time::Max();
++  }
++  if (!BeginTransaction()) {
++    return false;
++  }
++  bool ok = true;
++  auto delete_range = [&](std::optional<URLID> url_id) {
++    sql::Statement statement;
++    if (url_id) {
++      statement.Assign(db_.GetUniqueStatement(
++          "DELETE FROM visits WHERE visit_time >= ? AND visit_time < ? "
++          "AND (? = 0 OR app_id = ?) AND url = ?"));
++    } else {
++      statement.Assign(db_.GetUniqueStatement(
++          "DELETE FROM visits WHERE visit_time >= ? AND visit_time < ? "
++          "AND (? = 0 OR app_id = ?)"));
++    }
++    statement.BindTime(0, begin);
++    statement.BindTime(1, end);
++    statement.BindBool(2, app_id.has_value());
++    statement.BindString(3, app_id.value_or(std::string()));
++    if (url_id) {
++      statement.BindInt64(4, *url_id);
++    }
++    ok = statement.Run() && ok;
++  };
++  if (urls.empty()) {
++    delete_range(std::nullopt);
++  } else {
++    for (const GURL& url : urls) {
++      if (URLID id = GetRowForURL(url, nullptr)) {
++        delete_range(id);
++      }
++    }
++  }
++  ok = ok && DeleteOrphans();
++  if (!ok) {
++    RollbackTransaction();
++    return false;
++  }
++  return CommitTransaction();
++}
++
++bool ColdHistoryDatabase::DeleteURLsAndVisits(const std::set<GURL>& urls) {
++  if (!open_) {
++    return false;
++  }
++  if (!BeginTransaction()) {
++    return false;
++  }
++  bool ok = true;
++  for (const GURL& url : urls) {
++    URLID id = GetRowForURL(url, nullptr);
++    if (!id) {
++      continue;
++    }
++    sql::Statement statement(
++        db_.GetCachedStatement(SQL_FROM_HERE, "DELETE FROM visits WHERE url = ?"));
++    statement.BindInt64(0, id);
++    ok = statement.Run() && ok;
++  }
++  ok = ok && DeleteOrphans();
++  if (!ok) {
++    RollbackTransaction();
++    return false;
++  }
++  return CommitTransaction();
++}
++
++bool ColdHistoryDatabase::CloseAndDelete() {
++  db_.Close();
++  open_ = false;
++  return sql::Database::Delete(path_);
++}
++
++}  // namespace history
+--- /dev/null
++++ b/components/history/core/browser/cold_history_database.h
+@@ -0,0 +1,90 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#ifndef COMPONENTS_HISTORY_CORE_BROWSER_COLD_HISTORY_DATABASE_H_
++#define COMPONENTS_HISTORY_CORE_BROWSER_COLD_HISTORY_DATABASE_H_
++
++#include <optional>
++#include <set>
++#include <string>
++
++#include "base/files/file_path.h"
++#include "base/time/time.h"
++#include "components/history/core/browser/history_types.h"
++#include "components/history/core/browser/keyword_search_term.h"
++#include "components/history/core/browser/url_database.h"
++#include "components/history/core/browser/visit_database.h"
++#include "sql/database.h"
++#include "sql/meta_table.h"
++
++class GURL;
++
++namespace history {
++
++// aerographene: "History-Cold", the per-profile database that receives the
++// urls/visits/keyword_search_terms rows the expirer moves out of the hot
++// History database (ADR 0007). Same schema as the hot tables (created by the
++// URLDatabase/VisitDatabase helpers), no compression, no size cap. Opened on
++// demand by its owner, never on the History open path. Rows keep the ids they
++// had in the hot database, so visits.url keeps pointing at urls.id. Lives on
++// the history backend sequence.
++class ColdHistoryDatabase : public URLDatabase, public VisitDatabase {
++ public:
++  explicit ColdHistoryDatabase(const base::FilePath& path);
++  ColdHistoryDatabase(const ColdHistoryDatabase&) = delete;
++  ColdHistoryDatabase& operator=(const ColdHistoryDatabase&) = delete;
++  ~ColdHistoryDatabase() override;
++
++  // Opens (creating if `create` and missing) and initializes the tables.
++  // Idempotent. Returns false if the database is unusable; after a failure the
++  // object stays closed for the rest of the session.
++  bool Open(bool create);
++  bool is_open() const { return open_; }
++  bool Exists() const;
++  const base::FilePath& path() const { return path_; }
++
++  bool BeginTransaction();
++  bool CommitTransaction();
++  void RollbackTransaction();
++
++  // Inserts keeping the hot id. Duplicates (same id, or same URL for urls) are
++  // ignored, so replaying a batch after a crash is harmless.
++  bool AddURLRowKeepingID(const URLRow& row);
++  bool AddVisitRowKeepingID(const VisitRow& visit);
++  bool AddKeywordSearchTerm(const KeywordSearchTermRow& row);
++
++  // Removes urls rows (and their keyword terms) by id, keeping visits. Used
++  // when a copied row turned out to stay in the hot database.
++  bool DeleteURLRowsByID(const std::set<URLID>& ids);
++
++  // User-initiated deletion. Removes visits in [begin, end) (null end = no
++  // limit), optionally only for `urls` and/or `app_id`, then urls without
++  // visits and orphaned keyword terms / visit sources.
++  bool DeleteVisitsBetween(const std::set<GURL>& urls,
++                           const std::optional<std::string>& app_id,
++                           base::Time begin,
++                           base::Time end);
++  // Removes the urls rows for `urls` and all their visits.
++  bool DeleteURLsAndVisits(const std::set<GURL>& urls);
++
++  // Closes the handle and deletes the file (and journals).
++  bool CloseAndDelete();
++
++ private:
++  // URLDatabase / VisitDatabase:
++  sql::Database& GetDB() override;
++
++  bool InitTables();
++  bool DeleteOrphans();
++  void OnDatabaseError(int error, sql::Statement* stmt);
++
++  const base::FilePath path_;
++  sql::Database db_;
++  sql::MetaTable meta_table_;
++  bool open_ = false;
++  bool failed_ = false;
++};
++
++}  // namespace history
++
++#endif  // COMPONENTS_HISTORY_CORE_BROWSER_COLD_HISTORY_DATABASE_H_
+--- a/components/history/core/browser/history_constants.cc
++++ b/components/history/core/browser/history_constants.cc
+@@ -11,6 +11,9 @@ namespace history {
+ // filenames
+ const base::FilePath::CharType kFaviconsFilename[] =
+     FILE_PATH_LITERAL("Favicons");
++// aerographene: cold store (ADR 0007).
++const base::FilePath::CharType kColdHistoryFilename[] =
++    FILE_PATH_LITERAL("History-Cold");
+ const base::FilePath::CharType kHistoryFilename[] =
+     FILE_PATH_LITERAL("History");
+ const base::FilePath::CharType kTopSitesFilename[] =
+--- a/components/history/core/browser/history_constants.h
++++ b/components/history/core/browser/history_constants.h
+@@ -12,6 +12,7 @@ namespace history {
+ 
+ // filenames
+ extern const base::FilePath::CharType kFaviconsFilename[];
++extern const base::FilePath::CharType kColdHistoryFilename[];
+ extern const base::FilePath::CharType kHistoryFilename[];
+ extern const base::FilePath::CharType kTopSitesFilename[];
+ 
+--- a/components/history/core/browser/history_database_params.h
++++ b/components/history/core/browser/history_database_params.h
+@@ -26,6 +26,9 @@ struct HistoryDatabaseParams {
+   const DownloadInterruptReason download_interrupt_reason_none;
+   const DownloadInterruptReason download_interrupt_reason_crash;
+   const version_info::Channel channel;
++  // aerographene: days without use before history rows move to History-Cold
++  // (pref aerographene.cold_after_days, ADR 0007).
++  int cold_after_days = 30;
+ };
+ 
+ }  // namespace history
