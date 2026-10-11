@@ -19,6 +19,7 @@ Cada fatia compila `components/history` e roda os `history_unittests` afetados n
 - omnibox não sugere dado frio.
 - "limpar histórico" apaga também o frio.
 - sem reidratação do histórico: a visita nova cria linha quente; o frio só recebe dado com mais de 45 dias.
+- histórico no frio fica sem compressão (texto curto, ganho nulo); revoga a fatia 3 `cold-data-compress` para o histórico e a frase "mover sem comprimir viola a definição". zstd fica reservado ao cache de sites (em discussão).
 - teto de disco: pendente (ver discussão de compressão forte e teto de 1 GB).
 
 ## Decisões pendentes do dono (texto original)
