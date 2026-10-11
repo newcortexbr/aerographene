@@ -27,6 +27,14 @@ histórico, sem navegação pendente), ativa a pinned reaberta e fecha essa NTP.
 Se o usuário já navegou/digitou (outra URL, mais entradas, pendente), não fecha.
 Limites: só atua se houver janela normal do perfil quando o modelo carrega;
 duas abas comuns iguais fixam só uma; sem teste em runtime.
+Segunda causa (runtime): com o modelo ainda não carregado, GetPinnedTabs cai
+no pref kPinnedTabs e o Helium (lazy-session-restore) abre as pinned de fundo
+por AddDeferredPinnedStartupTab, com kDeferUntilActivation: a aba nasce com
+NeedsReload() e, por estar em segundo plano, nada inicia a navegação (URL como
+título, sem requisição) até ser ativada. As abertas por AdoptStartupTabs usam
+AddTabAt e carregam. Correção: AddDeferredPinnedStartupTab chama
+GetController().LoadIfNecessary() na aba devolvida por AddRestoredTab (só
+pinned de startup; abas comuns e session restore não mudam).
 Depende de aerographene/pinned-model-tabstrip.patch e pinned-closed.patch
 (serie: depois deles).
 
@@ -209,3 +217,37 @@ Depende de aerographene/pinned-model-tabstrip.patch e pinned-closed.patch
  };
  
  }  // namespace aerographene
+--- a/chrome/browser/ui/startup/startup_browser_creator_impl.cc
++++ b/chrome/browser/ui/startup/startup_browser_creator_impl.cc
+@@ -73,7 +73,9 @@
+ #include "components/signin/public/base/signin_switches.h"
+ #include "content/public/browser/child_process_security_policy.h"
+ #include "content/public/browser/dom_storage_context.h"
++#include "content/public/browser/navigation_controller.h"
+ #include "content/public/browser/storage_partition.h"
++#include "content/public/browser/web_contents.h"
+ #include "content/public/common/content_switches.h"
+ #include "url/origin.h"
+ 
+@@ -222,7 +224,7 @@
+   sessions::SerializedNavigationEntry navigation;
+   navigation.set_index(0);
+   navigation.set_virtual_url(url);
+-  chrome::AddRestoredTab(
++  content::WebContents* contents = chrome::AddRestoredTab(
+       browser, base::span_from_ref(navigation),
+       browser->tab_strip_model()->IndexOfFirstNonPinnedTab(),
+       /*selected_navigation=*/0, /*extension_app_id=*/std::string(),
+@@ -233,6 +235,12 @@
+       /*extra_data=*/{}, /*from_session_restore=*/false,
+       /*is_active_browser=*/std::nullopt,
+       chrome::RestoredTabLoadPolicy::kDeferUntilActivation);
++  // aerographene: the tab is in the background, so nothing would start its
++  // navigation until the user activates it (URL as title, no content). Pinned
++  // startup tabs are few and expected live: start the load now.
++  if (contents) {
++    contents->GetController().LoadIfNecessary();
++  }
+ }
+ 
+ // aerographene: a startup URL (command line, "open specific pages") that
