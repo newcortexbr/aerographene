@@ -1,0 +1,439 @@
+aerographene: favicons e downloads antigos vão para o History-Cold (ADR 0007, fatias 6 e 7).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: ADR 0007 fatias 6 e 7. Favicons: CopyToCold copia, junto com a
+linha de urls, os mapeamentos e bitmaps do Favicons de cada URL do lote
+(cold_icon_mapping por url id, cold_favicon_bitmaps por icon_url+tamanho);
+o quente segue apagando mapeamentos e ícones órfãos como no upstream. Linha
+que volta ao quente (pinada, revisitada) leva junto os mapeamentos frios;
+exclusão do usuário apaga os órfãos. Downloads: ColdHistoryDatabase herda
+DownloadDatabase (mesmo schema). HistoryBackend::QueryDownloads, antes de
+entregar ao DownloadHistory, move para o frio os downloads não em andamento
+cujo maior entre início/fim/último acesso passou do prazo de frio; o frio
+só abre se há o que mover. Id já ocupado no frio por outro guid (o quente
+reusa ids) renumera a linha fria. "Limpar histórico" por intervalo apaga os
+downloads frios iniciados no intervalo; tudo apaga o arquivo.
+Depende de aerographene/cold-data-history-ui.patch.
+
+
+--- a/components/history/core/browser/cold_history_database.h
++++ b/components/history/core/browser/cold_history_database.h
+@@ -9,7 +9,9 @@
+ #include <string>
+ 
+ #include "base/files/file_path.h"
++#include "base/containers/span.h"
+ #include "base/time/time.h"
++#include "components/history/core/browser/download_database.h"
+ #include "components/history/core/browser/history_types.h"
+ #include "components/history/core/browser/keyword_search_term.h"
+ #include "components/history/core/browser/url_database.h"
+@@ -28,7 +30,12 @@
+ // demand by its owner, never on the History open path. Rows keep the ids they
+ // had in the hot database, so visits.url keeps pointing at urls.id. Lives on
+ // the history backend sequence.
+-class ColdHistoryDatabase : public URLDatabase, public VisitDatabase {
++// aerographene (fatias 6 e 7): also keeps the favicons of the cold urls rows
++// (cold_icon_mapping/cold_favicon_bitmaps, keyed by url id) and the finished
++// download rows (downloads tables, same schema as the hot ones).
++class ColdHistoryDatabase : public URLDatabase,
++                            public VisitDatabase,
++                            public DownloadDatabase {
+  public:
+   explicit ColdHistoryDatabase(const base::FilePath& path);
+   ColdHistoryDatabase(const ColdHistoryDatabase&) = delete;
+@@ -53,6 +60,22 @@
+   bool AddVisitRowKeepingID(const VisitRow& visit);
+   bool AddKeywordSearchTerm(const KeywordSearchTermRow& row);
+ 
++  // aerographene (fatia 6): favicon of the cold url row `url_id`. Bitmaps are
++  // stored once per icon URL and size.
++  bool AddIconMapping(URLID url_id, const GURL& icon_url, int icon_type);
++  bool AddIconBitmap(const GURL& icon_url,
++                     int width,
++                     int height,
++                     base::Time last_updated,
++                     base::span<const uint8_t> data);
++
++  // aerographene (fatia 7): inserts a finished download keeping its id. The
++  // same row again is ignored; an older cold row holding the id (the hot table
++  // reuses ids once its newest rows left) is renumbered first.
++  bool AddDownloadKeepingID(const DownloadRow& row);
++  // Removes cold downloads started in [begin, end) (null end = no limit).
++  bool DeleteDownloadsBetween(base::Time begin, base::Time end);
++
+   // Removes urls rows (and their keyword terms) by id, keeping visits. Used
+   // when a copied row turned out to stay in the hot database.
+   bool DeleteURLRowsByID(const std::set<URLID>& ids);
+@@ -80,11 +103,12 @@
+   bool CloseAndDelete();
+ 
+  private:
+-  // URLDatabase / VisitDatabase:
++  // URLDatabase / VisitDatabase / DownloadDatabase:
+   sql::Database& GetDB() override;
+ 
+   bool InitTables();
+   bool DeleteOrphans();
++  bool DeleteOrphanIcons();
+   // Re-points visits/terms from `old_id` to `new_id` and drops `old_id`'s row.
+   bool ChangeURLID(URLID old_id, URLID new_id);
+   void OnDatabaseError(int error, sql::Statement* stmt);
+--- a/components/history/core/browser/cold_history_database.cc
++++ b/components/history/core/browser/cold_history_database.cc
+@@ -8,7 +8,9 @@
+ #include "base/files/file_util.h"
+ #include "base/functional/bind.h"
+ #include "base/logging.h"
++#include "base/strings/cstring_view.h"
+ #include "components/database_utils/url_converter.h"
++#include "components/history/core/browser/download_row.h"
+ #include "sql/recovery.h"
+ #include "sql/statement.h"
+ #include "sql/transaction.h"
+@@ -24,7 +26,11 @@
+ }  // namespace
+ 
+ ColdHistoryDatabase::ColdHistoryDatabase(const base::FilePath& path)
+-    : path_(path),
++    // The interrupt reasons only rewrite in-progress rows, which never go
++    // cold.
++    : DownloadDatabase(/*download_interrupt_reason_none=*/0,
++                       /*download_interrupt_reason_crash=*/0),
++      path_(path),
+       db_(sql::DatabaseOptions().set_exclusive_locking(true).set_cache_size(
+               250),
+           // Reuses the History tag (the tag list is generated from the
+@@ -69,7 +75,25 @@
+     return false;
+   }
+   if (!CreateURLTable(/*is_temporary=*/false) || !CreateMainURLIndex() ||
+-      !InitKeywordSearchTermsTable() || !InitVisitTable()) {
++      !InitKeywordSearchTermsTable() || !InitVisitTable() ||
++      !InitDownloadTable()) {
++    return false;
++  }
++  // aerographene (fatia 6).
++  if (!db_.Execute("CREATE TABLE IF NOT EXISTS cold_icon_mapping("
++                   "url_id INTEGER NOT NULL,"
++                   "icon_url LONGVARCHAR NOT NULL,"
++                   "icon_type INTEGER NOT NULL,"
++                   "PRIMARY KEY (url_id, icon_url))") ||
++      !db_.Execute("CREATE INDEX IF NOT EXISTS cold_icon_mapping_icon_url "
++                   "ON cold_icon_mapping(icon_url)") ||
++      !db_.Execute("CREATE TABLE IF NOT EXISTS cold_favicon_bitmaps("
++                   "icon_url LONGVARCHAR NOT NULL,"
++                   "width INTEGER NOT NULL,"
++                   "height INTEGER NOT NULL,"
++                   "last_updated INTEGER NOT NULL,"
++                   "image_data BLOB,"
++                   "PRIMARY KEY (icon_url, width, height))")) {
+     return false;
+   }
+   return transaction.Commit();
+@@ -208,6 +232,107 @@
+   return statement.Run();
+ }
+ 
++bool ColdHistoryDatabase::AddIconMapping(URLID url_id,
++                                         const GURL& icon_url,
++                                         int icon_type) {
++  if (!open_) {
++    return false;
++  }
++  sql::Statement statement(db_.GetCachedStatement(
++      SQL_FROM_HERE,
++      "INSERT OR REPLACE INTO cold_icon_mapping (url_id, icon_url, icon_type) "
++      "VALUES (?, ?, ?)"));
++  statement.BindInt64(0, url_id);
++  statement.BindString(1, database_utils::GurlToDatabaseUrl(icon_url));
++  statement.BindInt(2, icon_type);
++  return statement.Run();
++}
++
++bool ColdHistoryDatabase::AddIconBitmap(const GURL& icon_url,
++                                        int width,
++                                        int height,
++                                        base::Time last_updated,
++                                        base::span<const uint8_t> data) {
++  if (!open_) {
++    return false;
++  }
++  sql::Statement statement(db_.GetCachedStatement(
++      SQL_FROM_HERE,
++      "INSERT OR REPLACE INTO cold_favicon_bitmaps "
++      "(icon_url, width, height, last_updated, image_data) "
++      "VALUES (?, ?, ?, ?, ?)"));
++  statement.BindString(0, database_utils::GurlToDatabaseUrl(icon_url));
++  statement.BindInt(1, width);
++  statement.BindInt(2, height);
++  statement.BindTime(3, last_updated);
++  statement.BindBlob(4, data);
++  return statement.Run();
++}
++
++bool ColdHistoryDatabase::AddDownloadKeepingID(const DownloadRow& row) {
++  if (!open_) {
++    return false;
++  }
++  sql::Statement existing(db_.GetCachedStatement(
++      SQL_FROM_HERE, "SELECT guid FROM downloads WHERE id = ?"));
++  existing.BindInt64(0, row.id);
++  if (existing.Step()) {
++    if (existing.ColumnString(0) == row.guid) {
++      return true;
++    }
++    sql::Statement max_id(db_.GetCachedStatement(
++        SQL_FROM_HERE, "SELECT MAX(id) FROM downloads"));
++    if (!max_id.Step()) {
++      return false;
++    }
++    const int64_t new_id = max_id.ColumnInt64(0) + 1;
++    static constexpr base::cstring_view kRenumber[] = {
++        "UPDATE downloads SET id = ? WHERE id = ?",
++        "UPDATE downloads_url_chains SET id = ? WHERE id = ?",
++        "UPDATE downloads_slices SET download_id = ? WHERE download_id = ?"};
++    for (base::cstring_view sql : kRenumber) {
++      sql::Statement renumber(db_.GetUniqueStatement(sql));
++      renumber.BindInt64(0, new_id);
++      renumber.BindInt64(1, row.id);
++      if (!renumber.Run()) {
++        return false;
++      }
++    }
++  }
++  return CreateDownload(row);
++}
++
++bool ColdHistoryDatabase::DeleteDownloadsBetween(base::Time begin,
++                                                 base::Time end) {
++  if (!open_) {
++    return false;
++  }
++  if (end.is_null()) {
++    end = base::Time::Max();
++  }
++  std::vector<DownloadId> ids;
++  {
++    sql::Statement statement(db_.GetCachedStatement(
++        SQL_FROM_HERE,
++        "SELECT id FROM downloads WHERE start_time >= ? AND start_time < ?"));
++    statement.BindTime(0, begin);
++    statement.BindTime(1, end);
++    while (statement.Step()) {
++      ids.push_back(static_cast<DownloadId>(statement.ColumnInt64(0)));
++    }
++  }
++  if (ids.empty()) {
++    return true;
++  }
++  if (!BeginTransaction()) {
++    return false;
++  }
++  for (DownloadId id : ids) {
++    RemoveDownload(id);
++  }
++  return CommitTransaction();
++}
++
+ bool ColdHistoryDatabase::ChangeURLID(URLID old_id, URLID new_id) {
+   sql::Statement visits(db_.GetCachedStatement(
+       SQL_FROM_HERE, "UPDATE visits SET url = ? WHERE url = ?"));
+@@ -218,10 +343,19 @@
+       "UPDATE OR IGNORE keyword_search_terms SET url_id = ? WHERE url_id = ?"));
+   terms.BindInt64(0, new_id);
+   terms.BindInt64(1, old_id);
++  sql::Statement icons(db_.GetCachedStatement(
++      SQL_FROM_HERE,
++      "UPDATE OR IGNORE cold_icon_mapping SET url_id = ? WHERE url_id = ?"));
++  icons.BindInt64(0, new_id);
++  icons.BindInt64(1, old_id);
+   sql::Statement row(
+       db_.GetCachedStatement(SQL_FROM_HERE, "DELETE FROM urls WHERE id = ?"));
+   row.BindInt64(0, old_id);
+-  return visits.Run() && terms.Run() && row.Run();
++  sql::Statement old_icons(db_.GetCachedStatement(
++      SQL_FROM_HERE, "DELETE FROM cold_icon_mapping WHERE url_id = ?"));
++  old_icons.BindInt64(0, old_id);
++  return visits.Run() && terms.Run() && icons.Run() && row.Run() &&
++         old_icons.Run();
+ }
+ 
+ bool ColdHistoryDatabase::MoveURLRowOut(URLID cold_id, URLID hot_id) {
+@@ -258,8 +392,18 @@
+         SQL_FROM_HERE, "DELETE FROM keyword_search_terms WHERE url_id = ?"));
+     terms.BindInt64(0, id);
+     ok = terms.Run() && ok;
++    sql::Statement icons(db_.GetCachedStatement(
++        SQL_FROM_HERE, "DELETE FROM cold_icon_mapping WHERE url_id = ?"));
++    icons.BindInt64(0, id);
++    ok = icons.Run() && ok;
+   }
+-  return ok;
++  return DeleteOrphanIcons() && ok;
++}
++
++bool ColdHistoryDatabase::DeleteOrphanIcons() {
++  return db_.Execute(
++      "DELETE FROM cold_favicon_bitmaps WHERE icon_url NOT IN "
++      "(SELECT icon_url FROM cold_icon_mapping)");
+ }
+ 
+ bool ColdHistoryDatabase::DeleteOrphans() {
+@@ -270,7 +414,11 @@
+              "DELETE FROM urls WHERE id NOT IN (SELECT url FROM visits)") &&
+          db_.Execute(
+              "DELETE FROM keyword_search_terms WHERE url_id NOT IN "
+-             "(SELECT id FROM urls)");
++             "(SELECT id FROM urls)") &&
++         db_.Execute(
++             "DELETE FROM cold_icon_mapping WHERE url_id NOT IN "
++             "(SELECT id FROM urls)") &&
++         DeleteOrphanIcons();
+ }
+ 
+ bool ColdHistoryDatabase::DeleteVisitsBetween(
+--- a/components/history/core/browser/expire_history_backend.h
++++ b/components/history/core/browser/expire_history_backend.h
+@@ -34,6 +34,7 @@
+ namespace history {
+ 
+ class ColdHistoryDatabase;
++struct DownloadRow;
+ class HistoryBackendClient;
+ class HistoryBackendNotifier;
+ class HistoryDatabase;
+@@ -96,6 +97,12 @@
+   // creates it, so navigation never stats or opens it again.
+   ColdHistoryDatabase* GetColdDatabaseIfExists();
+ 
++  // aerographene (fatia 7): finished downloads whose last start/end/access is
++  // older than the cold threshold move from `rows` (just read from the hot
++  // table) to History-Cold. Returns true if any hot row was removed. No-op
++  // while expiration is off (keep-old-history).
++  bool MoveOldDownloadsToCold(std::vector<DownloadRow>* rows);
++
+   // Deletes everything associated with a URL until `end_time`.
+   void DeleteURL(const GURL& url, base::Time end_time);
+ 
+--- a/components/history/core/browser/expire_history_backend.cc
++++ b/components/history/core/browser/expire_history_backend.cc
+@@ -25,6 +25,8 @@
+ #include "build/build_config.h"
+ #include "components/favicon/core/favicon_database.h"
+ #include "components/history/core/browser/cold_history_database.h"
++#include "components/history/core/browser/download_constants.h"
++#include "components/history/core/browser/download_row.h"
+ #include "components/history/core/browser/features.h"
+ #include "components/history/core/browser/history_backend_client.h"
+ #include "components/history/core/browser/history_backend_notifier.h"
+@@ -235,6 +237,7 @@
+     return false;
+   }
+   bool ok = true;
++  std::set<favicon_base::FaviconID> copied_icons;
+   for (const VisitRow& visit : visits) {
+     ok = ok && cold->AddVisitRowKeepingID(visit);
+     if (!ok || !copied_url_ids->insert(visit.url_id).second) {
+@@ -245,6 +248,29 @@
+     URLRow url_row;
+     if (main_db_->GetURLRow(visit.url_id, &url_row)) {
+       ok = cold->AddURLRowKeepingID(url_row);
++      // aerographene (fatia 6): the favicons go cold with the url row; the
++      // hot mappings are then removed by DeleteOneURL as upstream.
++      std::vector<favicon::IconMapping> mappings;
++      if (ok && favicon_db_ &&
++          favicon_db_->GetIconMappingsForPageURL(url_row.url(), &mappings)) {
++        for (const favicon::IconMapping& mapping : mappings) {
++          ok = ok && cold->AddIconMapping(visit.url_id, mapping.icon_url,
++                                          static_cast<int>(mapping.icon_type));
++          if (!ok || !copied_icons.insert(mapping.icon_id).second) {
++            continue;
++          }
++          std::vector<favicon::FaviconBitmap> bitmaps;
++          favicon_db_->GetFaviconBitmaps(mapping.icon_id, &bitmaps);
++          for (const favicon::FaviconBitmap& bitmap : bitmaps) {
++            if (ok && bitmap.bitmap_data) {
++              ok = cold->AddIconBitmap(
++                  mapping.icon_url, bitmap.pixel_size.width(),
++                  bitmap.pixel_size.height(), bitmap.last_updated,
++                  base::span<const uint8_t>(*bitmap.bitmap_data));
++            }
++          }
++        }
++      }
+     }
+     KeywordSearchTermRow term;
+     if (ok && main_db_->GetKeywordSearchTermRow(visit.url_id, &term)) {
+@@ -258,6 +284,44 @@
+   return true;
+ }
+ 
++bool ExpireHistoryBackend::MoveOldDownloadsToCold(
++    std::vector<DownloadRow>* rows) {
++  if (!main_db_ || expiration_threshold_.is_zero()) {
++    return false;
++  }
++  const base::Time threshold = GetCurrentExpirationTime();
++  auto is_cold = [threshold](const DownloadRow& row) {
++    return row.state != DownloadState::IN_PROGRESS &&
++           std::max({row.start_time, row.end_time, row.last_access_time}) <
++               threshold;
++  };
++  if (std::none_of(rows->begin(), rows->end(), is_cold)) {
++    return false;
++  }
++  ColdHistoryDatabase* cold = GetColdDatabase(/*create=*/true);
++  cold_db_missing_ = !cold;
++  if (!cold || !cold->BeginTransaction()) {
++    return false;
++  }
++  bool ok = true;
++  for (const DownloadRow& row : *rows) {
++    if (ok && is_cold(row)) {
++      ok = cold->AddDownloadKeepingID(row);
++    }
++  }
++  if (!ok || !cold->CommitTransaction()) {
++    cold->RollbackTransaction();
++    return false;
++  }
++  for (const DownloadRow& row : *rows) {
++    if (is_cold(row)) {
++      main_db_->RemoveDownload(row.id);
++    }
++  }
++  std::erase_if(*rows, is_cold);
++  return true;
++}
++
+ void ExpireHistoryBackend::DeleteURL(const GURL& url, base::Time end_time) {
+   DeleteURLs({url}, end_time);
+ }
+@@ -362,6 +426,11 @@
+     url_ids.erase(0);
+     cold->DeleteVisitsBetween(restrict_urls, url_ids, restrict_app_id,
+                               begin_time, end_time);
++    // aerographene (fatia 7): cold downloads are only reachable through
++    // history deletion, by start time.
++    if (restrict_urls.empty() && !restrict_app_id) {
++      cold->DeleteDownloadsBetween(begin_time, end_time);
++    }
+   }
+ }
+ 
+--- a/components/history/core/browser/history_backend.cc
++++ b/components/history/core/browser/history_backend.cc
+@@ -2786,6 +2786,12 @@
+   std::vector<DownloadRow> rows;
+   if (db_) {
+     db_->QueryDownloads(&rows);
++    // aerographene (ADR 0007, fatia 7): old finished downloads go to
++    // History-Cold here, before DownloadHistory sees them; History-Cold only
++    // opens if there is something to move.
++    if (expirer_.MoveOldDownloadsToCold(&rows)) {
++      ScheduleCommit();
++    }
+   }
+   return rows;
+ }

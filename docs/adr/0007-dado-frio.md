@@ -36,8 +36,14 @@ Cada fatia compila `components/history` (ou o alvo afetado) no runner antes de b
 ## pendente de conferir no código (Chromium 154)
 
 - corte de idade do índice do omnibox (`URLIndexPrivateData`): define quanto o frio realmente alivia a abertura.
-- expiração de downloads por idade, número de gerações de sessão, ponto de remoção de favicons órfãos.
 - onde aplicar a idade máxima no cache (`disk_cache` simple backend) sem patch invasivo.
+
+## verificado no código (Chromium 154, 11/10/2026)
+
+- favicons: `ExpireHistoryBackend::DeleteOneURL`/`DeleteIcons` apagam os mapeamentos da URL que sai do quente e `DeleteFaviconsIfPossible` apaga os ícones sem mapeamento; `ClearOldOnDemandFaviconsIfPossible` (30 dias) só liga em Android/iOS (`kClearOldOnDemandFaviconsEnabled`). Fatia 6 em `cold-data-favicons-downloads`.
+- miniaturas: não há dado persistente. `top_sites` (`top_sites_database.cc`) guarda só `url`, `url_rank`, `title`; `chrome/browser/ui/thumbnails/` não grava em disco. Sem código.
+- downloads: a tabela `downloads` do `History` não expira por idade; a limpeza de 90 dias de `components/download/internal/common/download_utils.cc` vale só para entradas em andamento/interrompidas do banco de downloads em progresso. Fatia 7 em `cold-data-favicons-downloads`.
+- sessões: `CommandStorageBackend` (`components/sessions/core/command_storage_backend.cc`) mantém por tipo (`Session_*`, `Tabs_*`) só o arquivo atual e o último: `DeleteLastSessionFiles` apaga no início os demais e `MoveCurrentSessionToLastSession` apaga o último anterior. Não há sessões antigas acumuladas para esfriar; `lazy-session-restore` não toca esse arquivo. Fatia 8 sem código.
 
 ## Consequences
 
