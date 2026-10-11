@@ -191,9 +191,18 @@ Validado: HTML/JS em Chromium 1234 do cache do Playwright (servido por `http://`
 
 Trocar de space mantém a janela no mesmo lugar e tamanho. Toca só `chrome/browser/profiles/profile_window.cc` (nenhum patch ativo o toca; dry-run sobre 154.0.8037.97). Sem arquivo novo, sem BUILD.gn, sem IDS/prefs.
 
-- ponto de integração: `profiles::SwitchToProfile` (menu do avatar, profile picker). Com `always_create=false`, a janela de origem é `GlobalBrowserCollection::GetLastActiveBrowser()` no momento da troca, se `TYPE_NORMAL` e de outro perfil; o callback é embrulhado e roda quando a janela do destino existe (nova ou já aberta e ativada pelo upstream).
+- ponto de integração: `profiles::SwitchToProfile` (menu do avatar). O card do profile picker não passa por aqui (`ProfilePickerFlowController::OnProfileLoadedForPicking` chama `OpenBrowserWindowForProfile` direto); ele é coberto por `space-one-window.patch`. Com `always_create=false`, a janela de origem é `GlobalBrowserCollection::GetLastActiveBrowser()` no momento da troca, se `TYPE_NORMAL` e de outro perfil; o callback é embrulhado e roda quando a janela do destino existe (nova ou já aberta e ativada pelo upstream).
 - efeito: se a origem estava maximizada ou em tela cheia, o destino só recebe `Maximize()` (sem `SetBounds`, que desmaximiza e pisca); senão recebe `GetRestoredBounds()` da origem, e só se o destino não estiver maximizado (tela cheia não é replicada: `ui::BaseWindow` não tem setter); a origem é minimizada antes de ativar o destino, não fechada (premissa até decisão do dono). Nenhuma janela extra.
 - limites: Wayland ignora posição (xdg-shell), vale só o tamanho/maximizado; janela nova pode aparecer antes na posição padrão e então mudar; o perfil de origem segue carregado (RAM, extensões por perfil ativas); session restore restaura as duas janelas, a de origem minimizada. Compilação e runtime não verificados.
+
+### `aerographene/space-one-window.patch` (GPL-3.0, SCOPE item 5)
+
+Cada space (perfil normal) em no máximo uma janela normal, e o profile picker troca no mesmo lugar. Só Linux. Depende de `space-switch-in-place.patch` (diff gerado sobre a série aplicada até ele).
+
+- `chrome::NewEmptyWindow` (`browser_commands.cc`; cobre `NewWindow`/Ctrl+N): fora de incógnito/guest/OTR, se `ProfileBrowserCollection::GetForProfile(original)->FindTabbedBrowser(false)` acha janela, abre aba nova (`AddTabAt`) nela e chama `Show()`, sem criar outra.
+- `TabDragController::Init` (`tab_drag_controller.cc`): janela `TYPE_NORMAL` de perfil não-OTR recebe `DetachBehavior::kNotDetachable` (mecanismo upstream); a aba arrastada para fora volta ao strip. Efeito colateral: com uma aba só, arrastar a aba não move mais a janela.
+- profile picker: `profiles::AerographeneWrapSwitchInPlace` (novo em `profile_window.h`, extraído de `SwitchToProfile`) embrulha o callback nas duas chamadas de `OpenBrowserWindowForProfile` de `profile_picker_flow_controller.cc`; origem = `GetLastActiveBrowser()` normal de outro perfil.
+- dívidas: session restore com várias janelas do mesmo perfil não é consolidado (restaura todas); outros caminhos que criam janela direto (`Browser::Create`, abrir link em nova janela, `window.open` com features, extensões `chrome.windows.create`, linha de comando `--new-window`) não passam por `NewEmptyWindow`; `FindTabbedBrowser` só considera o workspace atual. Compilação por objeto verificada no runner; runtime não verificado.
 
 ### `aerographene/arc-import-pinned.patch` (GPL-3.0, SCOPE item 4, decisão do dono)
 
