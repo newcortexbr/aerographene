@@ -51,3 +51,19 @@ Medianas. Mesmo estado de energia nos três navegadores; não comparar valores a
 | 10 abas PSS MiB (n=16, intercalado) | 677,0 | 661,1 | 635,3 | +2,4% | +6,6% |
 
 A rodada de 10 abas por blocos (n=6) deu +2,1% em all_ms contra o Helium; repetida com ordem intercalada (8 voltas alternando a ordem, uma chamada do harness por navegador) virou -2,6% (razão pareada mediana 0,975, aero abaixo em 7 de 8 voltas): sem regressão. Diferenças de PSS ficam dentro do IQR (~80 MiB). O harness itera por blocos; intercalar exige chamá-lo uma vez por navegador.
+
+## rodada final de 10/10/2026 (aero 7fa451f, PGO; Comet Lake na tomada, perfil performance, load1 < 1,0 antes de cada chamada)
+
+Ordem intercalada: uma chamada do harness por navegador por volta, ordem invertida a cada volta, 6 voltas por bloco; 54 chamadas sem falha. Medianas; razão pareada = mediana das razões por volta. Versões: aero 154.0.8037.97 (0.1.0), Helium 0.18.3.1, ungoogled 154.0.8037.97. Dados em `bench/out/results-20261010-11*.jsonl` e `-12*.jsonl` (fora do git).
+
+| medição | aero | Helium | ungoogled | aero vs Helium (pareada) | aero vs ungoogled (pareada) |
+|---|---|---|---|---|---|
+| warm first_ms (n=12) | 475,2 | 432,0 | 516,4 | +10,0% (+8,8%) | -8,0% (-8,3%) |
+| first, perfil novo (n=6) | 497,5 | 506,1 | 535,0 | -1,7% (-3,0%) | -7,0% (-6,8%) |
+| 10 abas all_ms (n=12) | 864,2 | 852,9 | 1052,2 | +1,3% (+1,2%) | -17,9% (-17,7%) |
+| 10 abas PSS MiB (n=12) | 639,6 | 662,4 | 637,8 | -3,4% (-1,2%) | +0,3% (+4,7%) |
+| 10 abas processos | 19 | 19 | 19 | 0 | 0 |
+
+- warm contra o Helium encosta na regra fixa de 10% (meta 2%), mas o IQR do Helium foi 90,5 ms (aero 29,5) e a rodada de 83dde84 (mesmo dia, bateria) deu -4,1%: tratar como sinal a investigar, não regressão confirmada.
+- layout vertical (`helium.browser.layout` = 2), warm, aero vs Helium, 8 repetições intercaladas: 488,9 vs 480,4 ms, +1,8% (pareada +1,5%); sem crash. Layout confirmado por captura nos dois (`bench/out/vertical/confirm-*.png`). Medição com script próprio que importa o harness; dados em `bench/out/vertical/results-20261010-122653.jsonl`.
+- confirmação do warm (10/10, 13:52–14:04, mesmas condições, só aero e Helium, 10 voltas intercaladas, n=20 cada): aero 489,4 ms (IQR 35,5) vs Helium 485,1 ms (IQR 89,7), +0,9% (pareada +1,0%; aero abaixo em 3 de 10 voltas). Combinada com a rodada acima (n=32 cada): +3,5%. O +10% não se reproduziu; a dispersão vem do Helium. Sem regressão acima da regra fixa de 10%; contra a meta de 2% o resultado é inconclusivo. Dados: `/tmp/bench7w.manifest` aponta os `bench/out/results-20261010-135*`/`-140*.jsonl`.

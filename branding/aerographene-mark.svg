@@ -1,4 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 94 100" width="94" height="100">
-  <polygon fill="currentColor" points="0.00,45.95 64.00,9.00 90.00,9.00 90.00,99.00 0.00,99.00"/>
-  <polygon fill="currentColor" points="4.50,1.21 68.50,1.21 4.50,38.16"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100.0 99.35" width="100.0" height="99.35">
+  <polygon fill="currentColor" points="0.00,49.19 78.18,0.00 61.24,49.19"/>
+  <polygon fill="currentColor" points="0.00,54.07 65.80,54.07 76.55,23.13 89.25,23.13 89.25,99.35 0.00,99.35"/>
+  <polygon fill="currentColor" points="100.00,87.62 92.51,99.35 100.00,99.35"/>
 </svg>
