@@ -37,6 +37,12 @@ Regra de desempenho: nenhuma mudança piora mais de 2% a linha de base; uma muda
 - sync: Google Sync com chaves próprias (ADR 0006), depois da v1.2; antes, testar o login sobre o ungoogled.
 - fora: boosts (usar Stylus), anti-fingerprinting `noise/*`, zen-mode.
 
+## decisões do dono (11/10/2026)
+
+- item 8: os temas da v1.0 são o default e o pixelized (substituem nebula e high-contrast). Meta objetiva: seguir exatamente os mockups em `theming/1/design-language/` (default e pixelized).
+- item 11: uBlock sempre ligado por padrão. Ícone da extensão acompanha o pacote de ícones do tema ativo.
+- teste de uso real de spaces, command bar, peek e split view fica para a transição v0.1 → v0.2.
+
 ## em aberto
 
 Nada no escopo. Riscos conhecidos: MV2 pode perder mais código em versões futuras do Chromium; chaves Google podem ser revogadas (ADR 0006).
