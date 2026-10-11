@@ -1,0 +1,77 @@
+aerographene: fonte do tema pixelized (JetBrains Mono 12px).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/theme-radius.patch.
+Propósito: só no pixelized, uma vez por processo, em ThemeService::Init:
+gfx::FontList::SetDefaultFontDescription("JetBrains Mono, 12px") +
+ResourceBundle::ReloadFonts(); se a família não existir no fontconfig, usa
+"Monospace, 12px". O default não carrega fonte e mantém a fonte do sistema.
+
+
+--- a/chrome/browser/themes/theme_service.cc
++++ b/chrome/browser/themes/theme_service.cc
+@@ -27,6 +27,7 @@
+ #include "base/strings/string_number_conversions.h"
+ #include "base/strings/string_split.h"
+ #include "base/strings/string_util.h"
++#include "base/strings/stringprintf.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/task/sequenced_task_runner.h"
+ #include "base/task/single_thread_task_runner.h"
+@@ -76,12 +77,15 @@
+ #include "third_party/abseil-cpp/absl/cleanup/cleanup.h"
+ #include "ui/base/l10n/l10n_util.h"
+ #include "ui/base/mojom/themes.mojom.h"
++#include "ui/base/resource/resource_bundle.h"
+ #include "ui/base/resource/resource_scale_factor.h"
+ #include "ui/base/ui_base_features.h"
+ #include "ui/color/color_id.h"
+ #include "ui/color/color_provider.h"
+ #include "ui/color/color_provider_key.h"
+ #include "ui/color/color_provider_manager.h"
++#include "ui/gfx/font.h"
++#include "ui/gfx/font_list.h"
+ #include "ui/native_theme/native_theme.h"
+ 
+ #if BUILDFLAG(ENABLE_EXTENSIONS)
+@@ -357,6 +361,26 @@
+ 
+ ThemeService::~ThemeService() = default;
+ 
++#if BUILDFLAG(IS_LINUX)
++namespace {
++
++// aerographene: pixelized UI font, JetBrains Mono 12px (mono size in the
++// pixelized mockups); system monospace if it is not installed. Only called
++// for pixelized, so the default theme loads no extra font and keeps the
++// system UI font.
++void ApplyAerographenePixelizedFont() {
++  constexpr char kFamily[] = "JetBrains Mono";
++  constexpr int kSizePx = 12;
++  const bool installed = base::EqualsCaseInsensitiveASCII(
++      gfx::Font(kFamily, kSizePx).GetActualFontName(), kFamily);
++  gfx::FontList::SetDefaultFontDescription(base::StringPrintf(
++      "%s, %dpx", installed ? kFamily : "Monospace", kSizePx));
++  ui::ResourceBundle::GetSharedInstance().ReloadFonts();
++}
++
++}  // namespace
++#endif
++
+ void ThemeService::Init() {
+   theme_helper_->DCheckCalledOnValidSequence();
+ 
+@@ -375,6 +399,12 @@
+                            aerographene::BuiltinTheme::kPixelized;
+     views::LayoutProvider::SetAerographeneCornerRadii(pixelized ? 0 : 4,
+                                                       pixelized ? 2 : 3);
++    // The UI font is process-wide and set once (first regular profile).
++    static bool font_applied = false;
++    if (pixelized && !font_applied) {
++      font_applied = true;
++      ApplyAerographenePixelizedFont();
++    }
+   }
+ #endif
+ 
+

@@ -1,0 +1,130 @@
+aerographene: raio de canto por tema.
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/theme-builtin.patch.
+Propósito: hook estático em views::LayoutProvider
+(SetAerographeneCornerRadii) usado por GetCornerRadiusMetric (Emphasis e
+ShapeContextTokens) e pelo raio superior de TabStyle. default: 4px em
+controle/menu/diálogo, 3px em chip/badge; pixelized: 0 e 2px. Definido em
+ThemeService::Init (perfil regular).
+
+
+--- a/chrome/browser/themes/BUILD.gn
++++ b/chrome/browser/themes/BUILD.gn
+@@ -96,6 +96,7 @@
+     sources += [ "theme_service_aura_linux.cc" ]
+     deps += [
+       "//ui/linux:linux_ui",
++      "//ui/views",
+       "//ui/linux:linux_ui_factory",
+       "//ui/ozone",
+     ]
+
+--- a/chrome/browser/themes/theme_service.cc
++++ b/chrome/browser/themes/theme_service.cc
+@@ -94,6 +94,7 @@
+ #include "ui/linux/linux_ui.h"
+ #include "ui/linux/linux_ui_factory.h"
+ #include "ui/ozone/public/ozone_platform.h"  // nogncheck
++#include "ui/views/layout/layout_provider.h"
+ #endif
+ 
+ using TP = ThemeProperties;
+@@ -366,6 +367,16 @@
+           profile_->GetPrefs()->GetString(aerographene::kThemePref)))) {
+     ui::ColorProviderManager::Get().ResetColorProviderCache();
+   }
++#if BUILDFLAG(IS_LINUX)
++  if (profile_->IsRegularProfile()) {
++    // default.md: 4px controls, 3px inner items. pixelized mockups: 0 on
++    // fields, buttons, menus and tabs; 2px on chips/badges.
++    const bool pixelized = aerographene::GetBuiltinTheme() ==
++                           aerographene::BuiltinTheme::kPixelized;
++    views::LayoutProvider::SetAerographeneCornerRadii(pixelized ? 0 : 4,
++                                                      pixelized ? 2 : 3);
++  }
++#endif
+ 
+   InitFromPrefs();
+ 
+
+--- a/chrome/browser/ui/tabs/tab_style.cc
++++ b/chrome/browser/ui/tabs/tab_style.cc
+@@ -100,7 +100,11 @@
+ }
+ 
+ int TabStyle::GetTopCornerRadius() const {
+-  return 8;
++  // aerographene: theme radius on the visible top corners; the bottom radius
++  // also drives tab overlap/width, so it stays.
++  const int theme_radius =
++      views::LayoutProvider::GetAerographeneControlRadius();
++  return theme_radius >= 0 ? theme_radius : 8;
+ }
+ 
+ int TabStyle::GetBottomCornerRadius() const {
+
+--- a/ui/views/layout/layout_provider.cc
++++ b/ui/views/layout/layout_provider.cc
+@@ -188,8 +188,27 @@
+                            dialog_insets.right());
+ }
+ 
++namespace {
++int g_aero_control_radius = -1;
++int g_aero_chip_radius = -1;
++}  // namespace
++
++// static
++void LayoutProvider::SetAerographeneCornerRadii(int control, int chip) {
++  g_aero_control_radius = control;
++  g_aero_chip_radius = chip;
++}
++
++// static
++int LayoutProvider::GetAerographeneControlRadius() {
++  return g_aero_control_radius;
++}
++
+ int LayoutProvider::GetCornerRadiusMetric(Emphasis emphasis,
+                                           const gfx::Size& size) const {
++  if (g_aero_control_radius >= 0 && emphasis != Emphasis::kNone) {
++    return g_aero_control_radius;
++  }
+   switch (emphasis) {
+     case Emphasis::kNone:
+       return 0;
+@@ -229,6 +248,16 @@
+   ShapeSysTokens token = GetShapeSysToken(id);
+   DCHECK_NE(token, ShapeSysTokens::kDefault)
+       << "kDefault token means there is a missing mapping between shape tokens";
++  if (g_aero_control_radius >= 0) {
++    switch (id) {
++      case ShapeContextTokens::kBadgeRadius:
++      case ShapeContextTokens::kExtensionsMenuButtonRadius:
++      case ShapeContextTokens::kContentSeparatorRadius:
++        return g_aero_chip_radius;
++      default:
++        return g_aero_control_radius;
++    }
++  }
+   switch (token) {
+     case ShapeSysTokens::kXSmall:
+       return 4;
+
+--- a/ui/views/layout/layout_provider.h
++++ b/ui/views/layout/layout_provider.h
+@@ -256,6 +256,12 @@
+   int GetCornerRadiusMetric(ShapeContextTokens token,
+                             const gfx::Size& size = gfx::Size()) const;
+ 
++  // aerographene: theme corner radii. |control| = buttons, fields, menus,
++  // dialogs and every Emphasis level but kNone (no pills); |chip| = badges
++  // and small inner items. Negative = upstream values. Set at startup.
++  static void SetAerographeneCornerRadii(int control, int chip);
++  static int GetAerographeneControlRadius();
++
+  protected:
+   static constexpr int kSmallDialogWidth = 320;
+   static constexpr int kMediumDialogWidth = 448;
+

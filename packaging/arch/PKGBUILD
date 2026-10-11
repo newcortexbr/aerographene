@@ -11,6 +11,8 @@ depends=('gtk3' 'nss' 'alsa-lib' 'libxss' 'libcups' 'libxkbcommon' 'mesa'
          'dbus' 'at-spi2-core' 'cairo' 'pango' 'expat' 'libx11' 'libxcb' 'libxext'
          'libxcomposite' 'libxdamage' 'libxfixes' 'libxrandr' 'systemd-libs'
          'xdg-utils' 'ttf-liberation' 'hicolor-icon-theme')
+# pixelized usa JetBrains Mono; sem ela cai na mono do sistema (theme-font.patch)
+optdepends=('ttf-jetbrains-mono: fonte do tema pixelized')
 options=('!strip' '!debug')
 # release.yml publica o tarball com este nome (renomeado do artifact do build)
 source=("${pkgname}-${pkgver}-x86_64_linux.tar.zst::${url}/releases/download/v${pkgver}/${pkgname}-${pkgver}-x86_64_linux.tar.zst"

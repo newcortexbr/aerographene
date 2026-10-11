@@ -86,3 +86,6 @@ aerographene/cold-data-history-move.patch
 aerographene/cold-data-cache-expire.patch
 aerographene/cold-data-history-revisit.patch
 aerographene/cold-data-history-ui.patch
+aerographene/theme-builtin.patch
+aerographene/theme-radius.patch
+aerographene/theme-font.patch
