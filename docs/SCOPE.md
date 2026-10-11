@@ -15,7 +15,7 @@ Ordem de construção:
 7. peek (popups e `target=_blank`) e split view por arrastar (patch split-view do Helium).
 8. dois temas de teste (gradiente nebuloso azul-preto com estrelas; preto alto contraste) e tema/padding nas páginas internas.
 9. nomes de processo no Linux: `aerographene: <space>`, `aerographene: gpu` etc. No Windows fica `aerographene.exe`.
-10. dado frio de histórico, favicons/miniaturas, sessões e downloads, com prazo de 45 dias configurável.
+10. dado frio de histórico, favicons/miniaturas, sessões e downloads, com prazo de 30 dias configurável (ADR 0007); cache de sites com mais de 30 dias é apagado.
 11. extensões: uBlock Origin completo (MV2) embutido, com o patch MV2 do ungoogled e a instalação como componente do Helium; instalação pela Chrome Web Store. Importador do Arc.
 12. distribuição: `.tar.zst` na GitHub release + PKGBUILD no repo. Sem auto-update.
 

@@ -53,7 +53,7 @@ Layout alternativo, com abas horizontais no topo, mantendo a mesma linguagem vis
 Dado do perfil sem uso há mais que o prazo configurável (histórico, favicons e miniaturas, sessões antigas, registro de downloads e dados de sites). Sai do armazenamento quente e é catalogado, continuando pesquisável; comprimido só onde a compressão rende (texto do histórico fica sem compressão, decisão do dono em 11/10/2026).
 
 **Prazo de frio**:
-Número de dias sem uso após o qual um dado vira dado frio. Configurável; padrão 45 dias.
+Número de dias sem uso após o qual um dado vira dado frio. Configurável; padrão 30 dias.
 
 **Exceção de frio**:
 Lista de sites cujos dados nunca esfriam, como provedores de conta (Google, Proton, Microsoft). Cookies também nunca esfriam.

@@ -1,40 +1,48 @@
-# Dado frio em banco separado comprimido, nunca apagado (proposto)
+# Dado frio em banco separado, sem compressão, nunca apagado
 
-Status: aceito em 11/10/2026 com as decisões abaixo. Nada implementado.
+Status: aceito em 11/10/2026 (proposto em 10/10/2026; plano revisto com o dono em 11/10/2026). Nada implementado.
 
-Histórico, favicons, registros de downloads e sessões antigas sem uso há mais que o prazo de frio (padrão 45 dias, pref `aerographene.cold_after_days`) saem do banco quente e vão para um banco SQLite por perfil, `History-Cold`, com compressão zstd por linha nas colunas de texto/blob e um catálogo FTS5 de URL e título. Sessões antigas viram arquivos `.zst` registrados no mesmo catálogo. O `ExpireHistoryBackend` do Chromium (que apaga visitas com mais de 90 dias, `kExpireDaysThreshold` em `components/history/core/browser/history_backend.h`) passa a mover em vez de apagar; só a exclusão pedida pelo usuário apaga. `chrome://history` consulta quente e frio; o omnibox, só o quente. Alternativas descartadas: a expiração do Chromium (apaga; rejeitada pelo dono em 06/10/2026); comprimir colunas no próprio `History` (schema e migrações, risco ao startup pelo `InMemoryURLIndex`, conflito contínuo com o upstream); arquivo morto puro com índice (busca e lookup de favicon ruins, perda de um bloco = um mês), aceito só para sessões; mover sem comprimir (viola a definição de dado frio no `CONTEXT.md`). Dados de sites ficam para a v1.1.
+Histórico, favicons, registros de downloads e sessões antigas sem uso há mais que o prazo de frio (padrão 30 dias, pref `aerographene.cold_after_days`) saem do banco quente e vão para um banco SQLite por perfil, `History-Cold`, sem compressão. O objetivo é manter o `History` quente pequeno (abertura, `InMemoryURLIndex`, omnibox), não economizar disco. O `ExpireHistoryBackend` do Chromium (que apaga visitas com mais de 90 dias, `kExpireDaysThreshold` em `components/history/core/browser/history_backend.h`) passa a mover em vez de apagar; só a exclusão pedida pelo usuário apaga.
 
-## Fatias
+Cada URL existe num lugar só. Ao revisitar uma URL que está no frio, a linha de `urls` dela sai do frio e volta ao quente com a visita nova (contagens preservadas); as visitas antigas ficam no frio. Não há outra reidratação.
 
-1. `cold-data-store`: `ColdHistoryDatabase` (schema, abertura preguiçosa, recovery) e a pref; sem efeito no produto.
-2. `cold-data-history-move`: o expirer usa o prazo de frio e move `urls`/`visits`/`keyword_search_terms` em transação (copia, confirma, apaga do quente).
-3. `cold-data-compress`: zstd por linha, nível baixo.
-4. `cold-data-history-search`: busca de texto no `QueryHistory` cai no FTS do frio; rótulo na UI atual.
-5. `cold-data-favicons`, 6. `cold-data-downloads`, 7. `cold-data-sessions` (arquivo `.zst` + catálogo; conferir conflito com `lazy-session-restore`).
+O cache de sites não vai para o frio: entradas com mais de 30 dias são apagadas. Cookies nunca esfriam.
 
-Cada fatia compila `components/history` e roda os `history_unittests` afetados no runner antes de build completa. Medição: harness com perfil envelhecido e frio ativo; regra de 2% contra o Helium.
+Alternativas descartadas: a expiração do Chromium (apaga; rejeitada pelo dono em 06/10/2026); comprimir o histórico (texto curto, ganho nulo; decisão do dono em 11/10/2026); zstd no cache HTTP (conteúdo já chega comprimido; substituído por apagar o antigo); prazo de 10–15 dias (tiraria do autocomplete do omnibox sites visitados há poucas semanas); teto de disco (sem compressão nem cache, o volume esperado não justifica).
 
-## Decisões do dono (11/10/2026)
+## decisões do dono (11/10/2026)
 
+- prazo de frio: 30 dias, o mesmo do cache.
 - omnibox não sugere dado frio.
 - "limpar histórico" apaga também o frio.
-- sem reidratação do histórico: a visita nova cria linha quente; o frio só recebe dado com mais de 45 dias.
-- histórico no frio fica sem compressão (texto curto, ganho nulo); revoga a fatia 3 `cold-data-compress` para o histórico e a frase "mover sem comprimir viola a definição". zstd fica reservado ao cache de sites (em discussão).
-- sem teto de disco e sem aviso de tamanho: histórico sem compressão e sem limite, cookies fora do frio.
-- cache de sites: entradas com mais de 30 dias são apagadas (sem zstd, sem mover). Fatia nova `cold-data-cache-expire`.
-- fatia 3 `cold-data-compress` cancelada.
+- `chrome://history` mostra o quente; uma seção "30+ dias" no fim da lista consulta o frio sob demanda. A busca de texto também cai no frio nessa seção.
+- sem compressão, sem teto de disco e sem aviso de tamanho.
+- cache de sites: apagar entradas com mais de 30 dias.
+- cookies fora do frio.
 
-## Decisões pendentes do dono (texto original)
+Revogado por este texto: prazo de 45 dias, compressão zstd por linha, catálogo FTS5, sessões em `.zst`, fatia `cold-data-compress`, a frase "mover sem comprimir viola a definição de dado frio" (o `CONTEXT.md` foi ajustado).
 
-- omnibox sugere dado frio? Proposta: não na v1.0 (startup e memória).
-- "limpar histórico" apaga também o frio? Proposta: sim (privacidade).
-- reidratação do histórico: proposta: não mover de volta; a visita nova já cria a linha quente. Reidratação fica para dados de sites (v1.1).
-- teto de disco do frio? "Nunca apagar" implica crescimento sem limite.
+## fatias
+
+1. `cold-data-store`: `ColdHistoryDatabase` (schema igual ao das tabelas movidas, abertura sob demanda, recovery isolado) e a pref; sem efeito no produto.
+2. `cold-data-history-move`: o expirer usa o prazo de frio e move `urls`/`visits`/`keyword_search_terms` em transação (copia, confirma, apaga do quente).
+3. `cold-data-history-revisit`: visita a URL que está no frio move a linha de `urls` de volta ao quente, sem duplicata.
+4. `cold-data-history-ui`: seção "30+ dias" em `chrome://history`, consulta e busca no frio; "limpar histórico" apaga o frio.
+5. `cold-data-cache-expire`: apagar entradas do cache de sites com mais de 30 dias.
+6. `cold-data-favicons`, 7. `cold-data-downloads`, 8. `cold-data-sessions` (conferir conflito com `lazy-session-restore` e se o Chromium já limita as gerações de sessão).
+
+Cada fatia compila `components/history` (ou o alvo afetado) no runner antes de build completa; o runner não compila unit tests, então a checagem de comportamento é por QA em pacote com perfil envelhecido. Medição: harness com perfil envelhecido e frio ativo; regra de 2% contra o Helium.
+
+## pendente de conferir no código (Chromium 154)
+
+- corte de idade do índice do omnibox (`URLIndexPrivateData`): define quanto o frio realmente alivia a abertura.
+- expiração de downloads por idade, número de gerações de sessão, ponto de remoção de favicons órfãos.
+- onde aplicar a idade máxima no cache (`disk_cache` simple backend) sem patch invasivo.
 
 ## Consequences
 
 - O banco frio abre sob demanda e o movimento roda no task runner de background do backend de histórico: nada no caminho de abertura.
-- Disco do frio cresce sem limite enquanto não houver teto.
+- Disco do frio cresce sem limite, aceito pelo dono.
+- Sites visitados há mais de 30 dias não aparecem no autocomplete até serem revisitados.
 - Patches concentrados em `components/history/core/browser/`, expostos a mudanças do upstream no expirer.
 - Corrupção do frio fica isolada; o histórico quente não é afetado.
-- Não conferido no 154: expiração de downloads por idade, número de gerações de sessão, ponto de remoção de favicons órfãos.
