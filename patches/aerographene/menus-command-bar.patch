@@ -1,0 +1,449 @@
+aerographene: menus de contexto/app e command bar como nos mockups M-r01a/c e palette.
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/theme-builtin.patch, theme-radius.patch,
+toolbar-mockup.patch (ids[6] em aerographene_theme_tokens.cc),
+urlbar-mockup.patch (LocationBarView::UpdateBorder...), command-bar-type-icons.patch
+e omnibox-views-popup.patch (popup nativo).
+Propósito: fidelidade visual (SCOPE 11/10: menus sem blur, command bar).
+
+Menus (views::MenuConfig/MenuItemView/SubmenuView/MenuScrollViewContainer):
+padding do contêiner 6 px, itens de 32 px (minimum_text_item_height), padding
+de item 8 px e espaço ícone-rótulo 8 px, separador de 1 px com 4 px de margem
+(altura 9), contorno de 1 px (use_outer_border; cor = token menu_border em
+ui::kColorBubbleBorder/kColorMenuBorder), largura presa a 247-254 px (rótulos
+maiores sofrem elipse; combobox e ash intactos), atalho em cor secundária
+(token menu_text_dim em kColorMenuItemForegroundSecondary), item focado com
+raio interno do tema e barra accent de 2 px no início (tema default);
+pixelized usa só o bloco de seleção e elevação de sombra 0 (sem sombra).
+Fundo vem do token menu já existente (opaco; "quase opaco" do SCOPE).
+
+Command bar (OmniboxPopupViewViews, RoundedOmniboxResultsFrame, linhas):
+escolha: a omnibox NÃO é movida nem expandida. O popup nativo vira um painel
+flutuante de 600 px centrado na barra (limitado a largura da janela - 16),
+abaixo dela (sem recorte sobre a barra: SetCutoutVisibility(false)), com
+contorno de 1 px (kColorToolbarSeparator) e 7 px de padding, sombra só no
+default. Linhas: fundo selecionado com raio interno do tema (antes pílula),
+barra de seleção de 3 px (oculta no pixelized, que seleciona por bloco),
+rótulo do tipo à direita ("aba aberta", "histórico", "favorito", "busca";
+texto fixo pt-BR). O campo é a própria barra, que ganha contorno accent de
+1 px com o cursor visível. Sem chip "Esc". Clique na URL e Ctrl+L abrem este
+mesmo popup (comportamento de foco inalterado).
+Compilação parcial e runtime: ver patches/README.md.
+
+--- a/chrome/browser/ui/color/aerographene_theme_tokens.cc
++++ b/chrome/browser/ui/color/aerographene_theme_tokens.cc
+@@ -96,13 +96,16 @@
+       kColorTabDividerFrameInactive}},
+     {"menu", {ui::kColorMenuBackground}},
+     {"menu_text", {ui::kColorMenuItemForeground}},
++    // Menu stroke (also the bubble stroke) and secondary text (accelerators).
++    {"menu_border", {ui::kColorBubbleBorder, ui::kColorMenuBorder}},
++    {"menu_text_dim", {ui::kColorMenuItemForegroundSecondary}},
+     {"ntp", {kColorNewTabPageBackground}},
+     {"ntp_text", {kColorNewTabPageText}},
+     // System tokens: also reach WebUI through chrome://theme/colors.css.
+     {"base", {ui::kColorSysBase}},
+     {"surface", {ui::kColorSysSurface}},
+     {"text", {ui::kColorSysOnSurface}},
+-    {"accent", {ui::kColorSysPrimary}},
++    {"accent", {ui::kColorSysPrimary, kColorOmniboxResultsFocusIndicator}},
+     {"on_accent", {ui::kColorSysOnPrimary}},
+ };
+ 
+@@ -145,6 +148,8 @@
+     {"separator", SkColorSetARGB(0x29, 0x8C, 0xB4, 0xFF)},
+     {"menu", SkColorSetRGB(0x07, 0x0C, 0x18)},
+     {"menu_text", SkColorSetRGB(0xEA, 0xF2, 0xFF)},
++    {"menu_border", SkColorSetARGB(0x29, 0x8C, 0xB4, 0xFF)},
++    {"menu_text_dim", SkColorSetRGB(0xA9, 0xB8, 0xD0)},
+     {"ntp", SkColorSetRGB(0x04, 0x07, 0x0E)},
+     {"ntp_text", SkColorSetRGB(0xEA, 0xF2, 0xFF)},
+     {"base", SkColorSetRGB(0x04, 0x07, 0x0E)},
+@@ -183,6 +188,8 @@
+     {"separator", SkColorSetARGB(0x24, 0xFF, 0xFF, 0xFF)},
+     {"menu", SkColorSetRGB(0x11, 0x11, 0x11)},
+     {"menu_text", SkColorSetRGB(0xF2, 0xF2, 0xF2)},
++    {"menu_border", SkColorSetARGB(0x24, 0xFF, 0xFF, 0xFF)},
++    {"menu_text_dim", SkColorSetRGB(0x8C, 0x8C, 0x8C)},
+     {"ntp", SkColorSetRGB(0x0A, 0x0A, 0x0A)},
+     {"ntp_text", SkColorSetRGB(0xF2, 0xF2, 0xF2)},
+     {"base", SkColorSetRGB(0x0A, 0x0A, 0x0A)},
+--- a/chrome/browser/ui/views/location_bar/location_bar_view.cc
++++ b/chrome/browser/ui/views/location_bar/location_bar_view.cc
+@@ -1448,6 +1448,12 @@
+     border_color = color_provider->GetColor(kColorLocationBarBorderOnMismatch);
+   }
+ 
++  // aerographene: the focused field (command bar open) has a 1px accent
++  // outline (mockup .pal .in:focus-within).
++  if (!is_popup_mode_ && !high_contrast && is_caret_visible) {
++    border_color = color_provider->GetColor(ui::kColorFocusableBorderFocused);
++  }
++
+   if (is_popup_mode_) {
+     SetBackground(views::CreateSolidBackground(background_color_));
+   } else {
+--- a/chrome/browser/ui/views/omnibox/omnibox_match_cell_view.cc
++++ b/chrome/browser/ui/views/omnibox/omnibox_match_cell_view.cc
+@@ -203,6 +203,9 @@
+       l10n_util::GetStringUTF16(IDS_AUTOCOMPLETE_MATCH_DESCRIPTION_SEPARATOR));
+   iph_link_view_ = AddChildView(std::make_unique<views::Link>(
+       u"", ChromeTextContext::CONTEXT_OMNIBOX_POPUP, views::style::STYLE_LINK));
++  type_label_view_ =
++      AddChildView(std::make_unique<OmniboxTextView>(result_view));
++  type_label_view_->SetVisible(false);
+ }
+ 
+ OmniboxMatchCellView::~OmniboxMatchCellView() = default;
+@@ -254,6 +257,35 @@
+                                ? gfx::Size()
+                                : separator_view_->GetPreferredSize());
+ 
++  // aerographene: result type on the trailing edge (command bar, mockup .r .k).
++  // Fixed pt-BR text, no IDS_*. Plain rows only.
++  {
++    std::u16string type_text;
++    if (layout_style_ == LayoutStyle::SEARCH_SUGGESTION ||
++        layout_style_ == LayoutStyle::DEFAULT_NON_SEARCH_SUGGESTION) {
++      if (match.type == AutocompleteMatchType::OPEN_TAB ||
++          match.has_tab_match.value_or(false)) {
++        type_text = u"aba aberta";
++      } else if (match.type == AutocompleteMatchType::HISTORY_URL ||
++                 match.type == AutocompleteMatchType::HISTORY_TITLE ||
++                 match.type == AutocompleteMatchType::HISTORY_BODY ||
++                 match.type == AutocompleteMatchType::HISTORY_KEYWORD ||
++                 match.type == AutocompleteMatchType::HISTORY_EMBEDDINGS) {
++        type_text = u"hist\u00f3rico";
++      } else if (match.type == AutocompleteMatchType::BOOKMARK_TITLE) {
++        type_text = u"favorito";
++      } else if (AutocompleteMatch::IsSearchType(match.type)) {
++        type_text = u"busca";
++      }
++    }
++    type_label_view_->SetText(type_text);
++    type_label_view_->SetVisible(!type_text.empty());
++    type_label_view_->ApplyTextColor(
++        result_view->GetThemeState() == OmniboxPartState::SELECTED
++            ? kColorOmniboxResultsTextDimmedSelected
++            : kColorOmniboxResultsTextDimmed);
++  }
++
+   // Set up the IPH link following the main IPH text.
+   iph_link_view_->SetText(match.iph_link_text);
+   iph_link_view_->SetVisible(layout_style_ == LayoutStyle::IPH_SUGGESTION);
+@@ -445,7 +477,17 @@
+ 
+   const int text_indent = GetTextIndent() + tail_suggest_common_prefix_width_;
+   x += text_indent;
+-  const int text_width = child_area.width() - text_indent;
++  int text_width = child_area.width() - text_indent;
++
++  // aerographene: the type label takes the trailing edge.
++  if (type_label_view_->GetVisible()) {
++    const int type_width = type_label_view_->GetPreferredSize().width();
++    type_label_view_->SetBounds(child_area.right() - type_width, y, type_width,
++                                row_height);
++    text_width -= type_width + 12;
++  } else {
++    type_label_view_->SetSize(gfx::Size());
++  }
+ 
+   if (layout_style_ == LayoutStyle::HISTORY_EMBEDDING_ANSWER) {
+     if (description_view_->GetText().empty()) {
+--- a/chrome/browser/ui/views/omnibox/omnibox_match_cell_view.h
++++ b/chrome/browser/ui/views/omnibox/omnibox_match_cell_view.h
+@@ -71,6 +71,8 @@
+   OmniboxTextView* content() { return content_view_; }
+   OmniboxTextView* description() { return description_view_; }
+   OmniboxTextView* separator() { return separator_view_; }
++  // aerographene: right-aligned result type ("aba aberta", "histórico", ...).
++  OmniboxTextView* type_label() { return type_label_view_; }
+   views::Link* iph_link_view() { return iph_link_view_; }
+ 
+   // Determines if `match` should display an answer, calculator, or entity
+@@ -139,6 +141,7 @@
+   raw_ptr<OmniboxTextView> content_view_;
+   raw_ptr<OmniboxTextView> description_view_;
+   raw_ptr<OmniboxTextView> separator_view_;
++  raw_ptr<OmniboxTextView> type_label_view_;
+   // Some IPH matches have a link users can click to learn more or take action.
+   raw_ptr<views::Link> iph_link_view_;
+ 
+--- a/chrome/browser/ui/views/omnibox/omnibox_popup_view_views.cc
++++ b/chrome/browser/ui/views/omnibox/omnibox_popup_view_views.cc
+@@ -43,6 +43,7 @@
+ #include "ui/gfx/image/image.h"
+ #include "ui/views/accessibility/view_accessibility.h"
+ #include "ui/views/cascading_property.h"
++#include "ui/views/layout/layout_provider.h"
+ #include "ui/views/layout/box_layout.h"
+ #include "ui/views/property_effects.h"
+ #include "ui/views/widget/widget.h"
+@@ -133,8 +134,11 @@
+   }
+ 
+   void SetPopupContentsView(OmniboxPopupViewViews* contents) {
+-    SetContentsView(std::make_unique<RoundedOmniboxResultsFrame>(
+-        contents, contents->location_bar_view_, /*forward_mouse_events=*/true));
++    auto frame = std::make_unique<RoundedOmniboxResultsFrame>(
++        contents, contents->location_bar_view_, /*forward_mouse_events=*/true);
++    // aerographene: the panel floats below the bar (no cutout over it).
++    frame->SetCutoutVisibility(false);
++    SetContentsView(std::move(frame));
+   }
+ 
+   void SetTargetBounds(const gfx::Rect& bounds) {
+@@ -732,6 +736,8 @@
+     popup_height += contextual_group_view_->GetCurrentHeight();
+   }
+ 
++  const int rows_height = popup_height;
++
+   // Add space at the bottom for aesthetic reasons. It's expected that this
+   // space is dead unclickable/unhighlightable space. This extra padding is not
+   // added if the results section has no height (result set is empty or all
+@@ -747,6 +753,30 @@
+     popup_height += extra_bottom_padding;
+   }
+ 
++  // aerographene: command bar. The suggestions form a 600px panel (mockup
++  // .pal) centered on the location bar and floating below it, instead of a
++  // dropdown that wraps the bar. 8px of padding (1px stroke + 7px) around the
++  // rows; the widget grows by the shadow insets, which keep it clear of the
++  // bar.
++  if (views::LayoutProvider::GetAerographeneControlRadius() >= 0) {
++    constexpr int kAeroPanelWidth = 600;
++    constexpr int kAeroPanelPadding = 8;
++    const gfx::Insets shadow_insets =
++        RoundedOmniboxResultsFrame::GetShadowInsets();
++    const gfx::Rect bar_bounds = location_bar_view_->GetBoundsInScreen();
++    const int window_width =
++        location_bar_view_->GetWidget()->GetWindowBoundsInScreen().width();
++    const int panel_width = window_width - 16 < kAeroPanelWidth
++                                ? window_width - 16
++                                : kAeroPanelWidth;
++    const int gap = shadow_insets.top() > 8 ? shadow_insets.top() : 8;
++    gfx::Rect panel(
++        bar_bounds.CenterPoint().x() - panel_width / 2, bar_bounds.bottom() + gap,
++        panel_width, rows_height ? rows_height + 2 * kAeroPanelPadding : 0);
++    panel.Inset(-shadow_insets);
++    return panel;
++  }
++
+   // Add enough space on the top and bottom so it looks like there is the same
+   // amount of space between the text and the popup border as there is in the
+   // interior between each row of text.
+--- a/chrome/browser/ui/views/omnibox/omnibox_result_view.cc
++++ b/chrome/browser/ui/views/omnibox/omnibox_result_view.cc
+@@ -57,6 +57,7 @@
+ #include "ui/views/layout/box_layout.h"
+ #include "ui/views/layout/fill_layout.h"
+ #include "ui/views/layout/flex_layout.h"
++#include "ui/views/layout/layout_provider.h"
+ #include "ui/views/layout/layout_types.h"
+ #include "ui/views/view.h"
+ #include "ui/views/view_class_properties.h"
+@@ -104,7 +105,7 @@
+   METADATA_HEADER(OmniboxResultSelectionIndicator, views::View)
+ 
+  public:
+-  const int kStrokeThickness = 4;
++  const int kStrokeThickness = 3;  // aerographene: palette bar is 3px.
+ 
+   OmniboxResultSelectionIndicator() {
+     // Height will automatically match the parent's height.
+@@ -338,6 +339,15 @@
+         /*for_border_thickness=*/0);
+   }
+ 
++  // aerographene: palette rows use the theme's inner radius (3px, square in the
++  // flat theme) instead of a pill on the trailing edge.
++  if (const int aero_radius = views::LayoutProvider::GetAerographeneControlRadius();
++      aero_radius >= 0) {
++    return views::CreateRoundedRectBackground(
++        GetOmniboxBackgroundColorId(part_state), aero_radius > 0 ? 3.0f : 0.0f,
++        /*for_border_thickness=*/0);
++  }
++
+   const float half_row_height = OmniboxMatchCellView::kRowHeight / 2;
+   gfx::RoundedCornersF radii = {0, half_row_height, half_row_height, 0};
+   return views::CreateRoundedRectBackground(
+@@ -462,6 +472,7 @@
+                                     ? kColorOmniboxResultsTextDimmedSelected
+                                     : kColorOmniboxResultsTextDimmed;
+   suggestion_view_->separator()->ApplyTextColor(dimmed_id);
++  suggestion_view_->type_label()->ApplyTextColor(dimmed_id);
+ 
+   // Recreate the icons in case the color needs to change.
+   // Note: if this is an extension icon or favicon then this can be done in
+@@ -497,16 +508,18 @@
+ 
+   // The selection indicator indicates when the suggestion is focused. Do not
+   // show the selection indicator if an auxiliary button is selected.
++  // aerographene: the flat theme (radius 0) selects with a block, no bar.
++  const bool aero_flat = views::LayoutProvider::GetAerographeneControlRadius() == 0;
+   if (match_.HasInstantKeyword(
+           popup_view_->controller()->client()->GetTemplateURLService())) {
+     const OmniboxPopupSelection::LineState line_state =
+         popup_view_->GetSelection().state;
+     selection_indicator_->SetVisible(
+-        selected &&
++        selected && !aero_flat &&
+         (line_state == OmniboxPopupSelection::LineState::NORMAL ||
+          line_state == OmniboxPopupSelection::LineState::KEYWORD_MODE));
+   } else {
+-    selection_indicator_->SetVisible(selected &&
++    selection_indicator_->SetVisible(selected && !aero_flat &&
+                                      popup_view_->GetSelection().state ==
+                                          OmniboxPopupSelection::NORMAL);
+   }
+--- a/chrome/browser/ui/views/omnibox/rounded_omnibox_results_frame.cc
++++ b/chrome/browser/ui/views/omnibox/rounded_omnibox_results_frame.cc
+@@ -26,6 +26,7 @@
+ #include "ui/base/pointer/touch_ui_controller.h"
+ #include "ui/compositor/layer.h"
+ #include "ui/gfx/geometry/rounded_corners_f.h"
++#include "ui/views/border.h"
+ #include "ui/views/bubble/bubble_border.h"
+ #include "ui/views/layout/layout_provider.h"
+ #include "ui/views/metadata/view_factory.h"
+@@ -267,8 +268,21 @@
+   auto contents_host = std::move(contents_host_builder).Build();
+   contents_host->AddChildViewRaw(contents_.get());
+ 
++  // aerographene: palette-style panel (mockup .pal): 1px theme line and 7px
++  // padding inside it. The shadow exists only in the default theme (the flat
++  // theme has radius 0).
++  const bool aero = views::LayoutProvider::GetAerographeneControlRadius() >= 0;
++  if (aero) {
++    contents_host->SetBorder(views::CreatePaddedBorder(
++        views::CreateRoundedRectBorder(1, corner_radius,
++                                       kColorToolbarSeparator),
++        gfx::Insets(7)));
++  }
++
+   // Initialize the shadow.
+-  SetElevation(kDefaultElevation);
++  SetElevation(views::LayoutProvider::GetAerographeneControlRadius() == 0
++                   ? 0
++                   : kDefaultElevation);
+ 
+   AddChildView(std::move(contents_host));
+ }
+@@ -333,6 +347,10 @@
+ 
+ // static
+ gfx::Insets RoundedOmniboxResultsFrame::GetShadowInsets() {
++  // aerographene: the flat theme has no shadow (see the constructor).
++  if (views::LayoutProvider::GetAerographeneControlRadius() == 0) {
++    return gfx::Insets();
++  }
+   return views::BubbleBorder::GetBorderAndShadowInsets(kDefaultElevation);
+ }
+ 
+@@ -397,7 +415,7 @@
+   results_bounds.Inset(GetContentInsets());
+ 
+   // Align webview horizontal bounds and positioning with the outer view.
+-  results_bounds.set_x(0);
++  results_bounds.set_x(contents_host_->GetContentsBounds().x());
+   results_bounds.set_width(contents_host_->GetContentsBounds().width());
+ 
+   auto* webui_content = GetOmniboxPopupWebUIBaseContent();
+--- a/ui/views/controls/menu/menu_config.cc
++++ b/ui/views/controls/menu/menu_config.cc
+@@ -88,11 +88,21 @@
+   menu_horizontal_border_size = 0;
+   submenu_horizontal_overlap = 0;
+   item_vertical_margin = 6;
+-  item_horizontal_border_padding = 12;
+   arrow_size = 16;
+-  separator_height = 17;
+   separator_spacing_height = 4;
+-  use_outer_border = false;
++  // aerographene (mockups M-r01a/c): 6px container padding, items 32px with
++  // 8px padding and an 8px icon gap, 1px separators with 4px margins, 1px
++  // outer stroke (color from the theme through ui::kColorBubbleBorder).
++  menu_horizontal_border_size = 6;
++  rounded_menu_vertical_border_size = 6;
++  nonrounded_menu_vertical_border_size = 6;
++  item_horizontal_border_padding = 0;
++  item_horizontal_padding = 8;
++  icon_label_spacing = 8;
++  minimum_text_item_height = 32;
++  separator_height = 9;
++  separator_thickness = 1;
++  use_outer_border = true;
+ }
+ 
+ // static
+--- a/ui/views/controls/menu/menu_item_view.cc
++++ b/ui/views/controls/menu/menu_item_view.cc
+@@ -1315,10 +1315,28 @@
+ 
+     ui::NativeTheme::MenuItemExtraParams menu_item_extra_params;
+     menu_item_extra_params.corner_radius = config.item_corner_radius;
++    // aerographene: items use the theme's inner radius (3px default, square
++    // pixelized).
++    const bool aero_default_theme =
++        LayoutProvider::GetAerographeneControlRadius() > 0;
++    if (aero_default_theme) {
++      menu_item_extra_params.corner_radius =
++          LayoutProvider::Get()->GetCornerRadiusMetric(
++              ShapeContextTokens::kBadgeRadius);
++    }
+     GetNativeTheme()->Paint(
+         canvas->sk_canvas(), GetColorProvider(),
+         ui::NativeTheme::kMenuItemBackground, ui::NativeTheme::kHovered,
+         item_bounds, ui::NativeTheme::ExtraParams(menu_item_extra_params));
++    // aerographene: the default theme marks the focused item with a 2px accent
++    // bar on the leading edge; pixelized uses the selection block alone.
++    if (aero_default_theme) {
++      const int bar_x =
++          base::i18n::IsRTL() ? item_bounds.right() - 2 : item_bounds.x();
++      canvas->FillRect(
++          gfx::Rect(bar_x, item_bounds.y(), 2, item_bounds.height()),
++          GetColorProvider()->GetColor(ui::kColorFocusableBorderFocused));
++    }
+   }
+ }
+ 
+--- a/ui/views/controls/menu/menu_scroll_view_container.cc
++++ b/ui/views/controls/menu/menu_scroll_view_container.cc
+@@ -489,8 +489,12 @@
+   bubble_border->SetColor(id);
+ 
+   const MenuConfig& menu_config = MenuConfig::instance();
++  // aerographene: the flat theme (pixelized, control radius 0) has no shadow,
++  // only the 1px stroke.
++  const bool aero_flat = LayoutProvider::GetAerographeneControlRadius() == 0;
+   bubble_border->set_md_shadow_elevation(
+-      content_view_->GetMenuItem()->GetParentMenuItem()
++      aero_flat ? 0
++      : content_view_->GetMenuItem()->GetParentMenuItem()
+           ? menu_config.bubble_submenu_shadow_elevation
+           : menu_config.bubble_menu_shadow_elevation);
+   bubble_border->set_draw_border_stroke(menu_config.use_outer_border);
+--- a/ui/views/controls/menu/submenu_view.cc
++++ b/ui/views/controls/menu/submenu_view.cc
+@@ -298,6 +298,19 @@
+     width = std::max(touchable_minimum_width, width);
+   }
+ 
++  // aerographene (mockups M-r01a/c: 247-254px): menus are held to a narrow
++  // column; longer labels are elided by DrawStringRectWithFlags. Comboboxes
++  // and ash-style menus keep their natural width.
++  if (const MenuController* controller =
++          parent_menu_item_->GetMenuController();
++      controller && !controller->IsCombobox() &&
++      !controller->use_ash_system_ui_layout() &&
++      LayoutProvider::GetAerographeneControlRadius() >= 0) {
++    constexpr int kAeroMenuMinWidth = 247;
++    constexpr int kAeroMenuMaxWidth = 254;
++    width = std::clamp(width, kAeroMenuMinWidth, kAeroMenuMaxWidth);
++  }
++
+   // Then, the height for that width.
+   const int menu_item_width = width - insets.width();
+   bool previous_child_was_lower_separator = false;
