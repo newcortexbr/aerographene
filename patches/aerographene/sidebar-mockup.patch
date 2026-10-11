@@ -1,0 +1,975 @@
+aerographene: sidebar como nos mockups R-r01a (default e pixelized), fidelidade de 11/10/2026.
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: helium/ui/layout/vertical.patch, aerographene/sidebar-geometry.patch,
+aerographene/sidebar-footer.patch, aerographene/pinned-model-tabstrip.patch,
+aerographene/pinned-closed.patch, aerographene/pinned-folder.patch,
+aerographene/theme-builtin.patch, aerographene/theme-radius.patch,
+aerographene/theme-icons-infra.patch, aerographene/toolbar-mockup.patch.
+Propósito (CHECKLIST itens 18-21, 23-26, 28-35):
+(1) Constantes de layout (layout_constants.cc): aba e linha de pasta 32 px
+(kVerticalTabHeight), célula de pinned 40x40 (kVerticalTabPinnedHeight e
+kVerticalTabMinWidth), padding da sidebar 12 px, raio das abas verticais =
+raio do tema (LayoutProvider::GetAerographeneControlRadius; 4 default, 0
+pixelized). Fundo da sidebar (VerticalTabStripRegionView): gradiente
+#080e1c->#050912 no default, #111 chapado no pixelized, borda de 1 px na cor
+"separator" do tema à direita (esquerda com a sidebar à direita), 8 px de
+margem no topo. Substitui o CustomCornersBackground (sem cantos e sem imagem
+de tema personalizado).
+(2) Grade de pinned: colunas de 40 px fixas, no máximo 4 (sem esticar as
+células); contorno 1 px na cor do tema (borda do TabView pinned) e fundo
+rgba(255,255,255,.02) / #111; marcador vivo 6x6 accent a 3 px do canto
+superior direito (raio 1 default, 0 pixelized); fechado: opacidade .62 e
+contorno tracejado (cc::PathEffect::MakeDash) com o raio do tema.
+(3) Linha de pasta (AerographenePinnedFolderView): ícone de pasta do pacote
+do tema (vector_icons::kFolderFlippableIcon, trocado pelo override) em
+accent, rótulo em text2, chevron no fim (› fechada, ⌄ aberta), sem caixa,
+32 px, largura total da grade, hover na cor hover.
+(4) Linha do space (AerographeneSpaceRow, nova): ícone de pasta + nome do
+perfil (ProfileAttributesEntry::GetName; space = perfil, ADR 0005) + chevron
+para baixo, 32 px, no topo da sidebar; clique abre o menu do avatar
+(IDC_SHOW_AVATAR_MENU). Escondida sem nome (visitante/anônimo) e na sidebar
+recolhida. O nome é lido ao entrar no widget, não é observado.
+(5) Aba vertical (TabView::OnPaint -> PaintAeroVerticalTab): inativa sem
+fundo, hover na cor tab_hover; ativa default = gradiente rgba(108,182,255,.14)
+->rgba(10,16,32,.78), contorno 1 px no topo e laterais (sem linha inferior) e
+barra accent de 2 px no topo com 8 px de recuo; ativa pixelized = bloco
+preto, contorno branco 1 px, rampa Bayer 4x4 de pontos de 2 px nos 96 px finais
+(bitmap 96x32 criado uma vez) e chips pretos atrás do nome e do ×. O × aparece
+em todas as abas expandidas. Divisor de 1 px (10 px acima e abaixo) em cima do
+"+ Nova aba" (borda da VerticalTabStripBottomContainer); o botão passa a usar
+a cor text2 (antes esmaecido).
+(6) pt-BR: build/branding_strings.py troca "Nova guia"/"nova guia" por "Nova
+aba"/"nova aba" nas traduções pt-BR de cada grd processado (menus, atalhos,
+botão da sidebar); aplicado no inner.sh com o resto do branding.
+Não feito: fonte mono/caixa alta do pixelized nas linhas e abas (CHECKLIST 27,
+75), "+" em accent no "+ Nova aba" (a cor do ícone segue o rótulo), largura
+do rodapé (12 px de margem), modo recolhido (kCollapsedWidth 42 não foi
+mexido: células de 40 px não cabem nele).
+
+--- a/chrome/browser/ui/layout_constants.cc
++++ b/chrome/browser/ui/layout_constants.cc
+@@ -12,6 +12,7 @@
+ #include "ui/base/pointer/touch_ui_controller.h"
+ #include "ui/base/ui_base_features.h"
+ #include "ui/gfx/geometry/insets.h"
++#include "ui/views/layout/layout_provider.h"
+ 
+ #if BUILDFLAG(IS_CHROMEOS)
+ #include "chromeos/constants/chromeos_features.h"
+@@ -147,16 +148,23 @@
+       return 20;
+     case LayoutConstant::kMainBackgroundRegionCornerRadius:
+     case LayoutConstant::kToolbarCornerRadius:
+-    case LayoutConstant::kVerticalTabCornerRadius:
+       return 8;
++    case LayoutConstant::kVerticalTabCornerRadius: {
++      // aerographene: theme radius (4 default, 0 pixelized; mockups --r).
++      const int theme_radius =
++          views::LayoutProvider::GetAerographeneControlRadius();
++      return theme_radius >= 0 ? theme_radius : 8;
++    }
++    // aerographene: mockups R-r01a: tab and folder row 32, pinned cell 40x40,
++    // sidebar padding 12.
+     case LayoutConstant::kVerticalTabHeight:
+-      return 30;
++      return 32;
+     case LayoutConstant::kVerticalTabPinnedHeight:
+-      return 30;
++      return 40;
+     case LayoutConstant::kVerticalTabMinWidth:
+-      return 30;
++      return 40;
+     case LayoutConstant::kVerticalTabStripHorizontalPadding:
+-      return 6;
++      return 12;
+     case LayoutConstant::kVerticalTabStripUncollapsedVerticalPadding:
+       return 6;
+     case LayoutConstant::kVerticalTabStripCollapsedVerticalPadding:
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -9,6 +9,7 @@
+ 
+ #include "base/callback_list.h"
+ #include "base/functional/bind.h"
++#include "base/memory/raw_ptr.h"
+ #include "base/i18n/number_formatting.h"
+ #include "base/i18n/rtl.h"
+ #include "base/metrics/histogram_functions.h"
+@@ -22,6 +23,7 @@
+ #include "chrome/browser/ui/browser_element_identifiers.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/themes/aerographene_theme.h"
+ #include "chrome/browser/ui/color/chrome_color_id.h"
+ #include "chrome/browser/ui/layout_constants.h"
+ #include "chrome/browser/ui/omnibox/omnibox_tab_helper.h"
+@@ -47,6 +49,7 @@
+ #include "chrome/browser/ui/views/tabs/common/tab_view.h"
+ #include "chrome/browser/ui/views/tabs/common/unpinned_tab_container_view.h"
+ #include "chrome/browser/ui/views/tabs/shared/drop_arrow.h"
++#include "chrome/browser/ui/views/tabs/vertical/aerographene_space_row.h"
+ #include "chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.h"
+ #include "chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_focus_swipe_controller.h"
+ #include "chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_footer.h"
+@@ -62,6 +65,10 @@
+ #include "ui/display/screen.h"
+ #include "ui/events/event.h"
+ #include "ui/gfx/geometry/point.h"
++#include "ui/color/color_id.h"
++#include "ui/color/color_provider.h"
++#include "ui/gfx/canvas.h"
++#include "ui/gfx/skia_paint_util.h"
+ #include "ui/views/background.h"
+ #include "ui/views/controls/button/label_button.h"
+ #include "ui/views/controls/focus_ring.h"
+@@ -92,6 +99,45 @@
+      .light_ambient = 0.0,
+      .dark_key = 0.6,
+      .dark_ambient = 0.0});
++
++// aerographene: sidebar background of the mockups R-r01a: default = subtle
++// vertical gradient, pixelized = flat #111; 1px right border in the theme
++// line color (left when the strip is on the right). Opaque, no corners.
++class AerographeneSidebarBackground : public views::Background {
++ public:
++  explicit AerographeneSidebarBackground(
++      tabs::VerticalTabStripStateController* state_controller)
++      : state_controller_(state_controller) {}
++
++  // views::Background:
++  void Paint(gfx::Canvas* canvas, views::View* view) const override {
++    const ui::ColorProvider* const colors = view->GetColorProvider();
++    if (!colors) {
++      return;
++    }
++    const gfx::Rect bounds = view->GetLocalBounds();
++    cc::PaintFlags flags;
++    if (aerographene::GetBuiltinTheme() ==
++        aerographene::BuiltinTheme::kPixelized) {
++      flags.setColor(colors->GetColor(ui::kColorSysSurface));
++    } else {
++      flags.setShader(gfx::CreateGradientShader(
++          gfx::Point(0, 0), gfx::Point(0, bounds.height()),
++          SkColorSetRGB(0x08, 0x0E, 0x1C), SkColorSetRGB(0x05, 0x09, 0x12)));
++    }
++    canvas->DrawRect(bounds, flags);
++
++    cc::PaintFlags line;
++    line.setColor(colors->GetColor(kColorToolbarSeparator));
++    const int x = state_controller_->IsTabStripRightAligned()
++                      ? 0
++                      : bounds.width() - 1;
++    canvas->DrawRect(gfx::Rect(x, 0, 1, bounds.height()), line);
++  }
++
++ private:
++  const raw_ptr<tabs::VerticalTabStripStateController> state_controller_;
++};
+ }  // namespace
+ 
+ DEFINE_CLASS_CUSTOM_ELEMENT_EVENT_TYPE(VerticalTabStripRegionView,
+@@ -123,6 +169,14 @@
+                                    views::MinimumFlexSizeRule::kPreferred,
+                                    views::MaximumFlexSizeRule::kPreferred));
+ 
++  // aerographene: space row (profile name) above the pinned grid.
++  auto* const space_row = AddChildView(
++      std::make_unique<AerographeneSpaceRow>(browser_view->browser()));
++  space_row->SetProperty(
++      views::kMarginsKey,
++      gfx::Insets::TLBR(0, region_horizontal_padding, kBottomContainerGap,
++                        region_horizontal_padding));
++
+   bottom_button_container_ =
+       AddChildView(std::make_unique<VerticalTabStripBottomContainer>(
+           state_controller_, root_action_item, browser_view->browser(),
+@@ -169,10 +223,8 @@
+ 
+   GetViewAccessibility().SetRole(ax::mojom::Role::kTabList);
+ 
+-  SetBackground(std::make_unique<CustomCornersBackground>(
+-      *this, *browser_view,
+-      /*primary_color=*/CustomCornersBackground::FrameTheme(),
+-      /*corner_color=*/CustomCornersBackground::ToolbarTheme()));
++  SetBackground(
++      std::make_unique<AerographeneSidebarBackground>(state_controller_));
+ 
+   shadow_frame_ = AddChildView(std::make_unique<ShadowFrameView>(
+       kExpandOnHoverShadowElevation, kExpandOnHoverShadowAlpha));
+@@ -744,7 +796,8 @@
+ void VerticalTabStripRegionView::UpdateInteriorMargin() {
+   const int padding = GetLayoutConstant(
+       LayoutConstant::kVerticalTabStripUncollapsedVerticalPadding);
+-  flex_layout_->SetInteriorMargin(gfx::Insets::TLBR(0, 0, padding, 0));
++  // aerographene: 8px above the first row (mockup `.side` padding-top).
++  flex_layout_->SetInteriorMargin(gfx::Insets::TLBR(8, 0, padding, 0));
+ }
+ 
+ void VerticalTabStripRegionView::OnCollapseStateChanged(
+--- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
++++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
+@@ -14,6 +14,8 @@
+ #include "base/i18n/rtl.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "cc/paint/path_effect.h"
++#include "chrome/browser/ui/color/chrome_color_id.h"
+ #include "chrome/browser/ui/layout_constants.h"
+ #include "chrome/browser/ui/tabs/aerographene/pinned_model_factory.h"
+ #include "chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.h"
+@@ -29,6 +31,7 @@
+ #include "chrome/browser/ui/views/tabs/common/tab_strip_collection_controller.h"
+ #include "chrome/browser/ui/views/tabs/common/tab_view.h"
+ #include "chrome/grit/generated_resources.h"
++#include "components/vector_icons/vector_icons.h"
+ #include "ui/base/cursor/cursor.h"
+ #include "ui/base/cursor/mojom/cursor_type.mojom.h"
+ #include "ui/base/l10n/l10n_util.h"
+@@ -40,6 +43,7 @@
+ #include "ui/gfx/geometry/point_f.h"
+ #include "ui/gfx/geometry/rect.h"
+ #include "ui/gfx/geometry/rect_f.h"
++#include "ui/gfx/paint_vector_icon.h"
+ #include "ui/gfx/image/image.h"
+ #include "ui/gfx/image/image_skia.h"
+ #include "ui/menus/simple_menu_model.h"
+@@ -50,6 +54,7 @@
+ #include "ui/views/controls/scroll_view.h"
+ #include "ui/views/layout/delegating_layout_manager.h"
+ #include "ui/views/layout/layout_types.h"
++#include "ui/views/layout/layout_provider.h"
+ #include "ui/views/layout/proposed_layout.h"
+ #include "ui/views/view.h"
+ #include "ui/views/view_targeter.h"
+@@ -82,10 +87,12 @@
+   return model ? model->tab_mirror() : nullptr;
+ }
+ 
+-// Closed pinned placeholder look: dimmed favicon in an outlined cell.
+-constexpr uint8_t kClosedPinnedIconAlpha = 0x73;
+-constexpr SkAlpha kClosedPinnedOutlineAlpha = 0x40;
+-constexpr int kClosedPinnedCornerRadius = 8;
++// Closed pinned placeholder look (mockup proposal): the whole cell, favicon
++// and dashed 1px outline, at opacity .62.
++constexpr uint8_t kClosedPinnedIconAlpha = 0x9E;
++constexpr float kClosedPinnedDash = 3.0f;
++// Mockups R-r01a: the grid has 4 columns of 40x40 cells.
++constexpr int kPinnedGridColumns = 4;
+ constexpr int kClosedPinnedDotRadius = 3;
+ // Label of a placeholder spanning 2+ cells: favicon at the start, then text.
+ constexpr int kClosedPinnedTextPadding = 8;
+@@ -94,14 +101,16 @@
+ constexpr int kClosedPinnedRenameCommand = 1;
+ constexpr int kClosedPinnedFolderCommand = 2;
+ 
+-// Drawer folder row: chevron, folder glyph, then the folder label or title.
++// Drawer folder row (mockups): theme folder glyph, label, chevron at the end.
+ constexpr int kFolderRowPadding = 8;
+-constexpr int kFolderChevronSize = 8;
+-constexpr int kFolderIconWidth = 16;
+-constexpr int kFolderIconHeight = 12;
+-constexpr int kFolderIconTabWidth = 7;
+-constexpr int kFolderIconGap = 6;
+-constexpr float kFolderStrokeWidth = 1.5f;
++constexpr int kFolderIconSize = 16;
++constexpr int kFolderIconGap = 8;
++
++// Theme corner radius of grid cells (4 default, 0 pixelized).
++int GetCellRadius() {
++  const int radius = views::LayoutProvider::GetAerographeneControlRadius();
++  return radius >= 0 ? radius : 4;
++}
+ 
+ // Pinned entry label, or empty, for the live pinned `child`.
+ std::u16string GetPinnedLabel(const views::View* child) {
+@@ -188,7 +197,7 @@
+   gfx::Size CalculatePreferredSize(
+       const views::SizeBounds& available_size) const override {
+     return gfx::Size(GetLayoutConstant(LayoutConstant::kVerticalTabMinWidth),
+-                     GetLayoutConstant(LayoutConstant::kVerticalTabHeight));
++                     GetLayoutConstant(LayoutConstant::kVerticalTabPinnedHeight));
+   }
+ 
+   void PaintButtonContents(gfx::Canvas* canvas) override {
+@@ -199,14 +208,24 @@
+     const SkColor color = color_provider->GetColor(ui::kColorIcon);
+     const gfx::Rect bounds = GetLocalBounds();
+ 
++    // Cell: faint fill (hover color under the pointer), dashed theme line.
++    const SkColor line = color_provider->GetColor(kColorToolbarSeparator);
++    gfx::Rect outline_bounds = bounds;
++    outline_bounds.Inset(1);
++    if (GetState() == STATE_HOVERED || GetState() == STATE_PRESSED) {
++      cc::PaintFlags fill;
++      fill.setAntiAlias(true);
++      fill.setColor(color_provider->GetColor(kColorToolbarInkDropHover));
++      canvas->DrawRoundRect(outline_bounds, GetCellRadius(), fill);
++    }
+     cc::PaintFlags outline;
+     outline.setAntiAlias(true);
+     outline.setStyle(cc::PaintFlags::kStroke_Style);
+     outline.setStrokeWidth(1);
+-    outline.setColor(SkColorSetA(color, kClosedPinnedOutlineAlpha));
+-    gfx::Rect outline_bounds = bounds;
+-    outline_bounds.Inset(1);
+-    canvas->DrawRoundRect(outline_bounds, kClosedPinnedCornerRadius, outline);
++    outline.setColor(SkColorSetA(line, kClosedPinnedIconAlpha));
++    const float dashes[] = {kClosedPinnedDash, kClosedPinnedDash};
++    outline.setPathEffect(cc::PathEffect::MakeDash(dashes, 2, 0));
++    canvas->DrawRoundRect(outline_bounds, GetCellRadius(), outline);
+ 
+     // From 2 cells up the favicon moves to the start and the text follows.
+     const bool shows_text = span_ >= 2 && !text_.empty();
+@@ -348,61 +367,43 @@
+     if (!color_provider) {
+       return;
+     }
+-    const SkColor color = color_provider->GetColor(ui::kColorIcon);
+     const gfx::Rect bounds = GetLocalBounds();
+-    const float cy = bounds.y() + bounds.height() / 2.0f;
+-    auto point = [&](float logical_x, float y) {
+-      return gfx::PointF(base::i18n::IsRTL() ? bounds.width() - logical_x
+-                                             : logical_x,
+-                         y);
+-    };
+-
+-    cc::PaintFlags stroke;
+-    stroke.setAntiAlias(true);
+-    stroke.setStyle(cc::PaintFlags::kStroke_Style);
+-    stroke.setStrokeWidth(kFolderStrokeWidth);
+-    stroke.setColor(color);
+-
+-    // Chevron: pointing down when open, towards the text when closed.
+-    const float cx = bounds.x() + kFolderRowPadding + kFolderChevronSize / 2.0f;
+-    const float half = kFolderChevronSize / 2.0f;
+-    if (expanded_) {
+-      canvas->DrawLine(point(cx - half, cy - half / 2),
+-                       point(cx, cy + half / 2), stroke);
+-      canvas->DrawLine(point(cx, cy + half / 2),
+-                       point(cx + half, cy - half / 2), stroke);
+-    } else {
+-      canvas->DrawLine(point(cx - half / 2, cy - half),
+-                       point(cx + half / 2, cy), stroke);
+-      canvas->DrawLine(point(cx + half / 2, cy),
+-                       point(cx - half / 2, cy + half), stroke);
+-    }
+-
+-    // Folder glyph: a tab on top of an outlined body.
+-    const int icon_x =
+-        bounds.x() + kFolderRowPadding + kFolderChevronSize + kFolderIconGap;
+-    const int icon_y = bounds.y() + (bounds.height() - kFolderIconHeight) / 2;
+-    cc::PaintFlags fill;
+-    fill.setAntiAlias(true);
+-    fill.setColor(color);
+-    canvas->DrawRoundRect(GetMirroredRect(gfx::Rect(icon_x, icon_y,
+-                                                    kFolderIconTabWidth, 4)),
+-                          1, fill);
+-    canvas->DrawRoundRect(
+-        gfx::RectF(GetMirroredRect(gfx::Rect(icon_x, icon_y + 2,
+-                                             kFolderIconWidth,
+-                                             kFolderIconHeight - 2))),
+-        2, stroke);
++    const bool hovered =
++        GetState() == STATE_HOVERED || GetState() == STATE_PRESSED;
++
++    // Mockup `.row`: no box; hover color behind, folder glyph in the accent,
++    // label in the secondary text color, chevron at the end (right when
++    // closed, down when open). Glyphs come from the theme icon pack.
++    if (hovered) {
++      cc::PaintFlags fill;
++      fill.setAntiAlias(true);
++      fill.setColor(color_provider->GetColor(kColorToolbarInkDropHover));
++      canvas->DrawRoundRect(gfx::RectF(bounds), GetCellRadius(), fill);
++    }
++    const SkColor text_color = color_provider->GetColor(
++        hovered ? kColorTabForegroundActiveFrameActive
++                : kColorTabForegroundInactiveFrameActive);
++    const int icon_y = bounds.y() + (bounds.height() - kFolderIconSize) / 2;
++    const int icon_x = bounds.x() + kFolderRowPadding;
++    canvas->DrawImageInt(
++        gfx::CreateVectorIcon(vector_icons::kFolderFlippableIcon,
++                              kFolderIconSize,
++                              color_provider->GetColor(ui::kColorSysPrimary)),
++        GetMirroredXWithWidthInView(icon_x, kFolderIconSize), icon_y);
++    const int chevron_x = bounds.right() - kFolderRowPadding - kFolderIconSize;
++    canvas->DrawImageInt(
++        gfx::CreateVectorIcon(expanded_
++                                  ? vector_icons::kKeyboardArrowDownIcon
++                                  : vector_icons::kKeyboardArrowRightFlippableIcon,
++                              kFolderIconSize, text_color),
++        GetMirroredXWithWidthInView(chevron_x, kFolderIconSize), icon_y);
+ 
+-    const int text_x = icon_x + kFolderIconWidth + kFolderIconGap;
++    const int text_x = icon_x + kFolderIconSize + kFolderIconGap;
+     const gfx::Rect text_bounds(
+         text_x, bounds.y(),
+-        std::max(0, bounds.right() - kFolderRowPadding - text_x),
+-        bounds.height());
+-    canvas->DrawStringRect(
+-        text_, gfx::FontList(),
+-        color_provider->GetColor(ui::kColorLabelForeground),
+-        GetMirroredRect(text_bounds));
++        std::max(0, chevron_x - kFolderIconGap - text_x), bounds.height());
++    canvas->DrawStringRect(text_, gfx::FontList(), text_color,
++                           GetMirroredRect(text_bounds));
+   }
+ 
+  private:
+@@ -514,8 +515,9 @@
+                                                                         : 1.0f),
+       static_cast<float>(num_children));
+   const int min_height =
+-      base::ClampCeil(GetLayoutConstant(LayoutConstant::kVerticalTabHeight) *
+-                      min_rows) +
++      base::ClampCeil(
++          GetLayoutConstant(LayoutConstant::kVerticalTabPinnedHeight) *
++          min_rows) +
+       (num_children > 1 ? kTabPadding : 0);
+   return gfx::Size(GetLayoutConstant(LayoutConstant::kVerticalTabMinWidth),
+                    min_height);
+@@ -819,16 +821,13 @@
+                          std::floor((available_width - metrics.cell_width) /
+                                     (metrics.cell_width + kTabPadding)) +
+                          1));
++    // Mockups: at most 4 columns of fixed 40x40 cells (sidebar 240px).
++    metrics.max_cells = std::min(metrics.max_cells, kPinnedGridColumns);
+     metrics.cells_on_row = std::max(1, std::min(total_cells, metrics.max_cells));
+     // A folder row takes the whole width of the grid.
+     if (has_folder) {
+       metrics.cells_on_row = metrics.max_cells;
+     }
+-
+-    // Allocate extra space to the cells.
+-    available_width -= (metrics.cells_on_row * metrics.cell_width) +
+-                       (kTabPadding * (metrics.cells_on_row - 1));
+-    metrics.cell_width += std::floor(available_width / metrics.cells_on_row);
+   }
+   return metrics;
+ }
+@@ -858,11 +857,19 @@
+   for (size_t i = 0; i < children.size(); ++i) {
+     views::View* child = children[i];
+     // Folder rows span the whole row; drawers start and end on a new row.
+-    const int span =
+-        views::IsViewClass<AerographenePinnedFolderView>(child)
+-            ? cells_on_row
+-            : std::min(GetLayoutSpan(child), cells_on_row);
+-    const int span_width = span * child_width + (span - 1) * kTabPadding;
++    const bool is_folder = views::IsViewClass<AerographenePinnedFolderView>(child);
++    const int span = is_folder
++                         ? cells_on_row
++                         : std::min(GetLayoutSpan(child), cells_on_row);
++    int span_width = span * child_width + (span - 1) * kTabPadding;
++    if (is_folder && size_bounds.width().is_bounded()) {
++      // Mockup `.row`: folder rows take the whole width of the grid.
++      span_width = std::max(
++          span_width,
++          size_bounds.width().value() -
++              GetLayoutConstant(
++                  LayoutConstant::kVerticalTabStripHorizontalPadding));
++    }
+     gfx::Rect bounds =
+         gfx::Rect(child->GetPreferredSize(views::SizeBounds(span_width, {})));
+     bounds.set_width(span_width);
+--- a/chrome/browser/ui/views/tabs/common/tab_view.cc
++++ b/chrome/browser/ui/views/tabs/common/tab_view.cc
+@@ -9,6 +9,7 @@
+ 
+ #include "base/functional/callback_helpers.h"
+ #include "base/metrics/histogram_functions.h"
++#include "base/no_destructor.h"
+ #include "base/metrics/user_metrics.h"
+ #include "base/metrics/user_metrics_action.h"
+ #include "base/time/time.h"
+@@ -16,9 +17,11 @@
+ #include "chrome/browser/glic/browser_ui/tab_underline_controller.h"
+ #include "chrome/browser/glic/browser_ui/tab_underline_view.h"
+ #include "chrome/browser/glic/public/glic_enabling.h"
++#include "chrome/browser/themes/aerographene_theme.h"
+ #include "chrome/browser/themes/theme_properties.h"
+ #include "chrome/browser/ui/browser_element_identifiers.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/color/chrome_color_id.h"
+ #include "chrome/browser/ui/layout_constants.h"
+ #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
+ #include "chrome/browser/ui/tabs/alert/tab_alert_controller.h"
+@@ -60,6 +63,7 @@
+ #include "components/tabs/public/tab_alert.h"
+ #include "components/tabs/public/tab_collection_types.h"
+ #include "components/tabs/public/tab_interface.h"
++#include "third_party/skia/include/core/SkBitmap.h"
+ #include "third_party/skia/include/core/SkPath.h"
+ #include "third_party/skia/include/core/SkPathBuilder.h"
+ #include "third_party/skia/include/core/SkRRect.h"
+@@ -67,15 +71,20 @@
+ #include "ui/base/l10n/l10n_util.h"
+ #include "ui/base/metadata/metadata_impl_macros.h"
+ #include "ui/base/models/list_selection_model.h"
++#include "ui/color/color_provider.h"
++#include "ui/color/color_id.h"
+ #include "ui/base/theme_provider.h"
+ #include "ui/base/ui_base_features.h"
+ #include "ui/compositor/layer.h"
+ #include "ui/events/keycodes/keyboard_codes.h"
+ #include "ui/events/types/event_type.h"
+ #include "ui/gfx/geometry/insets.h"
++#include "ui/gfx/geometry/outsets.h"
+ #include "ui/gfx/geometry/rect.h"
+ #include "ui/gfx/geometry/rounded_corners_f.h"
+ #include "ui/gfx/geometry/size.h"
++#include "ui/gfx/image/image_skia.h"
++#include "ui/gfx/skia_paint_util.h"
+ #include "ui/gfx/geometry/skia_conversions.h"
+ #include "ui/views/accessibility/view_accessibility.h"
+ #include "ui/views/background.h"
+@@ -85,6 +94,7 @@
+ #include "ui/views/controls/highlight_path_generator.h"
+ #include "ui/views/controls/label.h"
+ #include "ui/views/layout/delegating_layout_manager.h"
++#include "ui/views/layout/layout_provider.h"
+ #include "ui/views/layout/layout_types.h"
+ #include "ui/views/layout/proposed_layout.h"
+ #include "ui/views/view.h"
+@@ -129,6 +139,160 @@
+   return gesture_detail;
+ }
+ 
++// aerographene: sidebar tab/pinned look of the mockups R-r01a (default and
++// pixelized). Painted with a few rects and one cached 96x32 bitmap; nothing is
++// allocated per frame.
++constexpr int kAeroIndicatorHeight = 2;
++constexpr int kAeroIndicatorInset = 8;
++constexpr int kAeroRampWidth = 96;
++constexpr int kAeroRampHeight = 32;
++constexpr int kAeroDotSize = 2;
++constexpr int kAeroMarkerSize = 6;
++constexpr int kAeroMarkerInset = 3;
++constexpr int kAeroChipPaddingH = 6;
++constexpr int kAeroChipPaddingV = 2;
++
++bool IsAeroPixelized() {
++  return aerographene::GetBuiltinTheme() ==
++         aerographene::BuiltinTheme::kPixelized;
++}
++
++int GetAeroRadius() {
++  const int radius = views::LayoutProvider::GetAerographeneControlRadius();
++  return radius >= 0 ? radius : 4;
++}
++
++// Bayer 4x4 ordered dither with 2px dots; density grows to the right (ramp
++// of assets/ramp-bayer-2.png). Drawn without filtering so it stays crisp.
++const gfx::ImageSkia& GetAeroRamp() {
++  static const base::NoDestructor<gfx::ImageSkia> ramp([] {
++    static constexpr uint8_t kBayer[4][4] = {
++        {0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
++    constexpr int kCols = kAeroRampWidth / kAeroDotSize;
++    SkBitmap bitmap;
++    bitmap.allocN32Pixels(kAeroRampWidth, kAeroRampHeight);
++    bitmap.eraseColor(SK_ColorTRANSPARENT);
++    for (int y = 0; y < kAeroRampHeight; ++y) {
++      for (int x = 0; x < kAeroRampWidth; ++x) {
++        const int cx = x / kAeroDotSize;
++        const int cy = y / kAeroDotSize;
++        const float density = (cx + 1.0f) / kCols;
++        const float threshold = (kBayer[cy & 3][cx & 3] + 0.5f) / 16.0f;
++        if (threshold < density) {
++          *bitmap.getAddr32(x, y) = SkColorSetRGB(0xF2, 0xF2, 0xF2);
++        }
++      }
++    }
++    return gfx::ImageSkia::CreateFrom1xBitmap(bitmap);
++  }());
++  return *ramp;
++}
++
++// Draws the background of a vertical (sidebar) tab: default = faint fill
++// (active: tenuous gradient, 1px outline on top and sides, 2px accent bar on
++// top; no bottom line), pixelized = black block with white outline, Bayer
++// ramp at the end and chips behind the name and the close button. Inactive
++// tabs have no fill; hover uses the theme hover color.
++void PaintAeroVerticalTab(gfx::Canvas* canvas,
++                          const TabView& tab,
++                          bool hovered) {
++  const ui::ColorProvider* const colors = tab.GetColorProvider();
++  if (!colors) {
++    return;
++  }
++  const bool pixelized = IsAeroPixelized();
++  const bool pinned = tab.pinned();
++  const bool active = tab.IsActive();
++  const gfx::Rect bounds = tab.GetLocalBounds();
++  const int radius = GetAeroRadius();
++  const SkColor line = colors->GetColor(kColorToolbarSeparator);
++  const SkColor accent = colors->GetColor(ui::kColorSysPrimary);
++
++  cc::PaintFlags flags;
++  flags.setAntiAlias(true);
++
++  if (pinned && !active) {
++    // Grid cell: faint fill (pixelized: surface), outline is the view border.
++    flags.setColor(pixelized ? colors->GetColor(ui::kColorSysSurface)
++                             : SkColorSetARGB(0x05, 0xFF, 0xFF, 0xFF));
++    canvas->DrawRoundRect(bounds, radius, flags);
++  }
++
++  if (active) {
++    if (pixelized) {
++      flags.setColor(colors->GetColor(ui::kColorFrameActive));
++      canvas->DrawRoundRect(bounds, radius, flags);
++      canvas->DrawImageInt(GetAeroRamp(), 0, 0, kAeroRampWidth,
++                           kAeroRampHeight,
++                           std::max(0, bounds.width() - kAeroRampWidth), 0,
++                           std::min(bounds.width(), kAeroRampWidth),
++                           kAeroRampHeight, /*filter=*/false);
++      // Chips: name and close button never sit on the texture.
++      flags.setColor(colors->GetColor(ui::kColorFrameActive));
++      for (const views::View* child : tab.children()) {
++        if (!child->GetVisible()) {
++          continue;
++        }
++        gfx::Rect chip;
++        if (const auto* label = views::AsViewClass<views::Label>(child)) {
++          chip = label->bounds();
++          chip.set_width(
++              std::min(chip.width(), label->GetPreferredSize().width()));
++          chip.Outset(gfx::Outsets::VH(kAeroChipPaddingV, kAeroChipPaddingH));
++        } else if (views::IsViewClass<TabCloseButton>(child)) {
++          chip = child->bounds();
++        } else {
++          continue;
++        }
++        chip.Intersect(bounds);
++        canvas->DrawRect(chip, flags);
++      }
++      cc::PaintFlags stroke;
++      stroke.setAntiAlias(true);
++      stroke.setStyle(cc::PaintFlags::kStroke_Style);
++      stroke.setStrokeWidth(1);
++      stroke.setColor(accent);
++      gfx::RectF outline(bounds);
++      outline.Inset(0.5f);
++      canvas->DrawRoundRect(outline, radius, stroke);
++    } else {
++      flags.setShader(gfx::CreateGradientShader(
++          gfx::Point(0, 0), gfx::Point(0, bounds.height()),
++          SkColorSetARGB(0x24, 0x6C, 0xB6, 0xFF),
++          SkColorSetARGB(0xC7, 0x0A, 0x10, 0x20)));
++      canvas->DrawRoundRect(bounds, radius, flags);
++      flags.setShader(nullptr);
++      // 1px outline on top and sides only.
++      flags.setColor(line);
++      canvas->DrawRect(gfx::Rect(0, 0, bounds.width(), 1), flags);
++      canvas->DrawRect(gfx::Rect(0, 0, 1, bounds.height()), flags);
++      canvas->DrawRect(
++          gfx::Rect(bounds.width() - 1, 0, 1, bounds.height()), flags);
++      // Accent bar on top, inset 8px.
++      flags.setColor(accent);
++      canvas->DrawRect(
++          gfx::Rect(kAeroIndicatorInset, 0,
++                    std::max(0, bounds.width() - 2 * kAeroIndicatorInset),
++                    kAeroIndicatorHeight),
++          flags);
++    }
++  } else if (hovered) {
++    flags.setColor(colors->GetColor(
++        pinned ? kColorToolbarInkDropHover
++               : kColorTabBackgroundInactiveHoverFrameActive));
++    canvas->DrawRoundRect(bounds, radius, flags);
++  }
++
++  if (pinned) {
++    // Live pinned marker: 6x6 accent square at the top right corner.
++    flags.setColor(accent);
++    canvas->DrawRoundRect(
++        gfx::Rect(bounds.width() - kAeroMarkerInset - kAeroMarkerSize,
++                  kAeroMarkerInset, kAeroMarkerSize, kAeroMarkerSize),
++        pixelized ? 0 : 1, flags);
++  }
++}
++
+ std::unique_ptr<TabView::LayoutManager> CreateTabViewLayout(
+     TabStripOrientation orientation) {
+   if (orientation == TabStripOrientation::kVertical) {
+@@ -749,7 +913,11 @@
+     return;
+   }
+ 
+-  tab_styling()->PaintTab(canvas);
++  if (orientation_ == TabStripOrientation::kVertical) {
++    PaintAeroVerticalTab(canvas, *this, hovered_);
++  } else {
++    tab_styling()->PaintTab(canvas);
++  }
+ 
+   views::View::OnPaint(canvas);
+ }
+@@ -1135,7 +1303,7 @@
+       SetBorder(views::CreateRoundedRectBorder(
+           GetLayoutConstant(LayoutConstant::kVerticalTabPinnedBorderThickness),
+           GetLayoutConstant(LayoutConstant::kVerticalTabCornerRadius),
+-          IsFrameActive() ? kColorVerticalTabPinnedOutline
++          IsFrameActive() ? kColorToolbarSeparator
+                           : kColorTabDividerFrameInactive));
+     }
+   } else if (GetBorder()) {
+--- a/chrome/browser/ui/views/tabs/common/tab_view_vertical_layout.cc
++++ b/chrome/browser/ui/views/tabs/common/tab_view_vertical_layout.cc
+@@ -193,7 +193,8 @@
+       return TabView().active_ && hovered_or_focused;
+     }
+ 
+-    return TabView().active_ || hovered_or_focused;
++    // aerographene: mockups show the close button on every tab.
++    return true;
+   }
+ 
+   NOTREACHED() << "Unknown tab child view";
+--- /dev/null
++++ b/chrome/browser/ui/views/tabs/vertical/aerographene_space_row.cc
+@@ -0,0 +1,125 @@
++// Copyright 2026 The Aerographene Authors
++// You can use, redistribute, and/or modify this source code under
++// the terms of the GPL-3.0 license that can be found in the LICENSE file.
++
++#include "chrome/browser/ui/views/tabs/vertical/aerographene_space_row.h"
++
++#include <algorithm>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "chrome/app/chrome_command_ids.h"
++#include "chrome/browser/browser_process.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/profiles/profile_attributes_entry.h"
++#include "chrome/browser/profiles/profile_attributes_storage.h"
++#include "chrome/browser/profiles/profile_manager.h"
++#include "chrome/browser/ui/browser_commands.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/color/chrome_color_id.h"
++#include "chrome/browser/ui/layout_constants.h"
++#include "components/vector_icons/vector_icons.h"
++#include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/color/color_id.h"
++#include "ui/color/color_provider.h"
++#include "ui/gfx/canvas.h"
++#include "ui/gfx/font_list.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/gfx/image/image_skia.h"
++#include "ui/gfx/paint_vector_icon.h"
++#include "ui/views/accessibility/view_accessibility.h"
++#include "ui/views/layout/layout_provider.h"
++
++namespace {
++
++constexpr int kPadding = 8;
++constexpr int kIconSize = 16;
++constexpr int kIconGap = 8;
++constexpr int kMinPaintWidth = 120;
++
++}  // namespace
++
++AerographeneSpaceRow::AerographeneSpaceRow(BrowserWindowInterface* browser)
++    : views::Button(base::BindRepeating(
++          [](BrowserWindowInterface* browser, const ui::Event&) {
++            chrome::ExecuteCommand(browser, IDC_SHOW_AVATAR_MENU);
++          },
++          browser)),
++      browser_(browser) {
++  SetVisible(false);
++}
++
++AerographeneSpaceRow::~AerographeneSpaceRow() = default;
++
++gfx::Size AerographeneSpaceRow::CalculatePreferredSize(
++    const views::SizeBounds& available_size) const {
++  // Width comes from the parent (cross-axis stretch).
++  return gfx::Size(0, GetLayoutConstant(LayoutConstant::kVerticalTabHeight));
++}
++
++void AerographeneSpaceRow::AddedToWidget() {
++  RefreshName();
++}
++
++void AerographeneSpaceRow::RefreshName() {
++  std::u16string name;
++  Profile* const profile = browser_ ? browser_->GetProfile() : nullptr;
++  if (profile && profile->IsRegularProfile() &&
++      g_browser_process->profile_manager()) {
++    if (ProfileAttributesEntry* entry =
++            g_browser_process->profile_manager()
++                ->GetProfileAttributesStorage()
++                .GetProfileAttributesWithPath(profile->GetPath())) {
++      name = entry->GetName();
++    }
++  }
++  if (name == name_ && GetVisible() == !name.empty()) {
++    return;
++  }
++  name_ = std::move(name);
++  SetTooltipText(name_);
++  GetViewAccessibility().SetName(name_);
++  SetVisible(!name_.empty());
++  SchedulePaint();
++}
++
++void AerographeneSpaceRow::PaintButtonContents(gfx::Canvas* canvas) {
++  const ui::ColorProvider* const colors = GetColorProvider();
++  // Not drawn in the collapsed (narrow) strip.
++  if (!colors || name_.empty() || width() < kMinPaintWidth) {
++    return;
++  }
++  const gfx::Rect bounds = GetLocalBounds();
++  const bool hovered =
++      GetState() == STATE_HOVERED || GetState() == STATE_PRESSED;
++  if (hovered) {
++    const int radius = views::LayoutProvider::GetAerographeneControlRadius();
++    cc::PaintFlags fill;
++    fill.setAntiAlias(true);
++    fill.setColor(colors->GetColor(kColorToolbarInkDropHover));
++    canvas->DrawRoundRect(bounds, radius >= 0 ? radius : 4, fill);
++  }
++  const SkColor text_color = colors->GetColor(
++      hovered ? kColorTabForegroundActiveFrameActive
++              : kColorTabForegroundInactiveFrameActive);
++  const int icon_y = bounds.y() + (bounds.height() - kIconSize) / 2;
++  const int icon_x = bounds.x() + kPadding;
++  canvas->DrawImageInt(
++      gfx::CreateVectorIcon(vector_icons::kFolderFlippableIcon, kIconSize,
++                            colors->GetColor(ui::kColorSysPrimary)),
++      GetMirroredXWithWidthInView(icon_x, kIconSize), icon_y);
++  const int chevron_x = bounds.right() - kPadding - kIconSize;
++  canvas->DrawImageInt(
++      gfx::CreateVectorIcon(vector_icons::kKeyboardArrowDownIcon, kIconSize,
++                            text_color),
++      GetMirroredXWithWidthInView(chevron_x, kIconSize), icon_y);
++  const int text_x = icon_x + kIconSize + kIconGap;
++  canvas->DrawStringRect(
++      name_, gfx::FontList(), text_color,
++      GetMirroredRect(gfx::Rect(text_x, bounds.y(),
++                                std::max(0, chevron_x - kIconGap - text_x),
++                                bounds.height())));
++}
++
++BEGIN_METADATA(AerographeneSpaceRow)
++END_METADATA
+--- /dev/null
++++ b/chrome/browser/ui/views/tabs/vertical/aerographene_space_row.h
+@@ -0,0 +1,43 @@
++// Copyright 2026 The Aerographene Authors
++// You can use, redistribute, and/or modify this source code under
++// the terms of the GPL-3.0 license that can be found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_TABS_VERTICAL_AEROGRAPHENE_SPACE_ROW_H_
++#define CHROME_BROWSER_UI_VIEWS_TABS_VERTICAL_AEROGRAPHENE_SPACE_ROW_H_
++
++#include <string>
++
++#include "base/memory/raw_ptr.h"
++#include "ui/base/metadata/metadata_header_macros.h"
++#include "ui/views/controls/button/button.h"
++
++class BrowserWindowInterface;
++
++// aerographene: space row at the top of the sidebar (mockup R-r01a, ADR 0005:
++// a space is a profile). Folder glyph of the theme, profile name, chevron
++// down; no box, 32 px. Hidden when the profile has no name (guest,
++// incognito). Click opens the avatar (profile) menu. The name is read when
++// the view is added to a widget, not observed.
++class AerographeneSpaceRow : public views::Button {
++  METADATA_HEADER(AerographeneSpaceRow, views::Button)
++
++ public:
++  explicit AerographeneSpaceRow(BrowserWindowInterface* browser);
++  AerographeneSpaceRow(const AerographeneSpaceRow&) = delete;
++  AerographeneSpaceRow& operator=(const AerographeneSpaceRow&) = delete;
++  ~AerographeneSpaceRow() override;
++
++  // views::Button:
++  gfx::Size CalculatePreferredSize(
++      const views::SizeBounds& available_size) const override;
++  void AddedToWidget() override;
++  void PaintButtonContents(gfx::Canvas* canvas) override;
++
++ private:
++  void RefreshName();
++
++  const raw_ptr<BrowserWindowInterface> browser_;
++  std::u16string name_;
++};
++
++#endif  // CHROME_BROWSER_UI_VIEWS_TABS_VERTICAL_AEROGRAPHENE_SPACE_ROW_H_
+--- a/chrome/browser/ui/views/tabs/vertical/BUILD.gn
++++ b/chrome/browser/ui/views/tabs/vertical/BUILD.gn
+@@ -7,6 +7,7 @@
+ 
+ source_set("vertical") {
+   sources = [
++    "aerographene_space_row.h",
+     "top_container_button.h",
+     "vertical_new_tab_button.h",
+     "vertical_tab_strip_bottom_container.h",
+@@ -38,6 +39,7 @@
+ 
+ source_set("impl") {
+   sources = [
++    "aerographene_space_row.cc",
+     "top_container_button.cc",
+     "vertical_new_tab_button.cc",
+     "vertical_tab_strip_bottom_container.cc",
+@@ -51,10 +53,12 @@
+   deps = [
+     "//chrome/app:command_ids",
+     "//chrome/app/vector_icons",
++    "//chrome/browser:browser_process",
+     "//chrome/browser:primitives",
+     "//chrome/browser/glic",
+     "//chrome/browser/glic/browser_ui:glow",
+     "//chrome/browser/glic/browser_ui:glow_controller",
++    "//chrome/browser/profiles:profile",
+     "//chrome/browser/themes",
+     "//chrome/browser/ui:browser_element_identifiers",
+     "//chrome/browser/ui:layout_constants",
+--- a/chrome/browser/ui/views/tabs/vertical/vertical_new_tab_button.cc
++++ b/chrome/browser/ui/views/tabs/vertical/vertical_new_tab_button.cc
+@@ -24,7 +24,8 @@
+           GetLayoutConstant(LayoutConstant::kVerticalTabStripNewTabButtonSize),
+           kIconSize) {
+   SetCornerRadius(GetLayoutConstant(LayoutConstant::kVerticalTabCornerRadius));
+-  SetForegroundColorId(kColorToolbarButtonIconDisabled);
++  // aerographene: row in the secondary text color (mockup `.row`), not dimmed.
++  SetForegroundColorId(kColorTabForegroundInactiveFrameActive);
+   SetHorizontalAlignment(gfx::HorizontalAlignment::ALIGN_LEFT);
+   SetLabelInsets(gfx::Insets::VH(kBasePadding, kBigPadding),
+                  gfx::Insets::VH(kBasePadding, kBigPadding));
+--- a/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.cc
++++ b/chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.cc
+@@ -10,7 +10,10 @@
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h"
+ #include "chrome/browser/ui/views/tabs/vertical/vertical_new_tab_button.h"
++#include "chrome/browser/ui/color/chrome_color_id.h"
+ #include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/gfx/geometry/insets.h"
++#include "ui/views/border.h"
+ #include "ui/views/view_class_properties.h"
+ 
+ VerticalTabStripBottomContainer::VerticalTabStripBottomContainer(
+@@ -36,6 +39,16 @@
+ 
+   new_tab_button_ = AddChildView(std::move(new_tab_button));
+ 
++  // aerographene: divider between pinned/folders and the tab list (mockup
++  // `.div`: 1px line color, 10px above and below).
++  constexpr int kDividerMargin = 10;
++  SetBorder(views::CreatePaddedBorder(
++      views::CreateSolidSidedBorder(gfx::Insets::TLBR(1, 0, 0, 0),
++                                    kColorToolbarSeparator),
++      gfx::Insets::TLBR(kDividerMargin, 0, 0, 0)));
++  new_tab_button_->SetProperty(
++      views::kMarginsKey, gfx::Insets::TLBR(kDividerMargin, 0, 0, 0));
++
+   OnCollapseStateChanged(state_controller->GetCollapseState());
+   collapsed_state_change_subscription_ =
+       state_controller->RegisterOnCollapseChanged(base::BindRepeating(
