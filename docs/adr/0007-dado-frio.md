@@ -14,7 +14,14 @@ Histórico, favicons, registros de downloads e sessões antigas sem uso há mais
 
 Cada fatia compila `components/history` e roda os `history_unittests` afetados no runner antes de build completa. Medição: harness com perfil envelhecido e frio ativo; regra de 2% contra o Helium.
 
-## Decisões pendentes do dono
+## Decisões do dono (11/10/2026)
+
+- omnibox não sugere dado frio.
+- "limpar histórico" apaga também o frio.
+- sem reidratação do histórico: a visita nova cria linha quente; o frio só recebe dado com mais de 45 dias.
+- teto de disco: pendente (ver discussão de compressão forte e teto de 1 GB).
+
+## Decisões pendentes do dono (texto original)
 
 - omnibox sugere dado frio? Proposta: não na v1.0 (startup e memória).
 - "limpar histórico" apaga também o frio? Proposta: sim (privacidade).
