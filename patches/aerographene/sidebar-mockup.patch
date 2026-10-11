@@ -14,8 +14,11 @@ raio do tema (LayoutProvider::GetAerographeneControlRadius; 4 default, 0
 pixelized). Fundo da sidebar (VerticalTabStripRegionView): gradiente
 #080e1c->#050912 no default, #111 chapado no pixelized, borda de 1 px na cor
 "separator" do tema à direita (esquerda com a sidebar à direita), 8 px de
-margem no topo. Substitui o CustomCornersBackground (sem cantos e sem imagem
-de tema personalizado).
+margem no topo. Pintado em VerticalTabStripRegionView::OnPaintBackground (sem
+cantos e sem imagem de tema personalizado); o CustomCornersBackground original
+fica no lugar, oculto (SetVisible(false)), porque
+BrowserViewTabbedLayoutImpl::DoPostLayoutVisualAdjustments dá CHECK nele
+(trocá-lo abortava o navegador na partida com a sidebar vertical).
 (2) Grade de pinned: colunas de 40 px fixas, no máximo 4 (sem esticar as
 células); contorno 1 px na cor do tema (borda do TabView pinned) e fundo
 rgba(255,255,255,.02) / #111; marcador vivo 6x6 accent a 3 px do canto
@@ -175,11 +178,7 @@ mexido: células de 40 px não cabem nele).
    bottom_button_container_ =
        AddChildView(std::make_unique<VerticalTabStripBottomContainer>(
            state_controller_, root_action_item, browser_view->browser(),
-@@ -169,10 +223,15 @@
- 
-   GetViewAccessibility().SetRole(ax::mojom::Role::kTabList);
- 
-   SetBackground(std::make_unique<CustomCornersBackground>(
+@@ -173,6 +227,11 @@
        *this, *browser_view,
        /*primary_color=*/CustomCornersBackground::FrameTheme(),
        /*corner_color=*/CustomCornersBackground::ToolbarTheme()));
@@ -191,7 +190,7 @@ mexido: células de 40 px não cabem nele).
  
    shadow_frame_ = AddChildView(std::make_unique<ShadowFrameView>(
        kExpandOnHoverShadowElevation, kExpandOnHoverShadowAlpha));
-@@ -744,7 +796,14 @@
+@@ -744,8 +796,15 @@
  void VerticalTabStripRegionView::UpdateInteriorMargin() {
    const int padding = GetLayoutConstant(
        LayoutConstant::kVerticalTabStripUncollapsedVerticalPadding);
@@ -207,6 +206,7 @@ mexido: células de 40 px não cabem nele).
 +}
  
  void VerticalTabStripRegionView::OnCollapseStateChanged(
+     tabs::VerticalTabStripCollapseState state) {
 --- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
 +++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
 @@ -92,6 +92,7 @@
