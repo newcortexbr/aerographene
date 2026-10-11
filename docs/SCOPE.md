@@ -2,7 +2,7 @@
 
 Estado: fechado no grilling de 04/10/2026; aguardando confirmação do dono para começar a implementação. Glossário em `../CONTEXT.md`; decisões em `adr/`.
 
-## v1.0.0 (Linux, x86-64-v3)
+## v0.1 (Linux, x86-64-v3)
 
 Ordem de construção:
 
@@ -32,14 +32,14 @@ Regra de desempenho: nenhuma mudança piora mais de 2% a linha de base; uma muda
 
 ## depois
 
-- v1.1: reescrita das páginas internas (histórico, configurações, segurança); dado frio do storage de sites, com reidratação na navegação, exceções de frio e cookies nunca frios.
-- v1.2: Windows 11 e build v2+AVX para a Ivy Bridge.
-- sync: Google Sync com chaves próprias (ADR 0006), depois da v1.2; antes, testar o login sobre o ungoogled.
+- v0.2: teste de uso real de spaces, command bar, peek e split view; reescrita das páginas internas (histórico, configurações, segurança); dado frio do storage de sites, com reidratação na navegação, exceções de frio e cookies nunca frios.
+- v0.3: Windows 11 e build v2+AVX para a Ivy Bridge.
+- sync: Google Sync com chaves próprias (ADR 0006), depois da v0.3; antes, testar o login sobre o ungoogled.
 - fora: boosts (usar Stylus), anti-fingerprinting `noise/*`, zen-mode.
 
 ## decisões do dono (11/10/2026)
 
-- item 8: os temas da v1.0 são o default e o pixelized (substituem nebula e high-contrast). Meta objetiva: seguir exatamente os mockups em `theming/1/design-language/` (default e pixelized).
+- item 8: os temas da v0.1 são o default e o pixelized (substituem nebula e high-contrast). Meta objetiva: seguir exatamente os mockups em `theming/1/design-language/` (default e pixelized).
 - item 11: uBlock sempre ligado por padrão. Ícone da extensão acompanha o pacote de ícones do tema ativo.
 - teste de uso real de spaces, command bar, peek e split view fica para a transição v0.1 → v0.2.
 
