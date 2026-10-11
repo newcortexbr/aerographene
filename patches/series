@@ -79,3 +79,4 @@ aerographene/perf-pinned-batch.patch
 aerographene/perf-pinned-reopen-deferred.patch
 aerographene/perf-startup-layout.patch
 aerographene/perf-pinned-small.patch
+aerographene/pinned-startup-dedupe.patch
