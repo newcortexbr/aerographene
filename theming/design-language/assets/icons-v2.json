@@ -15,6 +15,7 @@
   "i-close": "<path d=\"M3.5 3.5l9 9M12.5 3.5l-9 9\"/>",
   "i-min": "<path d=\"M3 12h10\"/>",
   "i-max": "<path d=\"M3 3h10v10H3z\"/>",
+  "i-restore": "<path d=\"M3 6h7v7H3zM6 6V3h7v7h-3\"/>",
   "i-win": "<path d=\"M2 3.5h12v9H2zM2 6.5h12\"/>",
   "i-minus": "<path d=\"M3 8h10\"/>",
   "i-chev": "<path d=\"M4 6l4 4 4-4\"/>",
