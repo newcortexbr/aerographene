@@ -89,6 +89,7 @@ aerographene/cold-data-history-ui.patch
 aerographene/theme-builtin.patch
 aerographene/theme-radius.patch
 aerographene/theme-font.patch
+aerographene/theme-scheme.patch
 aerographene/theme-icons-infra.patch
 aerographene/theme-icons-default.patch
 aerographene/theme-icons-pixelized.patch
