@@ -67,3 +67,12 @@ Ordem intercalada: uma chamada do harness por navegador por volta, ordem inverti
 - warm contra o Helium encosta na regra fixa de 10% (meta 2%), mas o IQR do Helium foi 90,5 ms (aero 29,5) e a rodada de 83dde84 (mesmo dia, bateria) deu -4,1%: tratar como sinal a investigar, não regressão confirmada.
 - layout vertical (`helium.browser.layout` = 2), warm, aero vs Helium, 8 repetições intercaladas: 488,9 vs 480,4 ms, +1,8% (pareada +1,5%); sem crash. Layout confirmado por captura nos dois (`bench/out/vertical/confirm-*.png`). Medição com script próprio que importa o harness; dados em `bench/out/vertical/results-20261010-122653.jsonl`.
 - confirmação do warm (10/10, 13:52–14:04, mesmas condições, só aero e Helium, 10 voltas intercaladas, n=20 cada): aero 489,4 ms (IQR 35,5) vs Helium 485,1 ms (IQR 89,7), +0,9% (pareada +1,0%; aero abaixo em 3 de 10 voltas). Combinada com a rodada acima (n=32 cada): +3,5%. O +10% não se reproduziu; a dispersão vem do Helium. Sem regressão acima da regra fixa de 10%; contra a meta de 2% o resultado é inconclusivo. Dados: `/tmp/bench7w.manifest` aponta os `bench/out/results-20261010-135*`/`-140*.jsonl`.
+
+## pinned no startup (11/10/2026, Comet Lake na tomada, perfil performance, load1 < 1,0)
+
+Perfil com 6 pinned (3 `open=1`, 3 fechadas, span 2, gaveta), mesmo modelo para os dois pacotes (`pinned_tabs` zerado), 12 voltas intercaladas. Script e dados em `bench/out/qa-defer/` (fora do git).
+
+- 1fa0bdf (reabrir pinned de fundo adiado, `perf-pinned-reopen-deferred`) vs 4abf68a: tempo até a pinned ativa ter título 561,6 vs 597,5 ms, pareada -5,8% (12/12 voltas a favor); PSS aos 5 s 405,4 vs 419,4 MiB, pareada -5,7%; 10 vs 12 processos.
+- 783ee4d (`perf-pinned-nocopy`) vs 859390d em perfil limpo (n=12, bateria): nenhuma métrica pior que 2% com evidência; abertura warm +0,8% dentro do ruído.
+- `perf-pinned-batch` (4abf68a): neutro no comportamento; a aparente diferença de 10 s vinha de perfis-modelo diferentes (pref `pinned_tabs`) e de timeout do script, não do patch.
+- comportamento: no startup só a pinned ativa carrega; as de fundo carregam ao ativar (~30 ms até o request), como o `AddDeferredPinnedStartupTab` do Helium.
