@@ -284,4 +284,6 @@ Favicons: `CopyToCold` copia, com a linha de `urls`, os mapeamentos e bitmaps do
 
 Downloads: `ColdHistoryDatabase` herda `DownloadDatabase` (mesmo schema). `HistoryBackend::QueryDownloads`, antes do `DownloadHistory`, move para o frio downloads não em andamento cujo maior entre início, fim e último acesso passou do prazo de frio; o frio só abre se há o que mover; uma vez por sessão (no início). Id ocupado no frio por outro guid (o quente reusa ids) renumera a linha fria. "Limpar histórico" por intervalo apaga downloads frios iniciados no intervalo; tudo apaga o arquivo. Limites: "limpar downloads" sozinho não alcança o frio; downloads frios não aparecem em `chrome://downloads`. Desligado com `keep-old-history`. Depende de `cold-data-history-ui`.
 
+Verificação (11/10/2026, árvore do cezanne com a série até `cold-data-history-ui`): dry-run `--fuzz=0` limpo; compilação por objeto no `aerographene-builder:v2`: `cold_history_database.o`, `expire_history_backend.o`, `history_backend.o` sem erro; árvore restaurada (md5 conferido) e fontes tocadas para recompilar. Link, unit tests e comportamento em runtime não testados.
+
 Sessões (fatia 8): sem código. `CommandStorageBackend` mantém só o arquivo atual e o último por tipo (`DeleteLastSessionFiles`, `MoveCurrentSessionToLastSession`), então não há sessão antiga a esfriar.
