@@ -1,0 +1,354 @@
+aerographene: infraestrutura de temas de ícone (troca de VectorIcon por ponteiro).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: gfx::SetVectorIconOverrides(flat_map<const VectorIcon*, const
+VectorIcon*>) em ui/gfx; CreateVectorIcon(IconDescription) e PaintVectorIcon
+trocam o ícone (e o badge) antes do cache. Comando novo CAP_BUTT (traço com
+ponta reta; o join padrão do Skia já é miter, limite 4 como no SVG). Alvo
+novo chrome/browser/ui/aerographene_theme_icons (aggregate_vector_icons +
+mapa por tema, vazio aqui) e chamada no PostProfileInit do perfil inicial
+lendo a pref de perfil "aerographene.theme" pelo nome (theme-builtin).
+Mapa vazio = ponteiro nulo = ícones upstream, sem lookup.
+
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/BUILD.gn
+@@ -0,0 +1,35 @@
++# Copyright 2026 The aerographene Authors
++# Use of this source code is governed by the GPL-3.0 license.
++
++import("//components/vector_icons/vector_icons.gni")
++
++# Ícones dos temas do aerographene. Os .icon são gerados por
++# theming/design-language/gen_theme_icons.py (repositório aerographene).
++aggregate_vector_icons("aerographene_theme_vector_icons") {
++  icon_directory = "."
++
++  sources = [
++    # aerographene: theme-icons-default
++    # aerographene: theme-icons-pixelized
++    # aerographene: theme-icon-ublock
++  ]
++}
++
++source_set("aerographene_theme_icons") {
++  sources = [
++    "aerographene_theme_icons.cc",
++    "aerographene_theme_icons.h",
++  ] + get_target_outputs(":aerographene_theme_vector_icons")
++
++  deps = [
++    ":aerographene_theme_vector_icons",
++    "//base",
++    "//chrome/app/vector_icons",
++    "//components/omnibox/browser:vector_icons",
++    "//components/vector_icons",
++    "//skia",
++    "//ui/gfx",
++    "//ui/views",
++    "//ui/views/window/vector_icons",
++  ]
++}
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/aerographene_theme_icons.cc
+@@ -0,0 +1,52 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "chrome/browser/ui/aerographene_theme_icons/aerographene_theme_icons.h"
++
++#include "base/no_destructor.h"
++#include "chrome/app/vector_icons/vector_icons.h"
++#include "chrome/browser/ui/aerographene_theme_icons/vector_icons.h"
++#include "components/omnibox/browser/vector_icons.h"
++#include "components/vector_icons/vector_icons.h"
++#include "ui/gfx/paint_vector_icon.h"
++#include "ui/gfx/vector_icon_types.h"
++#include "ui/views/vector_icons.h"
++#include "ui/views/window/vector_icons/vector_icons.h"
++
++namespace aerographene_theme_icons {
++
++namespace {
++
++Theme g_theme = Theme::kDefault;
++
++// Mapas id da tabela -> ícone do tema, gerados por
++// theming/design-language/gen_theme_icons.py (modo "map").
++void AddDefaultIcons(gfx::VectorIconOverrideMap* map) {
++  // aerographene: theme-icons-default
++}
++
++void AddPixelizedIcons(gfx::VectorIconOverrideMap* map) {
++  // aerographene: theme-icons-pixelized
++}
++
++}  // namespace
++
++void ApplyTheme(std::string_view theme) {
++  g_theme = theme == "pixelized" ? Theme::kPixelized : Theme::kDefault;
++
++  static base::NoDestructor<gfx::VectorIconOverrideMap> map;
++  map->clear();
++  if (g_theme == Theme::kPixelized) {
++    AddPixelizedIcons(map.get());
++  } else {
++    AddDefaultIcons(map.get());
++  }
++  // Mapa vazio = ícones upstream, sem custo de lookup.
++  gfx::SetVectorIconOverrides(map->empty() ? nullptr : map.get());
++}
++
++Theme GetActiveTheme() {
++  return g_theme;
++}
++
++}  // namespace aerographene_theme_icons
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/aerographene_theme_icons.h
+@@ -0,0 +1,23 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#ifndef CHROME_BROWSER_UI_AEROGRAPHENE_THEME_ICONS_AEROGRAPHENE_THEME_ICONS_H_
++#define CHROME_BROWSER_UI_AEROGRAPHENE_THEME_ICONS_AEROGRAPHENE_THEME_ICONS_H_
++
++#include <string_view>
++
++namespace aerographene_theme_icons {
++
++enum class Theme { kDefault, kPixelized };
++
++// Instala em ui/gfx (gfx::SetVectorIconOverrides) o mapa de troca de ícones
++// do tema |theme| ("default" | "pixelized"; outro valor = default). Chamado
++// uma vez no startup com o valor da pref "aerographene.theme"; trocar de tema
++// exige reiniciar.
++void ApplyTheme(std::string_view theme);
++
++Theme GetActiveTheme();
++
++}  // namespace aerographene_theme_icons
++
++#endif  // CHROME_BROWSER_UI_AEROGRAPHENE_THEME_ICONS_AEROGRAPHENE_THEME_ICONS_H_
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/vector_icons.cc.template
+@@ -0,0 +1,19 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++// vector_icons.cc.template is used to generate vector_icons.cc. Edit the former
++// rather than the latter.
++
++#include "chrome/browser/ui/aerographene_theme_icons/vector_icons.h"
++
++#include "components/vector_icons/cc_macros.h"
++#include "ui/gfx/vector_icon_types.h"
++
++#define DECLARE_VECTOR_COMMAND(x) using gfx::x;
++DECLARE_VECTOR_COMMANDS
++
++namespace aerographene_theme_icons {
++
++TEMPLATE_PLACEHOLDER
++
++}  // namespace aerographene_theme_icons
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/vector_icons.h.template
+@@ -0,0 +1,25 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++// vector_icons.h.template is used to generate vector_icons.h. Edit the former
++// rather than the latter.
++
++#ifndef CHROME_BROWSER_UI_AEROGRAPHENE_THEME_ICONS_VECTOR_ICONS_H_
++#define CHROME_BROWSER_UI_AEROGRAPHENE_THEME_ICONS_VECTOR_ICONS_H_
++
++namespace gfx {
++struct VectorIcon;
++}
++
++#define VECTOR_ICON_TEMPLATE_H(icon_name) \
++extern const gfx::VectorIcon icon_name;
++
++namespace aerographene_theme_icons {
++
++TEMPLATE_PLACEHOLDER
++
++}  // namespace aerographene_theme_icons
++
++#undef VECTOR_ICON_TEMPLATE_H
++
++#endif  // CHROME_BROWSER_UI_AEROGRAPHENE_THEME_ICONS_VECTOR_ICONS_H_
+--- a/chrome/browser/ui/views/BUILD.gn
++++ b/chrome/browser/ui/views/BUILD.gn
+@@ -1138,6 +1138,8 @@ source_set("chrome_browser_main_extra_parts_views") {
+     ":chrome_constrained_window_views_client",
+     ":chrome_views_delegate",
+     ":layout_provider",
++    "//chrome/browser/ui/aerographene_theme_icons",
++    "//components/prefs",
+     "//build:branding_buildflags",
+     "//chrome/app:generated_resources",
+     "//chrome/browser:browser_process",
+--- a/chrome/browser/ui/views/chrome_browser_main_extra_parts_views.cc
++++ b/chrome/browser/ui/views/chrome_browser_main_extra_parts_views.cc
+@@ -4,6 +4,7 @@
+ 
+ #include "chrome/browser/ui/views/chrome_browser_main_extra_parts_views.h"
+ 
++#include <string>
+ #include <utility>
+ 
+ #include "base/command_line.h"
+@@ -15,6 +16,7 @@
+ #include "chrome/browser/bookmarks/bookmark_merged_surface_service.h"
+ #include "chrome/browser/bookmarks/bookmark_merged_surface_service_factory.h"
+ #include "chrome/browser/browser_process.h"
++#include "chrome/browser/ui/aerographene_theme_icons/aerographene_theme_icons.h"
+ #include "chrome/browser/net/system_network_context_manager.h"
+ #include "chrome/browser/ui/infobars/browser_infobar_registry.h"
+ #include "chrome/browser/ui/views/bookmarks/bookmark_account_storage_move_dialog.h"
+@@ -27,6 +29,7 @@
+ #include "chrome/grit/generated_resources.h"
+ #include "components/constrained_window/constrained_window_views.h"
+ #include "components/infobars/core/infobar_delegate.h"
++#include "components/prefs/pref_service.h"
+ #include "components/media_router/browser/media_router_dialog_controller.h"
+ #include "components/strings/grit/components_strings.h"
+ #include "components/ui_devtools/devtools_server.h"
+@@ -179,6 +182,22 @@ void ChromeBrowserMainExtraPartsViews::PreProfileInit() {
+ void ChromeBrowserMainExtraPartsViews::PostProfileInit(
+     Profile* profile,
+     bool is_initial_profile) {
++  if (is_initial_profile) {
++    // aerographene: tema de ícones. A pref "aerographene.theme" é registrada
++    // pelo patch theme-builtin; aqui só é lida pelo nome, no local state ou,
++    // se não estiver registrada lá, nas prefs do perfil. Ausente = default.
++    std::string icon_theme;
++    for (PrefService* prefs :
++         {g_browser_process->local_state(), profile->GetPrefs()}) {
++      const PrefService::Preference* pref =
++          prefs ? prefs->FindPreference("aerographene.theme") : nullptr;
++      if (pref && pref->GetValue()->is_string()) {
++        icon_theme = pref->GetValue()->GetString();
++        break;
++      }
++    }
++    aerographene_theme_icons::ApplyTheme(icon_theme);
++  }
+   auto* service = BookmarkMergedSurfaceServiceFactory::GetForProfile(profile);
+   if (service) {
+     service->SetShowMoveStorageDialogCallback(base::BindRepeating(
+--- a/ui/gfx/paint_vector_icon.cc
++++ b/ui/gfx/paint_vector_icon.cc
+@@ -189,6 +189,10 @@ void PaintPath(Canvas* canvas,
+         flags.setStrokeCap(cc::PaintFlags::kSquare_Cap);
+         break;
+ 
++      case CAP_BUTT:
++        flags.setStrokeCap(cc::PaintFlags::kButt_Cap);
++        break;
++
+       case MOVE_TO:
+         path.moveTo(arg(0), arg(1));
+         break;
+@@ -434,6 +438,17 @@ class VectorIconCache {
+ static base::LazyInstance<VectorIconCache>::DestructorAtExit g_icon_cache =
+     LAZY_INSTANCE_INITIALIZER;
+ 
++// aerographene: icon theme overrides, keyed by pointer. Null = upstream icons.
++const VectorIconOverrideMap* g_icon_overrides = nullptr;
++
++const VectorIcon& ResolveIcon(const VectorIcon& icon) {
++  if (!g_icon_overrides) {
++    return icon;
++  }
++  auto it = g_icon_overrides->find(&icon);
++  return it == g_icon_overrides->end() ? icon : *it->second;
++}
++
+ }  // namespace
+ 
+ IconDescription::IconDescription(const IconDescription& other) = default;
+@@ -457,9 +472,10 @@ void PaintVectorIcon(Canvas* canvas, const VectorIcon& icon, SkColor color) {
+ }
+ 
+ void PaintVectorIcon(Canvas* canvas,
+-                     const VectorIcon& icon,
++                     const VectorIcon& original_icon,
+                      int dip_size,
+                      SkColor color) {
++  const VectorIcon& icon = ResolveIcon(original_icon);
+   CHECK(!icon.is_empty());
+   for (const auto& rep : icon.reps) {
+     CHECK(!rep.path.empty());
+@@ -469,7 +485,20 @@ void PaintVectorIcon(Canvas* canvas,
+   PaintPath(canvas, rep->path, dip_size, color);
+ }
+ 
++void SetVectorIconOverrides(const VectorIconOverrideMap* map) {
++  g_icon_overrides = map;
++}
++
+ ImageSkia CreateVectorIcon(const IconDescription& params) {
++  if (g_icon_overrides) {
++    const VectorIcon& icon = ResolveIcon(*params.icon);
++    const VectorIcon& badge = ResolveIcon(*params.badge_icon);
++    if (&icon != &*params.icon || &badge != &*params.badge_icon) {
++      return CreateVectorIcon(
++          IconDescription(icon, params.dip_size, params.color, &badge));
++    }
++  }
++
+   if (params.icon->is_empty())
+     return ImageSkia();
+ 
+--- a/ui/gfx/paint_vector_icon.h
++++ b/ui/gfx/paint_vector_icon.h
+@@ -6,6 +6,7 @@
+ #define UI_GFX_PAINT_VECTOR_ICON_H_
+ 
+ #include "base/component_export.h"
++#include "base/containers/flat_map.h"
+ #include "base/memory/raw_ref.h"
+ #include "third_party/skia/include/core/SkColor.h"
+ #include "ui/gfx/color_palette.h"
+@@ -36,6 +37,15 @@ struct COMPONENT_EXPORT(GFX) IconDescription {
+   const raw_ref<const VectorIcon> badge_icon;
+ };
+ 
++// aerographene: replaces a VectorIcon by another one when painting or
++// rasterizing, keyed by pointer (no lookup by name). |map| must outlive every
++// later paint (process lifetime); set once on the UI thread at startup.
++// Passing null restores the upstream icons.
++using VectorIconOverrideMap =
++    base::flat_map<const VectorIcon*, const VectorIcon*>;
++COMPONENT_EXPORT(GFX)
++void SetVectorIconOverrides(const VectorIconOverrideMap* map);
++
+ // Draws a vector icon identified by |id| onto |canvas| at (0, 0). |color| is
+ // used as the fill. The size will come from the .icon file (the 1x version, if
+ // multiple versions exist).
+--- a/ui/gfx/vector_icon_types.h
++++ b/ui/gfx/vector_icon_types.h
+@@ -68,7 +68,9 @@ namespace gfx {
+   DECLARE_VECTOR_COMMAND(DISABLE_AA)                                           \
+   /* Flips the x-axis in RTL locales. Default is false, this command sets */   \
+   /* it to true. */                                                            \
+-  DECLARE_VECTOR_COMMAND(FLIPS_IN_RTL)
++  DECLARE_VECTOR_COMMAND(FLIPS_IN_RTL)                                         \
++  /* aerographene: sets the stroke cap to butt (default is round). */        \
++  DECLARE_VECTOR_COMMAND(CAP_BUTT)
+ 
+ #define DECLARE_VECTOR_COMMAND(x) x,
+ 
+--- a/ui/gfx/vector_icon_utils.cc
++++ b/ui/gfx/vector_icon_utils.cc
+@@ -69,6 +69,7 @@ int GetCommandArgumentCount(CommandType command) {
+     case CLOSE:
+     case DISABLE_AA:
+     case FLIPS_IN_RTL:
++    case CAP_BUTT:
+       return 0;
+   }
+ 
