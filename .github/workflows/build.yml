@@ -52,6 +52,8 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         if: ${{ (inputs.target || 'chrome') == 'chrome' }}
+        # cota de artefatos cheia não invalida a build; o pacote fica em dist/ no runner
+        continue-on-error: true
         with:
           name: aerographene-linux-x86_64
           path: ${{ steps.art.outputs.path }}
