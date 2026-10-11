@@ -87,3 +87,10 @@ Dados em `bench/out/qa-layout/bench/` (fora do git). Medianas; razão pareada po
 - 10 abas PSS (n=12): aero 719,1, Helium 728,4, ungoogled 655,2 MiB. Vs Helium -1,2%; vs ungoogled +9,6%.
 - trace de startup (n=5, b1a7fed vs 8f7d5fa): `perf-startup-layout` reduziu pouco as passadas de layout (LayoutImmediately 1611 vs 1687, ToolbarView 9 vs 10); o excesso contra o Helium (~1118) continua. Desligar o omnibox centralizado baixa para ~1481.
 - leitura: warm contra o Helium segue inconclusivo e oscila entre rodadas (-4%, +10%, +0,9%, +3,7%); o Helium tem dois modos (~410 e ~490 ms) e o aero fica quase sempre no superior. Entender o modo rápido é a próxima pista.
+
+## bimodal da abertura warm (11/10/2026)
+
+- causa observada (traces `bench/out/trace-startup/`, 14 de 14): a execução é lenta (~+80 ms) quando o renderer pede `/favicon.ico` antes do beacon `/ready`; o fetch do beacon fica ~80 ms parado antes de chegar ao serviço de rede. Pré-BrowserMain, GPU, renderer e DOMContentLoaded são iguais nos dois modos. Acontece igual em aero e Helium; não é do produto. Mecanismo interno no serviço de rede não identificado.
+- página com favicon `data:` não remove o bimodal (`bench/out/bimodal/`, 40 execuções); fração rápida 20–30% nos dois navegadores nessa rodada.
+- por modo, juntando os dados de 10 e 11/10 (pacotes e condições misturados, n=165 aero, 160 Helium): rápido 405,8 vs 405,0 ms; lento 490,9 vs 499,6 ms. A diferença nas medianas vem da proporção de execuções rápidas em cada rodada, não de abertura mais lenta.
+- consequência: com n=12 a mediana warm é loteria entre os modos. Comparar por modo ou com n>=30; o harness também não registra AC nesta máquina (`on_ac` procura `AC`/`ACAD`, a fonte é `ADP1`). Mudanças no harness ficam para o dono (`bench/harness.py` não é editado por agentes).
