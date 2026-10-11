@@ -1,0 +1,365 @@
+aerographene: pinned em lote e layout da grade sem consultar o modelo.
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: reduzir trabalho sem mudar comportamento visível.
+1) PinnedModel::ScopedBatch (contador aninhável): enquanto vivo,
+NotifyChanged() só marca sujo; o lote mais externo notifica
+OnPinnedChanged() uma vez ao terminar, se algo mudou. O modelo é atualizado
+na hora (AlignOrder e GetEntryForTab leem estado real); só os observers
+esperam. Usado em Associate() (SetOpen + Move do AlignOrder +
+NotifyTabMappingChanged: de até 3 para 1 notificação), AssociateAllPinnedTabs
+e no laço de AdoptStartupTabs (de ~3N para 1; termina antes de fechar a NTP).
+Cada notificação custava, por janela, RefreshClosedPinned (cópia da árvore,
+favicons, Update dos placeholders) e RefreshPersistedSpans.
+2) Layout da grade: GetGridChildren() uma vez por layout (GetGridMetrics
+recebe o resultado); spans de TabView lidos do valor guardado no TabView
+(pinned_span(), mantido por SetTabSpan, ViewHierarchyChanged e
+RefreshPersistedSpans) via GetLayoutSpan, em vez de factory + 2 Resolve +
+meta info por aba; mirror buscado uma vez por GetGridChildren.
+3) GetTopLevelIndex devolve -1 para pasta de topo que não é gaveta (não é
+entrada em GetPinned()).
+Arquivos: chrome/browser/ui/tabs/aerographene/pinned_model.{h,cc},
+pinned_model_unittest.cc (lote e pasta comum), pinned_tab_mirror.cc,
+views/tabs/common/pinned_tab_container_view.{h,cc}, tab_view.h.
+Depende de: perf-pinned-nocopy e todos os patches pinned (aplica por último).
+
+---
+diff -ruN a/chrome/browser/ui/tabs/aerographene/pinned_model.cc b/chrome/browser/ui/tabs/aerographene/pinned_model.cc
+--- a/chrome/browser/ui/tabs/aerographene/pinned_model.cc
++++ b/chrome/browser/ui/tabs/aerographene/pinned_model.cc
+@@ -6,6 +6,7 @@
+ #include <algorithm>
+ #include <utility>
+ 
++#include "base/check_op.h"
+ #include "base/functional/bind.h"
+ #include "base/location.h"
+ #include "base/strings/string_number_conversions.h"
+@@ -137,7 +138,8 @@ const GURL* PinnedModel::FindURL(const base::Uuid& uuid) const {
+ 
+ int PinnedModel::GetTopLevelIndex(const base::Uuid& uuid) const {
+   const BookmarkNode* node = Resolve(uuid);
+-  if (!node || node->parent() != root_) {
++  if (!node || node->parent() != root_ ||
++      !(node->is_url() || IsDrawer(node))) {
+     return -1;
+   }
+   int index = 0;
+@@ -497,7 +499,28 @@ const BookmarkNode* PinnedModel::ResolveParent(const base::Uuid& uuid) const {
+   return (node && node->parent() == root_ && IsDrawer(node)) ? node : nullptr;
+ }
+ 
++PinnedModel::ScopedBatch::ScopedBatch(PinnedModel* model) : model_(model) {
++  ++model_->batch_depth_;
++}
++
++PinnedModel::ScopedBatch::~ScopedBatch() {
++  model_->EndBatch();
++}
++
++void PinnedModel::EndBatch() {
++  DCHECK_GT(batch_depth_, 0);
++  if (--batch_depth_ > 0 || !batch_dirty_) {
++    return;
++  }
++  batch_dirty_ = false;
++  NotifyChanged();
++}
++
+ void PinnedModel::NotifyChanged() {
++  if (batch_depth_ > 0) {
++    batch_dirty_ = true;
++    return;
++  }
+   for (Observer& observer : observers_) {
+     observer.OnPinnedChanged();
+   }
+diff -ruN a/chrome/browser/ui/tabs/aerographene/pinned_model.h b/chrome/browser/ui/tabs/aerographene/pinned_model.h
+--- a/chrome/browser/ui/tabs/aerographene/pinned_model.h
++++ b/chrome/browser/ui/tabs/aerographene/pinned_model.h
+@@ -82,6 +82,21 @@ class PinnedModel : public KeyedService,
+     virtual void OnPinnedChanged() = 0;
+   };
+ 
++  // Coalesces OnPinnedChanged(): while any batch is alive, changes only mark
++  // the model dirty; the outermost batch notifies once when it ends, if
++  // anything changed. Nests. The model itself is updated immediately, so
++  // reads inside the batch see every change; only observers wait.
++  class ScopedBatch {
++   public:
++    explicit ScopedBatch(PinnedModel* model);
++    ScopedBatch(const ScopedBatch&) = delete;
++    ScopedBatch& operator=(const ScopedBatch&) = delete;
++    ~ScopedBatch();
++
++   private:
++    raw_ptr<PinnedModel> model_;
++  };
++
+   explicit PinnedModel(bookmarks::BookmarkModel* bookmark_model);
+   PinnedModel(const PinnedModel&) = delete;
+   PinnedModel& operator=(const PinnedModel&) = delete;
+@@ -107,7 +122,8 @@ class PinnedModel : public KeyedService,
+   // lifetime as GetURL().
+   const GURL* FindURL(const base::Uuid& uuid) const;
+   // Index among the top-level entries (as in GetPinned()), or -1 for entries
+-  // inside a drawer and unknown entries. Does not copy the tree.
++  // inside a drawer, top-level folders that are not drawers and unknown
++  // entries. Does not copy the tree.
+   int GetTopLevelIndex(const base::Uuid& uuid) const;
+   // Label of the entry; empty if unset or unknown.
+   std::string GetLabel(const base::Uuid& uuid) const;
+@@ -192,8 +208,12 @@ class PinnedModel : public KeyedService,
+   // Space folder (invalid `uuid`) or a drawer folder; null otherwise.
+   const bookmarks::BookmarkNode* ResolveParent(const base::Uuid& uuid) const;
+   void NotifyChanged();
++  void EndBatch();
+ 
+   raw_ptr<bookmarks::BookmarkModel> model_;
++  // Live ScopedBatch count, and whether a change arrived during them.
++  int batch_depth_ = 0;
++  bool batch_dirty_ = false;
+   std::unique_ptr<PinnedTabMirror> tab_mirror_;
+   raw_ptr<const bookmarks::BookmarkNode> root_ = nullptr;
+   base::ObserverList<Observer> observers_;
+diff -ruN a/chrome/browser/ui/tabs/aerographene/pinned_model_unittest.cc b/chrome/browser/ui/tabs/aerographene/pinned_model_unittest.cc
+--- a/chrome/browser/ui/tabs/aerographene/pinned_model_unittest.cc
++++ b/chrome/browser/ui/tabs/aerographene/pinned_model_unittest.cc
+@@ -164,6 +164,47 @@ TEST_F(PinnedModelTest, CheapAccessorsMatchSnapshots) {
+   EXPECT_FALSE(model_->IsOpen(*folder));
+ }
+ 
++TEST_F(PinnedModelTest, TopLevelIndexSkipsPlainFolders) {
++  // A folder under the space folder without the drawer flag is not an entry
++  // (GetPinned() leaves it out), so it has no top-level index either.
++  const BookmarkNode* plain = bookmarks_->AddFolder(SpaceFolder(), 0, u"P");
++  ASSERT_TRUE(plain);
++  auto a = model_->AddPinned(GURL("https://a.test/"), u"A", base::Uuid(), 1);
++  ASSERT_TRUE(a);
++  ASSERT_EQ(1u, model_->GetPinned().size());
++  EXPECT_EQ(-1, model_->GetTopLevelIndex(plain->uuid()));
++  EXPECT_EQ(0, model_->GetTopLevelIndex(*a));
++}
++
++TEST_F(PinnedModelTest, BatchNotifiesOnceAtOutermostEnd) {
++  CountingObserver observer;
++  model_->AddObserver(&observer);
++  std::optional<base::Uuid> a;
++  {
++    PinnedModel::ScopedBatch outer(model_.get());
++    a = model_->AddPinned(GURL("https://a.test/"), u"A", base::Uuid(), 0);
++    ASSERT_TRUE(a);
++    {
++      PinnedModel::ScopedBatch inner(model_.get());
++      EXPECT_TRUE(model_->SetOpen(*a, true));
++      model_->NotifyTabMappingChanged();
++    }
++    EXPECT_TRUE(model_->SetSpan(*a, 2));
++    // Reads inside the batch see the changes; observers do not yet.
++    EXPECT_TRUE(model_->IsOpen(*a));
++    EXPECT_EQ(0, observer.changed);
++  }
++  EXPECT_EQ(1, observer.changed);
++  {
++    // Nothing changed: no notification.
++    PinnedModel::ScopedBatch empty(model_.get());
++  }
++  EXPECT_EQ(1, observer.changed);
++  model_->SetSpan(*a, 3);
++  EXPECT_EQ(2, observer.changed);
++  model_->RemoveObserver(&observer);
++}
++
+ TEST_F(PinnedModelTest, IgnoresNodesOutsideSpaceFolder) {
+   const BookmarkNode* outside = bookmarks_->AddNewURL(
+       bookmarks_->bookmark_bar_node(), 0, u"O", GURL("https://o.test/"));
+diff -ruN a/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc b/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc
+--- a/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc
++++ b/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc
+@@ -4,7 +4,9 @@
+ #include "chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.h"
+ 
+ #include <algorithm>
++#include <optional>
+ #include <set>
++#include <utility>
+ #include <vector>
+ 
+ #include "base/auto_reset.h"
+@@ -317,6 +319,10 @@ void PinnedTabMirror::AdoptStartupTabs() {
+   };
+   bool reopened = false;
+   std::vector<Candidate> candidates;
++  // One OnPinnedChanged() for the whole adoption, not one per pinned tab
++  // (each Associate() below would otherwise refresh every window's grid).
++  // Ends before the new tab page is closed.
++  std::optional<PinnedModel::ScopedBatch> batch(std::in_place, model_);
+   auto add = [&](const PinnedItem& item) {
+     if (!item.is_folder && item.url.is_valid() &&
+         item.url.SchemeIsHTTPOrHTTPS()) {
+@@ -366,6 +372,7 @@ void PinnedTabMirror::AdoptStartupTabs() {
+       reopened = true;
+     }
+   }
++  batch.reset();
+   if (!reopened || strip->count() - strip->IndexOfFirstNonPinnedTab() != 1) {
+     return;
+   }
+@@ -399,6 +406,8 @@ void PinnedTabMirror::AssociateAllPinnedTabs() {
+   if (!model_->IsLoaded()) {
+     return;
+   }
++  // One OnPinnedChanged() for all the tabs instead of up to three per tab.
++  PinnedModel::ScopedBatch batch(model_);
+   ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
+       [this](BrowserWindowInterface* browser) {
+         if (browser->GetProfile() != profile_ ||
+@@ -418,6 +427,9 @@ void PinnedTabMirror::Associate(tabs::TabInterface* tab) {
+   if (!tab || !tab->IsPinned() || !model_->IsLoaded()) {
+     return;
+   }
++  // SetOpen(), the Move() in AlignOrder() and NotifyTabMappingChanged() reach
++  // observers as one OnPinnedChanged(), once the mapping is complete.
++  PinnedModel::ScopedBatch batch(model_);
+   if (GetEntryForTab(tab)) {
+     // Already mapped (e.g. moved in from another window).
+     AlignOrder(tab);
+diff -ruN a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
+--- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
++++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
+@@ -459,7 +459,11 @@ views::ProposedLayout PinnedTabContainerView::CalculateProposedLayout(
+ }
+ 
+ gfx::Size PinnedTabContainerView::GetMinimumSize() const {
+-  if (!collection_node_ || GetGridChildren().empty()) {
++  if (!collection_node_) {
++    return gfx::Size();
++  }
++  const size_t num_grid_children = GetGridChildren().size();
++  if (num_grid_children == 0) {
+     return gfx::Size();
+   }
+ 
+@@ -487,7 +491,7 @@ gfx::Size PinnedTabContainerView::GetMinimumSize() const {
+ 
+   // The minimum size should be enough to show a row and a half, if needed.
+   auto collapse_state = GetTabStripCollapseState();
+-  const int num_children = GetGridChildren().size();
++  const int num_children = num_grid_children;
+   const float min_rows = std::min(
+       (collapse_state != tabs::VerticalTabStripCollapseState::kExpanded ? 1.5f
+                                                                         : 1.0f),
+@@ -749,7 +753,8 @@ views::ProposedLayout PinnedTabContainerView::CalculateHorizontalLayout(
+ }
+ 
+ PinnedTabContainerView::GridMetrics PinnedTabContainerView::GetGridMetrics(
+-    const views::SizeBounds& size_bounds) const {
++    const views::SizeBounds& size_bounds,
++    const std::vector<views::View*>& grid_children) const {
+   GridMetrics metrics;
+ 
+   // Child width will be uniform and match the largest child's width.
+@@ -768,8 +773,8 @@ PinnedTabContainerView::GridMetrics PinnedTabContainerView::GetGridMetrics(
+   // the previous uniform-column layout.
+   int total_cells = 0;
+   bool has_folder = false;
+-  for (auto* child : GetGridChildren()) {
+-    total_cells += GetTabSpan(child);
++  for (views::View* child : grid_children) {
++    total_cells += GetLayoutSpan(child);
+     has_folder |= views::IsViewClass<AerographenePinnedFolderView>(child);
+   }
+   metrics.cells_on_row = total_cells;
+@@ -827,7 +832,7 @@ views::ProposedLayout PinnedTabContainerView::CalculateVerticalLayout(
+     return layouts;
+   }
+ 
+-  const GridMetrics metrics = GetGridMetrics(size_bounds);
++  const GridMetrics metrics = GetGridMetrics(size_bounds, children);
+   const int child_width = metrics.cell_width;
+   const int cells_on_row = metrics.cells_on_row;
+ 
+@@ -839,7 +844,7 @@ views::ProposedLayout PinnedTabContainerView::CalculateVerticalLayout(
+     const int span =
+         views::IsViewClass<AerographenePinnedFolderView>(child)
+             ? cells_on_row
+-            : std::min(GetTabSpan(child), cells_on_row);
++            : std::min(GetLayoutSpan(child), cells_on_row);
+     const int span_width = span * child_width + (span - 1) * kTabPadding;
+     gfx::Rect bounds =
+         gfx::Rect(child->GetPreferredSize(views::SizeBounds(span_width, {})));
+@@ -954,6 +959,13 @@ int PinnedTabContainerView::GetTabSpan(const views::View* child) const {
+   return it == tab_spans_.end() ? 1 : it->second;
+ }
+ 
++int PinnedTabContainerView::GetLayoutSpan(const views::View* child) const {
++  if (const auto* tab_view = views::AsViewClass<TabView>(child)) {
++    return tab_view->pinned_span();
++  }
++  return GetTabSpan(child);
++}
++
+ views::View* PinnedTabContainerView::GetSpanResizeChildAt(
+     const gfx::Point& loc_in_container) const {
+   if (!collection_node_ ||
+@@ -1011,7 +1023,7 @@ bool PinnedTabContainerView::OnMousePressed(const ui::MouseEvent& event) {
+   // pointer through these values only, so reflowing the grid while dragging
+   // cannot feed back into the span.
+   const GridMetrics metrics =
+-      GetGridMetrics(views::SizeBounds(width(), {}));
++      GetGridMetrics(views::SizeBounds(width(), {}), GetGridChildren());
+   const int pitch = metrics.cell_width + kTabPadding;
+   const int first_cell = std::clamp(child->bounds().x() / pitch, 0,
+                                     std::max(0, metrics.max_cells - 1));
+@@ -1228,12 +1240,18 @@ std::vector<views::View*> PinnedTabContainerView::GetGridChildren(
+   };
+   std::vector<Entry> top_live;
+   std::map<base::Uuid, std::vector<Entry>> drawer_live;
++  // Every tab of this container belongs to the same window, hence the same
++  // profile and mirror: look it up once, not once per tab.
++  const aerographene::PinnedTabMirror* mirror = nullptr;
++  bool mirror_looked_up = false;
+   for (views::View* child : live) {
+     const tabs::TabInterface* tab = GetPinnedTab(child);
+-    const aerographene::PinnedTabMirror* mirror =
+-        tab ? GetPinnedTabMirror(tab) : nullptr;
++    if (tab && !mirror_looked_up) {
++      mirror = GetPinnedTabMirror(tab);
++      mirror_looked_up = mirror != nullptr;
++    }
+     const std::optional<base::Uuid> uuid =
+-        mirror ? mirror->GetEntryForTab(tab) : std::nullopt;
++        tab && mirror ? mirror->GetEntryForTab(tab) : std::nullopt;
+     int index = -1;
+     if (uuid) {
+       if (auto it = model_index_.find(*uuid); it != model_index_.end()) {
+diff -ruN a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h
+--- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h
++++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h
+@@ -107,7 +107,14 @@ class PinnedTabContainerView
+     int cells_on_row = 1;
+     int max_cells = 1;
+   };
+-  GridMetrics GetGridMetrics(const views::SizeBounds& size_bounds) const;
++  // `grid_children` is GetGridChildren(), computed once by the caller.
++  GridMetrics GetGridMetrics(
++      const views::SizeBounds& size_bounds,
++      const std::vector<views::View*>& grid_children) const;
++  // GetTabSpan() for layout: a TabView's span is the one cached on it
++  // (kept in sync by SetTabSpan(), ViewHierarchyChanged() and
++  // RefreshPersistedSpans()), so layout does not query the model per tab.
++  int GetLayoutSpan(const views::View* child) const;
+ 
+   // Returns the tab whose right-edge resize zone contains the point, if any.
+   views::View* GetSpanResizeChildAt(const gfx::Point& loc_in_container) const;
+diff -ruN a/chrome/browser/ui/views/tabs/common/tab_view.h b/chrome/browser/ui/views/tabs/common/tab_view.h
+--- a/chrome/browser/ui/views/tabs/common/tab_view.h
++++ b/chrome/browser/ui/views/tabs/common/tab_view.h
+@@ -110,6 +110,7 @@ class TabView : public views::View,
+   // the title shows from 2 cells up. Set by `PinnedTabContainerView`.
+   // Both setters return true when the value changed.
+   bool SetPinnedSpan(int span);
++  int pinned_span() const { return pinned_span_; }
+   // Text shown instead of the page title while the tab is pinned; empty uses
+   // the page title. Set by `PinnedTabContainerView` from the pinned model.
+   bool SetPinnedLabel(std::u16string label);
