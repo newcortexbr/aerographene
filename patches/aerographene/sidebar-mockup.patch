@@ -123,7 +123,7 @@ mexido: células de 40 px não cabem nele).
  #include "ui/views/background.h"
  #include "ui/views/controls/button/label_button.h"
  #include "ui/views/controls/focus_ring.h"
-@@ -92,6 +99,45 @@
+@@ -92,6 +99,36 @@
       .light_ambient = 0.0,
       .dark_key = 0.6,
       .dark_ambient = 0.0});
@@ -131,41 +131,32 @@ mexido: células de 40 px não cabem nele).
 +// aerographene: sidebar background of the mockups R-r01a: default = subtle
 +// vertical gradient, pixelized = flat #111; 1px right border in the theme
 +// line color (left when the strip is on the right). Opaque, no corners.
-+class AerographeneSidebarBackground : public views::Background {
-+ public:
-+  explicit AerographeneSidebarBackground(
-+      tabs::VerticalTabStripStateController* state_controller)
-+      : state_controller_(state_controller) {}
-+
-+  // views::Background:
-+  void Paint(gfx::Canvas* canvas, views::View* view) const override {
-+    const ui::ColorProvider* const colors = view->GetColorProvider();
-+    if (!colors) {
-+      return;
-+    }
-+    const gfx::Rect bounds = view->GetLocalBounds();
-+    cc::PaintFlags flags;
-+    if (aerographene::GetBuiltinTheme() ==
-+        aerographene::BuiltinTheme::kPixelized) {
-+      flags.setColor(colors->GetColor(ui::kColorSysSurface));
-+    } else {
-+      flags.setShader(gfx::CreateGradientShader(
-+          gfx::Point(0, 0), gfx::Point(0, bounds.height()),
-+          SkColorSetRGB(0x08, 0x0E, 0x1C), SkColorSetRGB(0x05, 0x09, 0x12)));
-+    }
-+    canvas->DrawRect(bounds, flags);
-+
-+    cc::PaintFlags line;
-+    line.setColor(colors->GetColor(kColorToolbarSeparator));
-+    const int x = state_controller_->IsTabStripRightAligned()
-+                      ? 0
-+                      : bounds.width() - 1;
-+    canvas->DrawRect(gfx::Rect(x, 0, 1, bounds.height()), line);
++// Painted from OnPaintBackground: the view keeps its (hidden)
++// CustomCornersBackground because BrowserViewTabbedLayoutImpl requires it.
++void PaintAerographeneSidebar(gfx::Canvas* canvas,
++                              views::View* view,
++                              bool right_aligned) {
++  const ui::ColorProvider* const colors = view->GetColorProvider();
++  if (!colors) {
++    return;
 +  }
++  const gfx::Rect bounds = view->GetLocalBounds();
++  cc::PaintFlags flags;
++  if (aerographene::GetBuiltinTheme() ==
++      aerographene::BuiltinTheme::kPixelized) {
++    flags.setColor(colors->GetColor(ui::kColorSysSurface));
++  } else {
++    flags.setShader(gfx::CreateGradientShader(
++        gfx::Point(0, 0), gfx::Point(0, bounds.height()),
++        SkColorSetRGB(0x08, 0x0E, 0x1C), SkColorSetRGB(0x05, 0x09, 0x12)));
++  }
++  canvas->DrawRect(bounds, flags);
 +
-+ private:
-+  const raw_ptr<tabs::VerticalTabStripStateController> state_controller_;
-+};
++  cc::PaintFlags line;
++  line.setColor(colors->GetColor(kColorToolbarSeparator));
++  const int x = right_aligned ? 0 : bounds.width() - 1;
++  canvas->DrawRect(gfx::Rect(x, 0, 1, bounds.height()), line);
++}
  }  // namespace
  
  DEFINE_CLASS_CUSTOM_ELEMENT_EVENT_TYPE(VerticalTabStripRegionView,
@@ -184,20 +175,23 @@ mexido: células de 40 px não cabem nele).
    bottom_button_container_ =
        AddChildView(std::make_unique<VerticalTabStripBottomContainer>(
            state_controller_, root_action_item, browser_view->browser(),
-@@ -169,10 +223,8 @@
+@@ -169,10 +223,15 @@
  
    GetViewAccessibility().SetRole(ax::mojom::Role::kTabList);
  
--  SetBackground(std::make_unique<CustomCornersBackground>(
--      *this, *browser_view,
--      /*primary_color=*/CustomCornersBackground::FrameTheme(),
--      /*corner_color=*/CustomCornersBackground::ToolbarTheme()));
-+  SetBackground(
-+      std::make_unique<AerographeneSidebarBackground>(state_controller_));
+   SetBackground(std::make_unique<CustomCornersBackground>(
+       *this, *browser_view,
+       /*primary_color=*/CustomCornersBackground::FrameTheme(),
+       /*corner_color=*/CustomCornersBackground::ToolbarTheme()));
++  // aerographene: BrowserViewTabbedLayoutImpl::DoPostLayoutVisualAdjustments
++  // CHECKs that this background is a CustomCornersBackground (replacing it
++  // aborted the browser at startup in the vertical layout). Keep it, hidden;
++  // the mockup sidebar is painted by OnPaintBackground().
++  background()->AsA<CustomCornersBackground>()->SetVisible(false);
  
    shadow_frame_ = AddChildView(std::make_unique<ShadowFrameView>(
        kExpandOnHoverShadowElevation, kExpandOnHoverShadowAlpha));
-@@ -744,7 +796,8 @@
+@@ -744,7 +796,14 @@
  void VerticalTabStripRegionView::UpdateInteriorMargin() {
    const int padding = GetLayoutConstant(
        LayoutConstant::kVerticalTabStripUncollapsedVerticalPadding);
@@ -205,8 +199,24 @@ mexido: células de 40 px não cabem nele).
 +  // aerographene: 8px above the first row (mockup `.side` padding-top).
 +  flex_layout_->SetInteriorMargin(gfx::Insets::TLBR(8, 0, padding, 0));
  }
++
++void VerticalTabStripRegionView::OnPaintBackground(gfx::Canvas* canvas) {
++  views::View::OnPaintBackground(canvas);
++  PaintAerographeneSidebar(canvas, this,
++                           state_controller_->IsTabStripRightAligned());
++}
  
  void VerticalTabStripRegionView::OnCollapseStateChanged(
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+@@ -92,6 +92,7 @@
+   void AddedToWidget() override;
+   void RemovedFromWidget() override;
+   void Layout(PassKey) override;
++  void OnPaintBackground(gfx::Canvas* canvas) override;
+   views::View* GetDefaultFocusableChild() override;
+   gfx::Size GetMinimumSize() const override;
+   gfx::Size CalculatePreferredSize(
 --- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
 +++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
 @@ -14,6 +14,8 @@
