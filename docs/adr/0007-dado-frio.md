@@ -1,6 +1,6 @@
 # Dado frio em banco separado comprimido, nunca apagado (proposto)
 
-Status: proposto em 10/10/2026, aguardando o dono. Nada implementado.
+Status: aceito em 11/10/2026 com as decisões abaixo. Nada implementado.
 
 Histórico, favicons, registros de downloads e sessões antigas sem uso há mais que o prazo de frio (padrão 45 dias, pref `aerographene.cold_after_days`) saem do banco quente e vão para um banco SQLite por perfil, `History-Cold`, com compressão zstd por linha nas colunas de texto/blob e um catálogo FTS5 de URL e título. Sessões antigas viram arquivos `.zst` registrados no mesmo catálogo. O `ExpireHistoryBackend` do Chromium (que apaga visitas com mais de 90 dias, `kExpireDaysThreshold` em `components/history/core/browser/history_backend.h`) passa a mover em vez de apagar; só a exclusão pedida pelo usuário apaga. `chrome://history` consulta quente e frio; o omnibox, só o quente. Alternativas descartadas: a expiração do Chromium (apaga; rejeitada pelo dono em 06/10/2026); comprimir colunas no próprio `History` (schema e migrações, risco ao startup pelo `InMemoryURLIndex`, conflito contínuo com o upstream); arquivo morto puro com índice (busca e lookup de favicon ruins, perda de um bloco = um mês), aceito só para sessões; mover sem comprimir (viola a definição de dado frio no `CONTEXT.md`). Dados de sites ficam para a v1.1.
 
@@ -20,7 +20,9 @@ Cada fatia compila `components/history` e roda os `history_unittests` afetados n
 - "limpar histórico" apaga também o frio.
 - sem reidratação do histórico: a visita nova cria linha quente; o frio só recebe dado com mais de 45 dias.
 - histórico no frio fica sem compressão (texto curto, ganho nulo); revoga a fatia 3 `cold-data-compress` para o histórico e a frase "mover sem comprimir viola a definição". zstd fica reservado ao cache de sites (em discussão).
-- teto de disco: pendente (ver discussão de compressão forte e teto de 1 GB).
+- sem teto de disco e sem aviso de tamanho: histórico sem compressão e sem limite, cookies fora do frio.
+- cache de sites: entradas com mais de 30 dias são apagadas (sem zstd, sem mover). Fatia nova `cold-data-cache-expire`.
+- fatia 3 `cold-data-compress` cancelada.
 
 ## Decisões pendentes do dono (texto original)
 
