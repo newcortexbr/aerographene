@@ -1,0 +1,25 @@
+aerographene: rodape da sidebar vertical fixo na base.
+
+O TabStripView tinha max kPreferred, entao o FlexLayout do
+VerticalTabStripRegionView deixava o VerticalTabStripFooter logo apos as abas.
+Com kUnbounded o TabStripView recebe a altura restante (o scroll interno segue
+valendo quando ha muitas abas) e o rodape fica na base. Sem view nem layout
+extra. Depende de aerographene/sidebar-footer.patch (aplica depois dele e do
+perf-startup-layout.patch).
+
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc	2026-10-11 14:23:34.809311376 -0300
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc	2026-10-11 14:23:40.899949952 -0300
+@@ -687,10 +687,12 @@
+ }
+ 
+ void VerticalTabStripRegionView::OnTabStripViewSet() {
++  // aerographene: o TabStripView ocupa o espaco restante (kUnbounded) e empurra o
++  // rodape para a base da sidebar; sem isso o rodape fica logo apos as abas.
+   tab_strip_view()->SetProperty(
+       views::kFlexBehaviorKey,
+       views::FlexSpecification(views::MinimumFlexSizeRule::kScaleToMinimum,
+-                               views::MaximumFlexSizeRule::kPreferred));
++                               views::MaximumFlexSizeRule::kUnbounded));
+   tab_strip_view()->SetProperty(views::kMarginsKey,
+                                gfx::Insets::TLBR(0, 0, kBottomContainerGap, 0));
+ 
