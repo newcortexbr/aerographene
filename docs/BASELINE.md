@@ -76,3 +76,14 @@ Perfil com 6 pinned (3 `open=1`, 3 fechadas, span 2, gaveta), mesmo modelo para 
 - 783ee4d (`perf-pinned-nocopy`) vs 859390d em perfil limpo (n=12, bateria): nenhuma métrica pior que 2% com evidência; abertura warm +0,8% dentro do ruído.
 - `perf-pinned-batch` (4abf68a): neutro no comportamento; a aparente diferença de 10 s vinha de perfis-modelo diferentes (pref `pinned_tabs`) e de timeout do script, não do patch.
 - comportamento: no startup só a pinned ativa carrega; as de fundo carregam ao ativar (~30 ms até o request), como o `AddDeferredPinnedStartupTab` do Helium.
+
+## rodada de 11/10/2026 (aero b1a7fed, Comet Lake na tomada, perfil performance, load1 < 1,0; rotação entre os 3 navegadores)
+
+Dados em `bench/out/qa-layout/bench/` (fora do git). Medianas; razão pareada por volta.
+
+- warm first_ms (n=12): aero 494,4, Helium 429,0 (IQR 415,7–499,4, bimodal), ungoogled 536,0. Vs Helium +3,7% (aero abaixo em 5/12); vs ungoogled -7,6%.
+- perfil novo (n=6): aero 519,1, Helium 533,3, ungoogled 555,2. Vs Helium -2,5%; vs ungoogled -6,3%.
+- 10 abas all_ms (n=12): aero 907,2, Helium 926,1, ungoogled 1087,2. Vs Helium -2,6%; vs ungoogled -18,4%.
+- 10 abas PSS (n=12): aero 719,1, Helium 728,4, ungoogled 655,2 MiB. Vs Helium -1,2%; vs ungoogled +9,6%.
+- trace de startup (n=5, b1a7fed vs 8f7d5fa): `perf-startup-layout` reduziu pouco as passadas de layout (LayoutImmediately 1611 vs 1687, ToolbarView 9 vs 10); o excesso contra o Helium (~1118) continua. Desligar o omnibox centralizado baixa para ~1481.
+- leitura: warm contra o Helium segue inconclusivo e oscila entre rodadas (-4%, +10%, +0,9%, +3,7%); o Helium tem dois modos (~410 e ~490 ms) e o aero fica quase sempre no superior. Entender o modo rápido é a próxima pista.
