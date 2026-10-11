@@ -1,0 +1,242 @@
+aerographene: chrome://history continua no History-Cold, seção "30+ dias" (ADR 0007, fatia 4).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: ADR 0007 fatia 4. Quando a consulta local de
+BrowsingHistoryService chega ao começo do quente, continua no frio
+(QueryOptions::aerographene_cold, só setado por chrome://history; omnibox e
+outros chamadores não veem o frio) a partir do resultado mais antigo do
+quente; os itens vêm marcados HistoryEntry::is_cold. HistoryBackend::
+QueryColdHistory consulta visitas do frio (por intervalo, ou busca de texto/
+host sobre as linhas do frio e as do quente de URLs revisitadas), sem
+abrir/criar o arquivo se ele não existe. O handler prefixa "30+ dias · " ao
+título do cartão (data) e, na busca, à data de cada item; sem mudança de
+mojom nem de TS. "Limpar histórico" e remoções já apagam o frio
+(cold-data-history-move). Texto fixo em pt-BR, sem IDS.
+Depende de aerographene/cold-data-history-revisit.patch.
+
+
+--- a/chrome/browser/ui/webui/history/browsing_history_handler.cc
++++ b/chrome/browser/ui/webui/history/browsing_history_handler.cc
+@@ -288,6 +288,13 @@ history::mojom::HistoryEntryPtr HistoryEntryToMojom(
+   // the monthly view.
+   result_mojom->date_short =
+       base::UTF16ToUTF8(base::TimeFormatShortDate(entry.time));
++  // aerographene (ADR 0007): History-Cold visits are labelled "30+ dias" (the
++  // card title when browsing, the per-item date in search results).
++  constexpr char16_t kAerographeneColdLabel[] = u"30+ dias \u00b7 ";
++  if (entry.is_cold) {
++    result_mojom->date_short =
++        base::UTF16ToUTF8(kAerographeneColdLabel) + result_mojom->date_short;
++  }
+ 
+   std::u16string snippet_string;
+   std::u16string date_relative_day;
+@@ -309,7 +316,8 @@ history::mojom::HistoryEntryPtr HistoryEntryToMojom(
+           IDS_HISTORY_DATE_WITH_RELATIVE_TIME, date_str,
+           base::TimeFormatFriendlyDate(entry.time));
+     }
+-    date_relative_day = date_str;
++    date_relative_day =
++        entry.is_cold ? kAerographeneColdLabel + date_str : date_str;
+     date_time_of_day = base::TimeFormatTimeOfDay(entry.time);
+   }
+ 
+--- a/components/history/core/browser/browsing_history_service.cc
++++ b/components/history/core/browser/browsing_history_service.cc
+@@ -94,6 +94,9 @@ struct BrowsingHistoryService::QueryHistoryState
+   // Should always be sorted in reverse chronological order.
+   std::vector<HistoryEntry> local_results;
+   base::Time local_end_time_for_continuation;
++  // aerographene (ADR 0007): the hot database reached its beginning and the
++  // local query continues in History-Cold.
++  bool local_in_cold = false;
+ 
+   QuerySourceStatus remote_status = UNINITIALIZED;
+   // Should always be sorted in reverse chronological order.
+@@ -257,10 +260,11 @@ void BrowsingHistoryService::QueryHistoryInternal(
+         state->local_status != REACHED_BEGINNING) {
+       CHECK_NE(state->local_status, NO_DEPENDENCY);
+       should_return_results_immediately = false;
++      QueryOptions local_options = OptionsWithEndTime(
++          state->original_options, state->local_end_time_for_continuation);
++      local_options.aerographene_cold = state->local_in_cold;
+       local_history_->QueryHistory(
+-          state->search_text,
+-          OptionsWithEndTime(state->original_options,
+-                             state->local_end_time_for_continuation),
++          state->search_text, local_options,
+           base::BindOnce(&BrowsingHistoryService::QueryComplete,
+                          weak_factory_.GetWeakPtr(), state),
+           &query_task_tracker_);
+@@ -794,6 +798,26 @@ void BrowsingHistoryService::QueryComplete(
+         std::string(), !state->search_text.empty(), page.snippet().text(),
+         page.blocked_visit(), GURL(), page.visit_count(), page.typed_count(),
+         page.has_actor_source(), page.app_id(), page.visit_id());
++    output.back().is_cold = state->local_in_cold;
++  }
++
++  // aerographene (ADR 0007): when the hot database is exhausted, the local
++  // query continues in History-Cold, past the oldest hot result.
++  if (results.reached_beginning() && !state->local_in_cold) {
++    state->local_in_cold = true;
++    state->local_status = MORE_RESULTS;
++    if (!output.empty()) {
++      state->local_end_time_for_continuation = OldestTime(output);
++    }
++    if (output.size() <
++        static_cast<size_t>(state->original_options.EffectiveMaxCount())) {
++      QueryHistoryInternal(std::move(state));
++      return;
++    }
++    if (!web_history_timer_->IsRunning()) {
++      ReturnResultsToDriver(std::move(state));
++    }
++    return;
+   }
+ 
+   state->local_status =
+--- a/components/history/core/browser/browsing_history_service.h
++++ b/components/history/core/browser/browsing_history_service.h
+@@ -128,6 +128,9 @@ class BrowsingHistoryService : public HistoryServiceObserver,
+     // All visit IDs in the local database represented by this entry (including
+     // synced visits).
+     std::vector<history::VisitID> all_visit_ids;
++
++    // aerographene (ADR 0007): the visit came from History-Cold ("30+ dias").
++    bool is_cold = false;
+   };
+ 
+   // Contains information about a completed history query.
+--- a/components/history/core/browser/history_backend.cc
++++ b/components/history/core/browser/history_backend.cc
+@@ -2848,7 +2848,9 @@ void HistoryBackend::RemoveDownloads(const std::set<uint32_t>& ids) {
+ QueryResults HistoryBackend::QueryHistory(const std::u16string& text_query,
+                                           const QueryOptions& options) {
+   QueryResults query_results;
+-  if (db_) {
++  if (db_ && options.aerographene_cold) {
++    QueryColdHistory(text_query, options, &query_results);
++  } else if (db_) {
+     if (text_query.empty()) {
+       // Basic history query for the main database.
+       QueryHistoryBasic(options, &query_results);
+@@ -2984,6 +2986,90 @@ void HistoryBackend::QueryHistoryText(const std::u16string& text_query,
+   }
+ }
+ 
++void HistoryBackend::QueryColdHistory(const std::u16string& text_query,
++                                      const QueryOptions& query_options,
++                                      QueryResults* result) {
++  ColdHistoryDatabase* cold = expirer_.GetColdDatabaseIfExists();
++  if (!cold) {
++    result->set_reached_beginning(true);
++    return;
++  }
++  // History-Cold has no context_annotations table.
++  QueryOptions options(query_options);
++  options.policy_for_404_visits = VisitQuery404sPolicy::kInclude404s;
++
++  auto get_url_row = [&](URLID id, URLRow* row) {
++    return cold->GetURLRow(id, row) || db_->GetURLRow(id, row);
++  };
++  auto make_result = [](const URLRow& row, const VisitRow& visit) {
++    URLResult url_result(row);
++    url_result.set_visit_id(visit.visit_id);
++    url_result.set_visit_time(visit.visit_time);
++    url_result.set_app_id(visit.app_id);
++    url_result.set_actor_source(visit.source == SOURCE_ACTOR);
++    url_result.set_blocked_visit(
++        (visit.transition & ui::PAGE_TRANSITION_BLOCKED) != 0);
++    return url_result;
++  };
++
++  std::vector<URLResult> matching;
++  bool has_more_results = false;
++  if (text_query.empty()) {
++    VisitVector visits;
++    has_more_results = cold->GetVisibleVisitsInRange(options, &visits);
++    for (const VisitRow& visit : visits) {
++      URLRow row;
++      if (!get_url_row(visit.url_id, &row) || !row.url().is_valid()) {
++        continue;
++      }
++      matching.push_back(make_result(row, visit));
++    }
++  } else {
++    // Cold rows, plus hot rows of revisited URLs (their old visits are cold).
++    URLRows rows;
++    for (URLDatabase* url_db : {static_cast<URLDatabase*>(cold),
++                                static_cast<URLDatabase*>(db_.get())}) {
++      URLRows found;
++      if (options.host_only) {
++        URLDatabase::URLEnumerator iter;
++        if (url_db->InitURLEnumeratorForEverything(&iter)) {
++          const std::string host = base::UTF16ToUTF8(text_query);
++          URLRow row;
++          while (iter.GetNextURL(&row)) {
++            if (row.url().is_valid() && row.url().GetHost() == host) {
++              found.push_back(row);
++            }
++          }
++        }
++      } else {
++        found = url_db->GetTextMatchesWithAlgorithm(
++            text_query, options.matching_algorithm.value_or(
++                            query_parser::MatchingAlgorithm::DEFAULT));
++      }
++      rows.insert(rows.end(), found.begin(), found.end());
++    }
++    std::set<URLID> seen;
++    for (const URLRow& row : rows) {
++      if (!seen.insert(row.id()).second) {
++        continue;
++      }
++      VisitVector visits;
++      cold->GetVisibleVisitsForURL(row.id(), options, &visits);
++      for (const VisitRow& visit : visits) {
++        matching.push_back(make_result(row, visit));
++      }
++    }
++    std::sort(matching.begin(), matching.end(), URLResult::CompareVisitTime);
++    if (options.max_count > 0 &&
++        matching.size() > static_cast<size_t>(options.max_count)) {
++      has_more_results = true;
++      matching.resize(options.max_count);
++    }
++  }
++  result->SetURLResults(std::move(matching));
++  result->set_reached_beginning(!has_more_results);
++}
++
+ URLRows HistoryBackend::GetMatchesForHost(const std::u16string& host_name) {
+   URLRows results;
+   URLDatabase::URLEnumerator iter;
+--- a/components/history/core/browser/history_backend.h
++++ b/components/history/core/browser/history_backend.h
+@@ -948,6 +948,12 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
+   // counts preserved) and fills `row`. The cold row is removed after the next
+   // hot commit. Returns the hot id, or 0. Only runs when the cold file exists.
+   URLID RestoreURLFromCold(const GURL& url, URLRow* row);
++  // aerographene (fatia 4): QueryHistory over History-Cold. Rows come from
++  // the cold urls table, or from the hot one for revisited URLs whose older
++  // visits stayed cold. Empty and at the beginning if the cold file is absent.
++  void QueryColdHistory(const std::u16string& text_query,
++                        const QueryOptions& options,
++                        QueryResults* result);
+   // Applies the cold row removals queued by RestoreURLFromCold. Called after
+   // the hot singleton transaction commits.
+   void FlushColdURLMoves();
+--- a/components/history/core/browser/history_types.h
++++ b/components/history/core/browser/history_types.h
+@@ -440,6 +440,11 @@ struct QueryOptions {
+   // other history surfaces.
+   bool include_actor_visits = false;
+ 
++  // aerographene (ADR 0007, fatia 4): query History-Cold instead of the hot
++  // database. Only chrome://history sets it; other callers never see cold
++  // rows (omnibox, clusters).
++  bool aerographene_cold = false;
++
+   // If true, visits with a source other than SOURCE_ACTOR are included.
+   // Defaults to true.
+   bool include_user_visits = true;

@@ -83,3 +83,5 @@ aerographene/pinned-startup-dedupe.patch
 aerographene/cold-data-store.patch
 aerographene/cold-data-history-move.patch
 aerographene/cold-data-cache-expire.patch
+aerographene/cold-data-history-revisit.patch
+aerographene/cold-data-history-ui.patch

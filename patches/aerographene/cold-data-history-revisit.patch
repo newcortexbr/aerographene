@@ -1,0 +1,465 @@
+aerographene: revisitar URL que está no frio traz a linha de urls de volta ao quente (ADR 0007, fatia 3).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: ADR 0007 fatia 3. AddPageVisit, AddPageNoVisitForBookmark e
+AddPagesWithDetails, quando a URL não está no quente, chamam
+HistoryBackend::RestoreURLFromCold: lê a linha no frio e a recoloca no quente
+com o mesmo id (urls.id é AUTOINCREMENT, o id liberado segue livre; se
+ocupado, id novo), visit_count/typed_count/título/hidden preservados, termo de
+busca junto; a visita nova segue o ramo "linha existente". As visitas antigas
+ficam no frio e apontam para o id do quente; a linha (e o termo) sai do frio
+só depois do commit do quente (Commit/CloseAllDatabases), então crash antes
+do commit não perde a URL. O frio só é consultado se a URL não está no
+quente e se o arquivo existe: a ausência é checada uma vez e guardada
+(ExpireHistoryBackend::GetColdDatabaseIfExists) até um movimento criá-lo.
+URL já no frio com outro id: ao esfriar de novo, a linha mais nova vence e
+visitas/termos antigos passam ao id novo. Exclusão do usuário por URL/
+intervalo também alcança visitas frias de URLs que voltaram ao quente.
+Depende de aerographene/cold-data-history-move.patch.
+
+
+--- a/components/history/core/browser/cold_history_database.cc
++++ b/components/history/core/browser/cold_history_database.cc
+@@ -111,9 +111,17 @@ bool ColdHistoryDatabase::AddURLRowKeepingID(const URLRow& row) {
+     return false;
+   }
+   // INSERT OR IGNORE by URL: a URL lives in one row.
+-  if (GetRowForURL(row.url(), nullptr)) {
++  const URLID cold_id = GetRowForURL(row.url(), nullptr);
++  if (cold_id == row.id()) {
+     return true;
+   }
++  if (cold_id) {
++    // aerographene (fatia 3): the URL came back hot under another id and cooled
++    // again. The newer hot row wins; older cold visits/terms follow its id.
++    if (!ChangeURLID(cold_id, row.id())) {
++      return false;
++    }
++  }
+   sql::Statement statement(db_.GetCachedStatement(
+       SQL_FROM_HERE,
+       "INSERT OR IGNORE INTO urls "
+@@ -200,6 +208,42 @@ bool ColdHistoryDatabase::AddKeywordSearchTerm(
+   return statement.Run();
+ }
+ 
++bool ColdHistoryDatabase::ChangeURLID(URLID old_id, URLID new_id) {
++  sql::Statement visits(db_.GetCachedStatement(
++      SQL_FROM_HERE, "UPDATE visits SET url = ? WHERE url = ?"));
++  visits.BindInt64(0, new_id);
++  visits.BindInt64(1, old_id);
++  sql::Statement terms(db_.GetCachedStatement(
++      SQL_FROM_HERE,
++      "UPDATE OR IGNORE keyword_search_terms SET url_id = ? WHERE url_id = ?"));
++  terms.BindInt64(0, new_id);
++  terms.BindInt64(1, old_id);
++  sql::Statement row(
++      db_.GetCachedStatement(SQL_FROM_HERE, "DELETE FROM urls WHERE id = ?"));
++  row.BindInt64(0, old_id);
++  return visits.Run() && terms.Run() && row.Run();
++}
++
++bool ColdHistoryDatabase::MoveURLRowOut(URLID cold_id, URLID hot_id) {
++  if (!open_ || !BeginTransaction()) {
++    return false;
++  }
++  bool ok = true;
++  if (cold_id != hot_id) {
++    sql::Statement visits(db_.GetCachedStatement(
++        SQL_FROM_HERE, "UPDATE visits SET url = ? WHERE url = ?"));
++    visits.BindInt64(0, hot_id);
++    visits.BindInt64(1, cold_id);
++    ok = visits.Run();
++  }
++  ok = ok && DeleteURLRowsByID({cold_id});
++  if (!ok) {
++    RollbackTransaction();
++    return false;
++  }
++  return CommitTransaction();
++}
++
+ bool ColdHistoryDatabase::DeleteURLRowsByID(const std::set<URLID>& ids) {
+   if (!open_) {
+     return false;
+@@ -231,6 +275,7 @@ bool ColdHistoryDatabase::DeleteOrphans() {
+ 
+ bool ColdHistoryDatabase::DeleteVisitsBetween(
+     const std::set<GURL>& urls,
++    const std::set<URLID>& hot_url_ids,
+     const std::optional<std::string>& app_id,
+     base::Time begin,
+     base::Time end) {
+@@ -267,11 +312,17 @@ bool ColdHistoryDatabase::DeleteVisitsBetween(
+   if (urls.empty()) {
+     delete_range(std::nullopt);
+   } else {
++    // aerographene (fatia 3): visits of a URL whose row went back hot point at
++    // the hot id.
++    std::set<URLID> ids(hot_url_ids);
+     for (const GURL& url : urls) {
+       if (URLID id = GetRowForURL(url, nullptr)) {
+-        delete_range(id);
++        ids.insert(id);
+       }
+     }
++    for (URLID id : ids) {
++      delete_range(id);
++    }
+   }
+   ok = ok && DeleteOrphans();
+   if (!ok) {
+@@ -281,7 +332,9 @@ bool ColdHistoryDatabase::DeleteVisitsBetween(
+   return CommitTransaction();
+ }
+ 
+-bool ColdHistoryDatabase::DeleteURLsAndVisits(const std::set<GURL>& urls) {
++bool ColdHistoryDatabase::DeleteURLsAndVisits(
++    const std::set<GURL>& urls,
++    const std::set<URLID>& hot_url_ids) {
+   if (!open_) {
+     return false;
+   }
+@@ -289,11 +342,13 @@ bool ColdHistoryDatabase::DeleteURLsAndVisits(const std::set<GURL>& urls) {
+     return false;
+   }
+   bool ok = true;
++  std::set<URLID> ids(hot_url_ids);
+   for (const GURL& url : urls) {
+-    URLID id = GetRowForURL(url, nullptr);
+-    if (!id) {
+-      continue;
++    if (URLID id = GetRowForURL(url, nullptr)) {
++      ids.insert(id);
+     }
++  }
++  for (URLID id : ids) {
+     sql::Statement statement(
+         db_.GetCachedStatement(SQL_FROM_HERE, "DELETE FROM visits WHERE url = ?"));
+     statement.BindInt64(0, id);
+--- a/components/history/core/browser/cold_history_database.h
++++ b/components/history/core/browser/cold_history_database.h
+@@ -57,15 +57,24 @@ class ColdHistoryDatabase : public URLDatabase, public VisitDatabase {
+   // when a copied row turned out to stay in the hot database.
+   bool DeleteURLRowsByID(const std::set<URLID>& ids);
+ 
++  // aerographene (fatia 3): a revisited URL went back hot as `hot_id`. Points
++  // its cold visits at `hot_id` (they stay cold) and removes the cold url row
++  // and its keyword terms, in one transaction.
++  bool MoveURLRowOut(URLID cold_id, URLID hot_id);
++
+   // User-initiated deletion. Removes visits in [begin, end) (null end = no
+   // limit), optionally only for `urls` and/or `app_id`, then urls without
+   // visits and orphaned keyword terms / visit sources.
++  // `hot_url_ids` adds ids of urls rows that live hot (revisited URLs whose
++  // older visits stayed cold).
+   bool DeleteVisitsBetween(const std::set<GURL>& urls,
++                           const std::set<URLID>& hot_url_ids,
+                            const std::optional<std::string>& app_id,
+                            base::Time begin,
+                            base::Time end);
+   // Removes the urls rows for `urls` and all their visits.
+-  bool DeleteURLsAndVisits(const std::set<GURL>& urls);
++  bool DeleteURLsAndVisits(const std::set<GURL>& urls,
++                           const std::set<URLID>& hot_url_ids);
+ 
+   // Closes the handle and deletes the file (and journals).
+   bool CloseAndDelete();
+@@ -76,6 +85,8 @@ class ColdHistoryDatabase : public URLDatabase, public VisitDatabase {
+ 
+   bool InitTables();
+   bool DeleteOrphans();
++  // Re-points visits/terms from `old_id` to `new_id` and drops `old_id`'s row.
++  bool ChangeURLID(URLID old_id, URLID new_id);
+   void OnDatabaseError(int error, sql::Statement* stmt);
+ 
+   const base::FilePath path_;
+--- a/components/history/core/browser/expire_history_backend.cc
++++ b/components/history/core/browser/expire_history_backend.cc
+@@ -190,6 +190,19 @@ void ExpireHistoryBackend::SetDatabases(HistoryDatabase* main_db,
+ void ExpireHistoryBackend::SetColdDatabasePath(const base::FilePath& path) {
+   cold_db_.reset();
+   cold_db_path_ = path;
++  cold_db_missing_ = false;
++}
++
++ColdHistoryDatabase* ExpireHistoryBackend::GetColdDatabaseIfExists() {
++  if (cold_db_ && cold_db_->is_open()) {
++    return cold_db_.get();
++  }
++  if (cold_db_missing_) {
++    return nullptr;
++  }
++  ColdHistoryDatabase* cold = GetColdDatabase(/*create=*/false);
++  cold_db_missing_ = !cold;
++  return cold;
+ }
+ 
+ ColdHistoryDatabase* ExpireHistoryBackend::GetColdDatabase(bool create) {
+@@ -211,11 +224,13 @@ void ExpireHistoryBackend::DeleteColdDatabase() {
+   }
+   cold_db_->CloseAndDelete();
+   cold_db_.reset();
++  cold_db_missing_ = true;
+ }
+ 
+ bool ExpireHistoryBackend::CopyToCold(const VisitVector& visits,
+                                       std::set<URLID>* copied_url_ids) {
+   ColdHistoryDatabase* cold = GetColdDatabase(/*create=*/true);
++  cold_db_missing_ = !cold;
+   if (!cold || !cold->BeginTransaction()) {
+     return false;
+   }
+@@ -253,10 +268,14 @@ void ExpireHistoryBackend::DeleteURLs(base::span<const GURL> urls,
+     return;
+ 
+   DeleteEffects effects;
++  // aerographene: hot ids, for cold visits of URLs that went back hot.
++  std::set<URLID> hot_url_ids;
+   for (const auto& url : urls) {
+     const bool is_pinned = backend_client_ && backend_client_->IsPinnedURL(url);
+     URLRow url_row;
+-    if (!main_db_->GetRowForURL(url, &url_row)) {
++    if (main_db_->GetRowForURL(url, &url_row)) {
++      hot_url_ids.insert(url_row.id());
++    } else {
+       if (!is_pinned) {
+         // If the URL isn't in the database and not pinned, we should still
+         // check to see if any favicons need to be deleted.
+@@ -300,10 +319,10 @@ void ExpireHistoryBackend::DeleteURLs(base::span<const GURL> urls,
+   if (ColdHistoryDatabase* cold = GetColdDatabase(/*create=*/false)) {
+     std::set<GURL> cold_urls(urls.begin(), urls.end());
+     if (end_time.is_null() || end_time.is_max()) {
+-      cold->DeleteURLsAndVisits(cold_urls);
++      cold->DeleteURLsAndVisits(cold_urls, hot_url_ids);
+     } else {
+-      cold->DeleteVisitsBetween(cold_urls, std::nullopt, base::Time(),
+-                                end_time + base::Microseconds(1));
++      cold->DeleteVisitsBetween(cold_urls, hot_url_ids, std::nullopt,
++                                base::Time(), end_time + base::Microseconds(1));
+     }
+   }
+ }
+@@ -321,8 +340,8 @@ void ExpireHistoryBackend::ExpireHistoryBetween(
+   VisitVector visits;
+   main_db_->GetAllVisitsInRange(begin_time, end_time, restrict_app_id, 0,
+                                 &visits);
++  std::set<URLID> url_ids;
+   if (!restrict_urls.empty()) {
+-    std::set<URLID> url_ids;
+     for (const auto& restrict_url : restrict_urls)
+       url_ids.insert(main_db_->GetRowForURL(restrict_url, nullptr));
+     VisitVector all_visits;
+@@ -340,8 +359,9 @@ void ExpireHistoryBackend::ExpireHistoryBetween(
+ 
+   // aerographene: deleting a range also deletes it from History-Cold.
+   if (ColdHistoryDatabase* cold = GetColdDatabase(/*create=*/false)) {
+-    cold->DeleteVisitsBetween(restrict_urls, restrict_app_id, begin_time,
+-                              end_time);
++    url_ids.erase(0);
++    cold->DeleteVisitsBetween(restrict_urls, url_ids, restrict_app_id,
++                              begin_time, end_time);
+   }
+ }
+ 
+--- a/components/history/core/browser/expire_history_backend.h
++++ b/components/history/core/browser/expire_history_backend.h
+@@ -91,6 +91,11 @@ class ExpireHistoryBackend {
+   // aerographene: "clear all history" also removes History-Cold.
+   void DeleteColdDatabase();
+ 
++  // aerographene (fatias 3 e 4): History-Cold if its file exists, opened on
++  // first use. A missing file is checked once and remembered until a move
++  // creates it, so navigation never stats or opens it again.
++  ColdHistoryDatabase* GetColdDatabaseIfExists();
++
+   // Deletes everything associated with a URL until `end_time`.
+   void DeleteURL(const GURL& url, base::Time end_time);
+ 
+@@ -341,6 +346,8 @@ class ExpireHistoryBackend {
+   // aerographene: History-Cold (ADR 0007), lazily opened.
+   base::FilePath cold_db_path_;
+   std::unique_ptr<ColdHistoryDatabase> cold_db_;
++  // aerographene: true once History-Cold is known to be missing or unusable.
++  bool cold_db_missing_ = false;
+ 
+   // Used to generate runnable methods to do timers on this class. They will be
+   // automatically canceled when this class is deleted.
+--- a/components/history/core/browser/history_backend.cc
++++ b/components/history/core/browser/history_backend.cc
+@@ -46,6 +46,7 @@
+ #include "build/ios_buildflags.h"
+ #include "components/favicon/core/favicon_backend.h"
+ #include "components/favicon/core/favicon_types.h"
++#include "components/history/core/browser/cold_history_database.h"
+ #include "components/history/core/browser/download_constants.h"
+ #include "components/history/core/browser/download_row.h"
+ #include "components/history/core/browser/features.h"
+@@ -1361,9 +1362,13 @@ void HistoryBackend::InitImpl(
+ void HistoryBackend::CloseAllDatabases() {
+   // Reset to avoid dangling pointers to the database.
+   history_sync_bridge_.reset();
+-  expirer_.SetDatabases(/*main_db=*/nullptr, /*favicon_db=*/nullptr);
+   if (db_) {
++    // aerographene: the cold store closes with the expirer databases below.
+     CommitSingletonTransactionIfItExists();
++    FlushColdURLMoves();
++  }
++  expirer_.SetDatabases(/*main_db=*/nullptr, /*favicon_db=*/nullptr);
++  if (db_) {
+     db_.reset();
+     // Forget the first recorded time since the database is closed.
+     first_recorded_time_ = base::Time();
+@@ -1400,6 +1405,11 @@ std::pair<URLID, VisitID> HistoryBackend::AddPageVisit(
+   // See if this URL is already in the DB.
+   URLRow url_info(url);
+   URLID url_id = db_->GetRowForURL(url, &url_info);
++  if (!url_id) {
++    // aerographene (ADR 0007): a URL that only lives in History-Cold comes
++    // back hot with its counts and is then updated as an existing row.
++    url_id = RestoreURLFromCold(url, &url_info);
++  }
+   if (url_id) {
+     // Update of an existing row.
+     if (!ui::PageTransitionCoreTypeIs(transition, ui::PAGE_TRANSITION_RELOAD)) {
+@@ -1545,6 +1555,13 @@ void HistoryBackend::AddPagesWithDetails(const URLRows& urls,
+ 
+     URLRow existing_url;
+     URLID url_id = db_->GetRowForURL(i->url(), &existing_url);
++    if (!url_id) {
++      // aerographene (ADR 0007): no duplicate of a row that is in History-Cold.
++      url_id = RestoreURLFromCold(i->url(), &existing_url);
++      if (url_id) {
++        changed_urls.push_back(existing_url);
++      }
++    }
+     if (!url_id) {
+       // Add the page if it doesn't exist.
+       url_id = db_->AddURL(*i);
+@@ -1662,6 +1679,11 @@ void HistoryBackend::AddPageNoVisitForBookmark(const GURL& url,
+ 
+   URLRow url_info(url);
+   URLID url_id = db_->GetRowForURL(url, &url_info);
++  if (!url_id) {
++    // aerographene (ADR 0007): a cold row comes back hot instead of a
++    // duplicate.
++    url_id = RestoreURLFromCold(url, &url_info);
++  }
+   if (url_id) {
+     // URL is already known, nothing to do.
+     return;
+@@ -1680,6 +1702,59 @@ void HistoryBackend::AddPageNoVisitForBookmark(const GURL& url,
+   db_->AddURL(url_info);
+ }
+ 
++URLID HistoryBackend::RestoreURLFromCold(const GURL& url, URLRow* row) {
++  ColdHistoryDatabase* cold = expirer_.GetColdDatabaseIfExists();
++  if (!cold) {
++    return 0;
++  }
++  URLRow cold_row(url);
++  const URLID cold_id = cold->GetRowForURL(url, &cold_row);
++  if (!cold_id) {
++    return 0;
++  }
++  URLID hot_id = 0;
++  URLRow taken;
++  if (!db_->GetURLRow(cold_id, &taken)) {
++    // urls.id is AUTOINCREMENT, so the id freed by the move is normally still
++    // free: keep it and the cold visits keep pointing at it.
++    if (db_->InsertOrUpdateURLRowByID(cold_row)) {
++      hot_id = cold_id;
++    }
++  }
++  if (!hot_id) {
++    hot_id = db_->AddURL(cold_row);
++    if (!hot_id) {
++      return 0;
++    }
++  }
++  KeywordSearchTermRow term;
++  if (cold->GetKeywordSearchTermRow(cold_id, &term)) {
++    db_->SetKeywordSearchTermsForURL(hot_id, term.keyword_id, term.term);
++  }
++  pending_cold_url_moves_[cold_id] = hot_id;
++  cold_row.set_id(hot_id);
++  *row = cold_row;
++  ScheduleCommit();
++  return hot_id;
++}
++
++void HistoryBackend::FlushColdURLMoves() {
++  if (pending_cold_url_moves_.empty()) {
++    return;
++  }
++  std::map<URLID, URLID> moves;
++  moves.swap(pending_cold_url_moves_);
++  ColdHistoryDatabase* cold = expirer_.GetColdDatabaseIfExists();
++  if (!cold) {
++    return;
++  }
++  for (const auto& [cold_id, hot_id] : moves) {
++    // On failure the cold row stays; the URL then exists in both stores until
++    // the expirer copies it again (duplicates are ignored there).
++    cold->MoveURLRowOut(cold_id, hot_id);
++  }
++}
++
+ bool HistoryBackend::CanAddURL(const GURL& url) const {
+   return delegate_->CanAddURL(url);
+ }
+@@ -3364,6 +3439,9 @@ void HistoryBackend::Commit() {
+   CancelScheduledCommit();
+ 
+   CommitSingletonTransactionIfItExists();
++  // aerographene: cold rows leave History-Cold only after the hot rows that
++  // replace them are on disk.
++  FlushColdURLMoves();
+   BeginSingletonTransaction();
+ 
+   // `FaviconBackend` has its OWN internal long-running transaction.
+@@ -3821,6 +3899,7 @@ void HistoryBackend::NotifyVisitsDeleted(
+ 
+ void HistoryBackend::DeleteAllHistory() {
+   // aerographene: "clear all history" also removes History-Cold (ADR 0007).
++  pending_cold_url_moves_.clear();
+   expirer_.DeleteColdDatabase();
+ 
+   // Our approach to deleting all history is:
+--- a/components/history/core/browser/history_backend.h
++++ b/components/history/core/browser/history_backend.h
+@@ -9,6 +9,7 @@
+ #include <stdint.h>
+ 
+ #include <list>
++#include <map>
+ #include <memory>
+ #include <optional>
+ #include <set>
+@@ -942,6 +943,15 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
+   // match the `host_name` string. Returns any matches.
+   URLRows GetMatchesForHost(const std::u16string& host_name);
+ 
++  // aerographene (ADR 0007, fatia 3): if `url` is not hot but its urls row is
++  // in History-Cold, puts the row back in the hot database (same id when free,
++  // counts preserved) and fills `row`. The cold row is removed after the next
++  // hot commit. Returns the hot id, or 0. Only runs when the cold file exists.
++  URLID RestoreURLFromCold(const GURL& url, URLRow* row);
++  // Applies the cold row removals queued by RestoreURLFromCold. Called after
++  // the hot singleton transaction commits.
++  void FlushColdURLMoves();
++
+   // Committing ----------------------------------------------------------------
+ 
+   // We always keep a transaction open on the history database so that multiple
+@@ -1135,6 +1145,10 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
+   // Manages expiration between the various databases.
+   ExpireHistoryBackend expirer_;
+ 
++  // aerographene (fatia 3): cold url id -> hot url id of rows restored from
++  // History-Cold, removed from the cold store once the hot rows are committed.
++  std::map<URLID, URLID> pending_cold_url_moves_;
++
+   scoped_refptr<base::SequencedTaskRunner> task_runner_;
+ 
+   // Contains diagnostic information about the sql database that is non-empty
