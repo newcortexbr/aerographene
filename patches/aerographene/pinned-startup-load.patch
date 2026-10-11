@@ -43,7 +43,7 @@ Depende de aerographene/pinned-model-tabstrip.patch e pinned-closed.patch
  #include "chrome/browser/lifetime/application_lifetime_desktop.h"
  #include "chrome/browser/profiles/profile.h"
  #include "chrome/browser/ui/browser_tabstrip.h"
-@@ -245,6 +248,133 @@
+@@ -245,6 +248,136 @@
  
  void PinnedTabMirror::OnPinnedModelLoaded() {
    AssociateAllPinnedTabs();
@@ -56,9 +56,12 @@ Depende de aerographene/pinned-model-tabstrip.patch e pinned-closed.patch
 +                                weak_factory_.GetWeakPtr()));
 +}
 +
++// NTP hosts: "newtab", "new-tab-page" and "new-tab-page-third-party" (the last
++// one is the startup NTP seen at runtime as a pending URL).
 +static bool IsNewTabPageURL(const GURL& url) {
 +  return (url.SchemeIs("chrome") || url.SchemeIs("chrome-untrusted")) &&
-+         (url.host() == "newtab" || url.host() == "new-tab-page");
++         (url.host() == "newtab" || url.host() == "new-tab-page" ||
++          url.host() == "new-tab-page-third-party");
 +}
 +
 +// True for a new tab page the user has not touched: it is the only history
