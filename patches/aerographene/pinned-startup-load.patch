@@ -32,17 +32,18 @@ Depende de aerographene/pinned-model-tabstrip.patch e pinned-closed.patch
 
 --- a/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc
 +++ b/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc
-@@ -9,6 +9,9 @@
+@@ -9,6 +9,10 @@
  
  #include "base/auto_reset.h"
  #include "base/functional/bind.h"
 +#include "base/location.h"
 +#include "base/task/single_thread_task_runner.h"
 +#include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/navigation_entry.h"
  #include "chrome/browser/lifetime/application_lifetime_desktop.h"
  #include "chrome/browser/profiles/profile.h"
  #include "chrome/browser/ui/browser_tabstrip.h"
-@@ -245,6 +248,122 @@
+@@ -245,6 +248,133 @@
  
  void PinnedTabMirror::OnPinnedModelLoaded() {
    AssociateAllPinnedTabs();
@@ -61,18 +62,29 @@ Depende de aerographene/pinned-model-tabstrip.patch e pinned-closed.patch
 +}
 +
 +// True for a new tab page the user has not touched: it is the only history
-+// entry and nothing else is loading or pending.
++// entry, and neither a pending navigation nor the last committed entry points
++// to a URL other than the new tab page. The startup NTP may still be
++// navigating when the model loads, so a pending NTP navigation is allowed.
 +static bool IsUntouchedNewTab(const tabs::TabInterface* tab) {
 +  content::WebContents* contents = tab ? tab->GetContents() : nullptr;
 +  if (!contents) {
 +    return false;
 +  }
 +  content::NavigationController& controller = contents->GetController();
-+  if (controller.GetEntryCount() > 1 || controller.GetPendingEntry()) {
++  if (controller.GetEntryCount() > 1) {
 +    return false;
 +  }
-+  const GURL url = GetTabURL(tab);
-+  return IsNewTabPageURL(url) && IsNewTabPageURL(contents->GetVisibleURL());
++  const content::NavigationEntry* pending = controller.GetPendingEntry();
++  if (pending && !IsNewTabPageURL(pending->GetURL())) {
++    return false;
++  }
++  const content::NavigationEntry* committed =
++      controller.GetLastCommittedEntry();
++  if (committed && !committed->IsInitialEntry() &&
++      !IsNewTabPageURL(committed->GetURL())) {
++    return false;
++  }
++  return IsNewTabPageURL(contents->GetVisibleURL());
 +}
 +
 +void PinnedTabMirror::AdoptStartupTabs() {
