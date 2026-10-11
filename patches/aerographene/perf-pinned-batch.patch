@@ -45,7 +45,22 @@ diff -ruN a/chrome/browser/ui/tabs/aerographene/pinned_model.cc b/chrome/browser
      return -1;
    }
    int index = 0;
-@@ -497,7 +499,28 @@ const BookmarkNode* PinnedModel::ResolveParent(const base::Uuid& uuid) const {
+@@ -423,8 +425,12 @@
+     return;
+   }
+   EnsureRoot();
+-  for (Observer& observer : observers_) {
+-    observer.OnPinnedModelLoaded();
++  {
++    // Defers notifications from observers until the loop has ended.
++    ScopedBatch batch(this);
++    for (Observer& observer : observers_) {
++      observer.OnPinnedModelLoaded();
++    }
+   }
+ }
+ 
+@@ -497,7 +503,28 @@ const BookmarkNode* PinnedModel::ResolveParent(const base::Uuid& uuid) const {
    return (node && node->parent() == root_ && IsDrawer(node)) ? node : nullptr;
  }
  
