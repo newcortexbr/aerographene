@@ -20,23 +20,29 @@ está open=1, abre aba pinned mapeada a essa entrada (next_entry_). Entradas
 fechadas (open=0) sem aba correspondente continuam fechadas. Se o modelo já
 estava carregado no startup, o caminho síncrono de pinned-startup-url trata
 tudo e este passo não encontra nada a fazer.
+Aba nova padrão sobrando: sem URL de início o startup já abriu a NTP; se esta
+passada reabriu ao menos uma pinned e a janela tem exatamente uma aba comum, e
+ela é a NTP intocada (URL chrome://newtab/ ou NTP equivalente, 1 entrada de
+histórico, sem navegação pendente), ativa a pinned reaberta e fecha essa NTP.
+Se o usuário já navegou/digitou (outra URL, mais entradas, pendente), não fecha.
 Limites: só atua se houver janela normal do perfil quando o modelo carrega;
-duas abas comuns iguais fixam só uma; sem teste em runtime nem compilação.
+duas abas comuns iguais fixam só uma; sem teste em runtime.
 Depende de aerographene/pinned-model-tabstrip.patch e pinned-closed.patch
 (serie: depois deles).
 
 --- a/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc
 +++ b/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc
-@@ -9,6 +9,8 @@
+@@ -9,6 +9,9 @@
  
  #include "base/auto_reset.h"
  #include "base/functional/bind.h"
 +#include "base/location.h"
 +#include "base/task/single_thread_task_runner.h"
++#include "content/public/browser/navigation_controller.h"
  #include "chrome/browser/lifetime/application_lifetime_desktop.h"
  #include "chrome/browser/profiles/profile.h"
  #include "chrome/browser/ui/browser_tabstrip.h"
-@@ -245,6 +247,88 @@
+@@ -245,6 +248,122 @@
  
  void PinnedTabMirror::OnPinnedModelLoaded() {
    AssociateAllPinnedTabs();
@@ -47,6 +53,26 @@ Depende de aerographene/pinned-model-tabstrip.patch e pinned-closed.patch
 +  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
 +      FROM_HERE, base::BindOnce(&PinnedTabMirror::AdoptStartupTabs,
 +                                weak_factory_.GetWeakPtr()));
++}
++
++static bool IsNewTabPageURL(const GURL& url) {
++  return (url.SchemeIs("chrome") || url.SchemeIs("chrome-untrusted")) &&
++         (url.host() == "newtab" || url.host() == "new-tab-page");
++}
++
++// True for a new tab page the user has not touched: it is the only history
++// entry and nothing else is loading or pending.
++static bool IsUntouchedNewTab(const tabs::TabInterface* tab) {
++  content::WebContents* contents = tab ? tab->GetContents() : nullptr;
++  if (!contents) {
++    return false;
++  }
++  content::NavigationController& controller = contents->GetController();
++  if (controller.GetEntryCount() > 1 || controller.GetPendingEntry()) {
++    return false;
++  }
++  const GURL url = GetTabURL(tab);
++  return IsNewTabPageURL(url) && IsNewTabPageURL(contents->GetVisibleURL());
 +}
 +
 +void PinnedTabMirror::AdoptStartupTabs() {
@@ -73,6 +99,7 @@ Depende de aerographene/pinned-model-tabstrip.patch e pinned-closed.patch
 +    GURL url;
 +    bool open;
 +  };
++  bool reopened = false;
 +  std::vector<Candidate> candidates;
 +  auto add = [&](const PinnedItem& item) {
 +    if (!item.is_folder && item.url.is_valid() &&
@@ -120,8 +147,21 @@ Depende de aerographene/pinned-model-tabstrip.patch e pinned-closed.patch
 +                       /*foreground=*/false, /*group=*/std::nullopt,
 +                       /*pinned=*/true);
 +      next_entry_.reset();
++      reopened = true;
 +    }
 +  }
++  if (!reopened || strip->count() - strip->IndexOfFirstNonPinnedTab() != 1) {
++    return;
++  }
++  // The startup already opened the default new tab (no start URL) and it is
++  // now the lone ordinary tab next to the reopened pinned ones: drop it, but
++  // only while untouched.
++  const int ntp_index = strip->IndexOfFirstNonPinnedTab();
++  if (!IsUntouchedNewTab(strip->GetTabAtIndex(ntp_index))) {
++    return;
++  }
++  strip->ActivateTabAt(ntp_index - 1);
++  strip->CloseWebContentsAt(ntp_index, TabCloseTypes::CLOSE_NONE);
  }
  
  void PinnedTabMirror::OnPinnedChanged() {
