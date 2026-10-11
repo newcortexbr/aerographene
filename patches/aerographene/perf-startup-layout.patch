@@ -1,0 +1,271 @@
+aerographene: menos relayout/invalidação redundante no startup (visual idêntico).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: traces de startup mostraram ~55% mais View::LayoutImmediately que o
+Helium; o omnibox centralizado explicava ~67% do tempo extra. Sem mudar o visual:
+1) ToolbarView::UpdateLocationBarCentering (chamado em todo BrowserView::Layout)
+   sai cedo se a chave {tamanho da toolbar, largura do pai, x, layout vertical}
+   é igual à da última centralização (feita pelo CenteredLocationBarLayout ou
+   por chamada anterior); a chave é gravada em GetCenteredLocationBarBounds e
+   zerada em OnLocationBarCenteredChanged. Mudança de filhos invalida a
+   toolbar, cujo Layout recentraliza e regrava a chave; redimensionar a janela,
+   largura da sidebar (x/largura do pai) e fullscreen mudam a chave.
+2) ToolbarView::UpdateSidebarToggle só chama SetVisible/SetVectorIcon/
+   SetTooltipText quando visibilidade ou estado recolhido mudaram.
+3) VerticalTabStripRegionView: footer_ nasce com a visibilidade inicial certa e
+   SetVisible(!collapsed) só ocorre quando muda.
+4) PinnedTabContainerView::RefreshClosedPinned só invalida o layout se mudaram
+   posições/pastas do modelo, conjunto ou ordem de placeholders/linhas de
+   pasta, span ou expanded (Update agora devolve bool de layout).
+Depende de: omnibox-centered, sidebar-toggle-button, sidebar-footer,
+pinned-closed, pinned-folder e perf-pinned-* (aplica por último).
+
+---
+diff -ruN a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -142,6 +142,10 @@
+   // OnTabStripViewSet poe o TabStripView antes dele.
+   footer_ = AddChildView(
+       std::make_unique<VerticalTabStripFooter>(browser_view->browser()));
++  // Born with the right visibility so the first OnCollapseStateChanged below
++  // does not toggle it.
++  footer_->SetVisible(state_controller_->GetCollapseState() ==
++                      tabs::VerticalTabStripCollapseState::kExpanded);
+ 
+   gemini_button_ = AddChildView(std::make_unique<views::View>());
+ 
+@@ -758,7 +762,9 @@
+   }
+ 
+   // aerographene: rodape so com a sidebar expandida.
+-  footer_->SetVisible(!collapsed);
++  if (footer_->GetVisible() == collapsed) {
++    footer_->SetVisible(!collapsed);
++  }
+ 
+   if (state == tabs::VerticalTabStripCollapseState::kExpanded ||
+       state == tabs::VerticalTabStripCollapseState::kCollapsed) {
+diff -ruN a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
+--- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
++++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
+@@ -141,11 +141,15 @@
+ 
+   // `model_index` is the index among the top-level entries, or among the
+   // children of `folder` when `folder` is valid (entry inside a drawer).
+-  void Update(const aerographene::PinnedItem& item,
++  // Returns whether something that affects the grid layout changed (index,
++  // drawer or span); paint-only changes (text, favicon) return false.
++  bool Update(const aerographene::PinnedItem& item,
+               int model_index,
+               const base::Uuid& folder,
+               const gfx::Image& favicon) {
+     uuid_ = item.uuid;
++    bool layout_changed =
++        model_index_ != model_index || folder_ != folder;
+     model_index_ = model_index;
+     folder_ = folder;
+     const int span = std::max(item.span, 1);
+@@ -167,10 +171,12 @@
+       SchedulePaint();
+     }
+     if (span != span_ || !favicon_skia.BackedBySameObjectAs(favicon_)) {
++      layout_changed |= span != span_;
+       span_ = span;
+       favicon_ = favicon_skia;
+       SchedulePaint();
+     }
++    return layout_changed;
+   }
+ 
+   const base::Uuid& uuid() const { return uuid_; }
+@@ -301,8 +307,11 @@
+       const AerographenePinnedFolderView&) = delete;
+   ~AerographenePinnedFolderView() override = default;
+ 
+-  void Update(const aerographene::PinnedItem& item, int model_index) {
++  // Returns whether the index or the expanded state (grid layout) changed.
++  bool Update(const aerographene::PinnedItem& item, int model_index) {
+     uuid_ = item.uuid;
++    const bool layout_changed =
++        model_index_ != model_index || expanded_ != item.expanded;
+     model_index_ = model_index;
+     expanded_ = item.expanded;
+     text_ = item.label.empty() ? item.title : base::UTF8ToUTF16(item.label);
+@@ -314,6 +323,7 @@
+       GetViewAccessibility().SetIsCollapsed();
+     }
+     SchedulePaint();
++    return layout_changed;
+   }
+ 
+   const base::Uuid& uuid() const { return uuid_; }
+@@ -1145,15 +1155,21 @@
+   }
+   // Layout reads model positions from here instead of copying the model per
+   // frame: top-level index, or (folder, child index) inside a drawer.
+-  model_index_.clear();
+-  parent_folder_.clear();
++  std::map<base::Uuid, int> new_model_index;
++  std::map<base::Uuid, base::Uuid> new_parent_folder;
+   for (size_t i = 0; i < items.size(); ++i) {
+-    model_index_[items[i].uuid] = static_cast<int>(i);
++    new_model_index[items[i].uuid] = static_cast<int>(i);
+     for (size_t j = 0; j < items[i].children.size(); ++j) {
+-      model_index_[items[i].children[j].uuid] = static_cast<int>(j);
+-      parent_folder_[items[i].children[j].uuid] = items[i].uuid;
++      new_model_index[items[i].children[j].uuid] = static_cast<int>(j);
++      new_parent_folder[items[i].children[j].uuid] = items[i].uuid;
+     }
+   }
++  // Invalidate the layout only if something it reads changed: positions,
++  // set/order of placeholders and folder rows, spans, expanded state.
++  bool layout_changed =
++      new_model_index != model_index_ || new_parent_folder != parent_folder_;
++  model_index_ = std::move(new_model_index);
++  parent_folder_ = std::move(new_parent_folder);
+ 
+   std::map<base::Uuid, views::View*> previous;
+   for (AerographeneClosedPinnedView* view : closed_views_) {
+@@ -1182,8 +1198,10 @@
+                               base::Unretained(this), item.uuid),
+           base::BindRepeating(&PinnedTabContainerView::MoveClosedPinnedFolder,
+                               base::Unretained(this), item.uuid)));
++      layout_changed = true;
+     }
+-    view->Update(item, index, folder, model->GetFavicon(item.uuid));
++    layout_changed |=
++        view->Update(item, index, folder, model->GetFavicon(item.uuid));
+     next.push_back(view);
+   };
+   for (size_t i = 0; i < items.size(); ++i) {
+@@ -1201,13 +1219,16 @@
+       row = AddChildView(std::make_unique<AerographenePinnedFolderView>(
+           base::BindRepeating(&PinnedTabContainerView::ToggleFolder,
+                               base::Unretained(this), item.uuid)));
++      layout_changed = true;
+     }
+-    row->Update(item, static_cast<int>(i));
++    layout_changed |= row->Update(item, static_cast<int>(i));
+     next_folders.push_back(row);
+     for (size_t j = 0; j < item.children.size(); ++j) {
+       add_closed(item.children[j], static_cast<int>(j), item.uuid);
+     }
+   }
++  layout_changed |= next != closed_views_ || next_folders != folder_views_ ||
++                    !previous.empty();
+   closed_views_ = std::move(next);
+   folder_views_ = std::move(next_folders);
+   // Out of the grid now; the layout manager deletes them on a later layout
+@@ -1215,7 +1236,9 @@
+   for (auto& [uuid, view] : previous) {
+     layout_manager_->AnimateAndDestroyChildView(view);
+   }
+-  InvalidateLayout();
++  if (layout_changed) {
++    InvalidateLayout();
++  }
+ }
+ 
+ std::vector<views::View*> PinnedTabContainerView::GetGridChildren(
+diff -ruN a/chrome/browser/ui/views/toolbar/toolbar_view.cc b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.cc
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+@@ -1899,11 +1899,20 @@
+   }
+   auto* layout = HeliumLayoutStateController::From(browser_view_->browser());
+   auto* state = tabs::VerticalTabStripStateController::From(browser_);
+-  sidebar_toggle_->SetVisible(layout && layout->IsVerticalLayout() && state);
++  // Called on every vertical-tabs/collapse notification and at startup: touch
++  // the button only when something changed.
++  const bool visible = layout && layout->IsVerticalLayout() && state;
++  if (sidebar_toggle_->GetVisible() != visible) {
++    sidebar_toggle_->SetVisible(visible);
++  }
+   if (!state) {
+     return;
+   }
+   const bool collapsed = state->IsCollapsed();
++  if (sidebar_toggle_collapsed_ == collapsed) {
++    return;
++  }
++  sidebar_toggle_collapsed_ = collapsed;
+   sidebar_toggle_->SetVectorIcon(
+       collapsed ? (features::IsRoundedIconsEnabled() ? views::kMenuOpenIcon
+                                                      : views::kMenuOpenOldIcon)
+@@ -2184,6 +2193,7 @@
+ }
+ 
+ void ToolbarView::OnLocationBarCenteredChanged() {
++  last_centering_key_.reset();
+   InvalidateLayout();
+ }
+ 
+@@ -2193,6 +2203,14 @@
+     return;
+   }
+ 
++  // Nothing the centering reads changed since the last computation (made by
++  // the toolbar's own layout or by a previous call): the omnibox is already
++  // in place. Child changes invalidate the toolbar, whose layout recomputes
++  // and records the key again.
++  if (last_centering_key_ == GetCenteringKey()) {
++    return;
++  }
++
+   // Use the original FlexLayout slot to avoid shrinking on repeated updates.
+   const auto layout = layout_manager_->GetProposedLayout(size());
+   const auto* location_bar_layout = layout.GetLayoutFor(location_bar_view_);
+@@ -2203,6 +2221,13 @@
+   }
+ }
+ 
++ToolbarView::CenteringKey ToolbarView::GetCenteringKey() const {
++  auto* controller =
++      HeliumLayoutStateController::From(browser_view_->browser());
++  return CenteringKey{size(), parent() ? parent()->width() : 0, x(),
++                      controller && controller->IsVerticalLayout()};
++}
++
+ gfx::Rect ToolbarView::GetCenteredLocationBarBounds(gfx::Rect bounds,
+                                                     int toolbar_width) const {
+   if (display_mode_ != DisplayMode::kNormal ||
+@@ -2210,6 +2235,8 @@
+     return bounds;
+   }
+ 
++  last_centering_key_ = GetCenteringKey();
++
+   auto* controller =
+       HeliumLayoutStateController::From(browser_view_->browser());
+   const int target_width = controller && controller->IsVerticalLayout()
+diff -ruN a/chrome/browser/ui/views/toolbar/toolbar_view.h b/chrome/browser/ui/views/toolbar/toolbar_view.h
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.h
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.h
+@@ -368,6 +368,17 @@
+   gfx::Rect GetCenteredLocationBarBounds(gfx::Rect bounds,
+                                          int toolbar_width) const;
+ 
++  // Inputs of GetCenteredLocationBarBounds besides the layout slot; equal
++  // keys mean the centered bounds cannot have changed.
++  struct CenteringKey {
++    gfx::Size size;
++    int parent_width;
++    int x;
++    bool vertical;
++    bool operator==(const CenteringKey&) const = default;
++  };
++  CenteringKey GetCenteringKey() const;
++
+   void OnTouchUiChanged();
+ 
+   void InitGlicContainer();
+@@ -410,6 +421,8 @@
+   // |location_bar_| is guaranteed to exist. These pointers are owned by the
+   // view hierarchy.
+   raw_ptr<ToolbarButton> sidebar_toggle_ = nullptr;
++  std::optional<bool> sidebar_toggle_collapsed_;
++  mutable std::optional<CenteringKey> last_centering_key_;
+   raw_ptr<ToolbarButton> back_ = nullptr;
+   raw_ptr<ToolbarButton> forward_ = nullptr;
+   raw_ptr<ReloadButton> reload_ = nullptr;
