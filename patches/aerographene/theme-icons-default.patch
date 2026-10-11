@@ -1,0 +1,763 @@
+aerographene: ícones do tema default (tabela default-icons/icons-v2.json).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/theme-icons-infra.patch.
+Propósito: 32 .icon (16dip, traço 1,5, CAP_BUTT, sem curvas) gerados por
+theming/design-language/gen_theme_icons.py e o mapa id -> ícones upstream.
+
+--- a/chrome/browser/ui/aerographene_theme_icons/BUILD.gn
++++ b/chrome/browser/ui/aerographene_theme_icons/BUILD.gn
+@@ -10,6 +10,38 @@ aggregate_vector_icons("aerographene_theme_vector_icons") {
+ 
+   sources = [
+     # aerographene: theme-icons-default
++    "default_back.icon",
++    "default_bell.icon",
++    "default_check.icon",
++    "default_chev.icon",
++    "default_chevr.icon",
++    "default_chl.icon",
++    "default_chr.icon",
++    "default_close.icon",
++    "default_dl.icon",
++    "default_down.icon",
++    "default_ext.icon",
++    "default_ext2.icon",
++    "default_folder.icon",
++    "default_fwd.icon",
++    "default_gear.icon",
++    "default_hist.icon",
++    "default_info.icon",
++    "default_link.icon",
++    "default_max.icon",
++    "default_min.icon",
++    "default_minus.icon",
++    "default_mon.icon",
++    "default_more.icon",
++    "default_plus.icon",
++    "default_rel.icon",
++    "default_search.icon",
++    "default_side.icon",
++    "default_spk.icon",
++    "default_spkoff.icon",
++    "default_split.icon",
++    "default_up.icon",
++    "default_win.icon",
+     # aerographene: theme-icons-pixelized
+     # aerographene: theme-icon-ublock
+   ]
+--- a/chrome/browser/ui/aerographene_theme_icons/aerographene_theme_icons.cc
++++ b/chrome/browser/ui/aerographene_theme_icons/aerographene_theme_icons.cc
+@@ -23,6 +23,122 @@ Theme g_theme = Theme::kDefault;
+ // theming/design-language/gen_theme_icons.py (modo "map").
+ void AddDefaultIcons(gfx::VectorIconOverrideMap* map) {
+   // aerographene: theme-icons-default
++  // i-back: views/toolbar/back_forward_button.cc:48-53
++  (*map)[&vector_icons::kArrowBackIcon] = &aerographene_theme_icons::kDefaultBackIcon;
++  (*map)[&vector_icons::kBackArrowChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultBackIcon;
++  (*map)[&::kBackArrowTouchOldIcon] = &aerographene_theme_icons::kDefaultBackIcon;
++  // i-fwd: views/toolbar/back_forward_button.cc:62-67
++  (*map)[&vector_icons::kArrowForwardIcon] = &aerographene_theme_icons::kDefaultFwdIcon;
++  (*map)[&vector_icons::kForwardArrowChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultFwdIcon;
++  (*map)[&::kForwardArrowTouchOldIcon] = &aerographene_theme_icons::kDefaultFwdIcon;
++  // i-rel: views/toolbar/reload_button.cc:68-73
++  (*map)[&vector_icons::kRefreshIcon] = &aerographene_theme_icons::kDefaultRelIcon;
++  (*map)[&vector_icons::kReloadChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultRelIcon;
++  (*map)[&::kReloadTouchOldIcon] = &aerographene_theme_icons::kDefaultRelIcon;
++  // i-side: aerographene/sidebar-toggle-button.patch (sidebar_toggle_)
++  (*map)[&views::kMenuOpenIcon] = &aerographene_theme_icons::kDefaultSideIcon;
++  (*map)[&views::kMenuOpenOldIcon] = &aerographene_theme_icons::kDefaultSideIcon;
++  (*map)[&views::kMenuCloseCustomIcon] = &aerographene_theme_icons::kDefaultSideIcon;
++  // i-search: toolbar/app_menu_model.cc:2267, omnibox
++  (*map)[&vector_icons::kSearchIcon] = &aerographene_theme_icons::kDefaultSearchIcon;
++  (*map)[&vector_icons::kSearchChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultSearchIcon;
++  // i-hist: tabs/recent_tabs_builder.cc:247-248
++  (*map)[&vector_icons::kHistoryIcon] = &aerographene_theme_icons::kDefaultHistIcon;
++  (*map)[&::kHistoryIcon] = &aerographene_theme_icons::kDefaultHistIcon;
++  (*map)[&vector_icons::kHistoryChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultHistIcon;
++  // i-dl: views/download/bubble/download_toolbar_ui_controller.cc:698-702
++  (*map)[&vector_icons::kDownloadIcon] = &aerographene_theme_icons::kDefaultDlIcon;
++  (*map)[&::kDownloadIcon] = &aerographene_theme_icons::kDefaultDlIcon;
++  (*map)[&::kDownloadToolbarButtonChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultDlIcon;
++  (*map)[&::kDownloadToolbarButtonTouchOldIcon] = &aerographene_theme_icons::kDefaultDlIcon;
++  // i-ext: extensions/extensions_toolbar_view_model.cc:179-181
++  (*map)[&vector_icons::kChromeExtensionIcon] = &aerographene_theme_icons::kDefaultExtIcon;
++  (*map)[&vector_icons::kExtensionChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultExtIcon;
++  // i-more: views/toolbar/browser_app_menu_button.cc:154-159
++  (*map)[&::kMoreVertIcon] = &aerographene_theme_icons::kDefaultMoreIcon;
++  (*map)[&::kBrowserToolsChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultMoreIcon;
++  (*map)[&::kBrowserToolsTouchOldIcon] = &aerographene_theme_icons::kDefaultMoreIcon;
++  // i-link: toolbar/app_menu_model.cc:921-922
++  (*map)[&vector_icons::kLinkIcon] = &aerographene_theme_icons::kDefaultLinkIcon;
++  (*map)[&::kLinkChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultLinkIcon;
++  // i-info: views/location_bar/location_icon_view.cc:208-211
++  (*map)[&omnibox::kPageInfoCustomIcon] = &aerographene_theme_icons::kDefaultInfoIcon;
++  (*map)[&omnibox::kSecurePageInfoChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultInfoIcon;
++  // i-plus: views/toolbar/app_menu.cc:733, omnibox/omnibox_edit_model.cc:586
++  (*map)[&::kAddIcon] = &aerographene_theme_icons::kDefaultPlusIcon;
++  (*map)[&::kAddChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultPlusIcon;
++  // i-close: views/tabs/tab/tab_close_button.cc:212-214, ui/views/window/frame_view_linux.cc:92-93
++  (*map)[&views::kCloseIcon] = &aerographene_theme_icons::kDefaultCloseIcon;
++  (*map)[&vector_icons::kCloseIcon] = &aerographene_theme_icons::kDefaultCloseIcon;
++  (*map)[&::kCloseIcon] = &aerographene_theme_icons::kDefaultCloseIcon;
++  (*map)[&vector_icons::kCloseChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultCloseIcon;
++  (*map)[&::kCloseChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultCloseIcon;
++  (*map)[&::kCloseWeight500CustomIcon] = &aerographene_theme_icons::kDefaultCloseIcon;
++  (*map)[&::kCloseTabChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultCloseIcon;
++  (*map)[&views::kWindowControlCloseOldIcon] = &aerographene_theme_icons::kDefaultCloseIcon;
++  // i-min: ui/views/window/frame_view_linux.cc:99-100, views/frame/opaque_browser_frame_view.cc:173
++  (*map)[&views::kChromeMinimizeIcon] = &aerographene_theme_icons::kDefaultMinIcon;
++  (*map)[&::kChromeMinimizeIcon] = &aerographene_theme_icons::kDefaultMinIcon;
++  (*map)[&views::kWindowControlMinimizeOldIcon] = &aerographene_theme_icons::kDefaultMinIcon;
++  // i-max: ui/views/window/frame_view_linux.cc:106-107
++  (*map)[&views::kChromeMaximizeIcon] = &aerographene_theme_icons::kDefaultMaxIcon;
++  (*map)[&views::kWindowControlMaximizeOldIcon] = &aerographene_theme_icons::kDefaultMaxIcon;
++  // i-win: toolbar/app_menu_model.cc:2104
++  (*map)[&views::kNewWindowIcon] = &aerographene_theme_icons::kDefaultWinIcon;
++  (*map)[&::kNewWindowIcon] = &aerographene_theme_icons::kDefaultWinIcon;
++  (*map)[&views::kNewWindowOldIcon] = &aerographene_theme_icons::kDefaultWinIcon;
++  (*map)[&::kNewWindowOldIcon] = &aerographene_theme_icons::kDefaultWinIcon;
++  // i-minus: views/location_bar/zoom_bubble_view.cc:291, views/zoom/zoom_view_controller.cc:80
++  (*map)[&::kRemoveIcon] = &aerographene_theme_icons::kDefaultMinusIcon;
++  (*map)[&::kRemoveOldIcon] = &aerographene_theme_icons::kDefaultMinusIcon;
++  (*map)[&::kZoomMinusChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultMinusIcon;
++  // i-chev: views/find_bar_view.cc:299, views/tabs/common/tab_group_header_view.cc:566
++  (*map)[&vector_icons::kKeyboardArrowDownIcon] = &aerographene_theme_icons::kDefaultChevIcon;
++  (*map)[&::kKeyboardArrowDownIcon] = &aerographene_theme_icons::kDefaultChevIcon;
++  (*map)[&::kKeyboardArrowDownChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultChevIcon;
++  // i-chevr: ui/views/controls/menu/menu_item_view.cc:1705-1706
++  (*map)[&vector_icons::kKeyboardArrowRightFlippableIcon] = &aerographene_theme_icons::kDefaultChevrIcon;
++  (*map)[&vector_icons::kSubmenuArrowChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultChevrIcon;
++  // i-chl: views/tabs/horizontal/tab_scroll_button_container.cc:152
++  (*map)[&::kKeyboardArrowLeftIcon] = &aerographene_theme_icons::kDefaultChlIcon;
++  // i-chr: views/tabs/horizontal/tab_scroll_button_container.cc:166, views/download/bubble/download_bubble_row_view.cc:473
++  (*map)[&::kKeyboardArrowRightIcon] = &aerographene_theme_icons::kDefaultChrIcon;
++  (*map)[&::kChevronRightIcon] = &aerographene_theme_icons::kDefaultChrIcon;
++  // i-up: views/tabs/shared/drop_arrow.cc:35
++  (*map)[&::kArrowUpwardIcon] = &aerographene_theme_icons::kDefaultUpIcon;
++  // i-down: views/tabs/shared/drop_arrow.cc:38
++  (*map)[&::kArrowDownwardIcon] = &aerographene_theme_icons::kDefaultDownIcon;
++  // i-check: ui/views/controls/menu/menu_item_view.cc:1713
++  (*map)[&views::kCheckIcon] = &aerographene_theme_icons::kDefaultCheckIcon;
++  (*map)[&::kCheckIcon] = &aerographene_theme_icons::kDefaultCheckIcon;
++  (*map)[&views::kMenuCheckOldIcon] = &aerographene_theme_icons::kDefaultCheckIcon;
++  // i-gear: toolbar/app_menu_model.cc:2347, page_info/chrome_page_info_delegate.cc:268
++  (*map)[&vector_icons::kSettingsIcon] = &aerographene_theme_icons::kDefaultGearIcon;
++  (*map)[&::kSettingsIcon] = &aerographene_theme_icons::kDefaultGearIcon;
++  (*map)[&::kSettingsMenuOldIcon] = &aerographene_theme_icons::kDefaultGearIcon;
++  (*map)[&vector_icons::kSettingsChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultGearIcon;
++  // i-mon: toolbar/app_menu_model.cc:905
++  (*map)[&vector_icons::kDesktopWindowsIcon] = &aerographene_theme_icons::kDefaultMonIcon;
++  (*map)[&::kDesktopWindowsIcon] = &aerographene_theme_icons::kDefaultMonIcon;
++  // i-split: tabs/tab_menu_model.cc:347-349
++  (*map)[&::kSplitSceneIcon] = &aerographene_theme_icons::kDefaultSplitIcon;
++  (*map)[&::kSplitSceneOldIcon] = &aerographene_theme_icons::kDefaultSplitIcon;
++  // i-ext2: tabs/tab_menu_model.cc:463-464
++  (*map)[&::kOpenInNewIcon] = &aerographene_theme_icons::kDefaultExt2Icon;
++  (*map)[&views::kOpenInNewIcon] = &aerographene_theme_icons::kDefaultExt2Icon;
++  (*map)[&::kOpenInNewOldIcon] = &aerographene_theme_icons::kDefaultExt2Icon;
++  // i-folder: bookmarks/bookmark_utils.cc:388-390, ui/views/controls/tree/tree_view.cc:115
++  (*map)[&vector_icons::kFolderFlippableIcon] = &aerographene_theme_icons::kDefaultFolderIcon;
++  (*map)[&vector_icons::kFolderChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultFolderIcon;
++  // i-bell: page_info/page_info_view_factory.cc:353
++  (*map)[&vector_icons::kNotificationsIcon] = &aerographene_theme_icons::kDefaultBellIcon;
++  (*map)[&vector_icons::kNotificationsChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultBellIcon;
++  // i-spk: tabs/alert/tab_alert_icon.cc:72
++  (*map)[&vector_icons::kVolumeUpIcon] = &aerographene_theme_icons::kDefaultSpkIcon;
++  (*map)[&vector_icons::kVolumeUpChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultSpkIcon;
++  // i-spkoff: tabs/alert/tab_alert_icon.cc:76
++  (*map)[&vector_icons::kVolumeOffIcon] = &aerographene_theme_icons::kDefaultSpkoffIcon;
++  (*map)[&vector_icons::kVolumeOffChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultSpkoffIcon;
+ }
+ 
+ void AddPixelizedIcons(gfx::VectorIconOverrideMap* map) {
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_back.icon
+@@ -0,0 +1,12 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 13, 8,
++LINE_TO, 3, 8,
++MOVE_TO, 7, 4,
++LINE_TO, 3, 8,
++LINE_TO, 7, 12,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_bell.icon
+@@ -0,0 +1,18 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 3, 13,
++LINE_TO, 4, 12,
++LINE_TO, 4, 7,
++LINE_TO, 5.5f, 3.5f,
++LINE_TO, 10.5f, 3.5f,
++LINE_TO, 12, 7,
++LINE_TO, 12, 12,
++LINE_TO, 13, 13,
++CLOSE,
++MOVE_TO, 6.5f, 14.5f,
++LINE_TO, 9.5f, 14.5f,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_check.icon
+@@ -0,0 +1,10 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 3, 8.5f,
++LINE_TO, 6.5f, 12,
++LINE_TO, 13, 4.5f,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_chev.icon
+@@ -0,0 +1,10 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 4, 6,
++LINE_TO, 8, 10,
++LINE_TO, 12, 6,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_chevr.icon
+@@ -0,0 +1,11 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++FLIPS_IN_RTL,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 6, 4,
++LINE_TO, 10, 8,
++LINE_TO, 6, 12,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_chl.icon
+@@ -0,0 +1,10 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 10, 4,
++LINE_TO, 6, 8,
++LINE_TO, 10, 12,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_chr.icon
+@@ -0,0 +1,10 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 6, 4,
++LINE_TO, 10, 8,
++LINE_TO, 6, 12,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_close.icon
+@@ -0,0 +1,11 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 3.5f, 3.5f,
++LINE_TO, 12.5f, 12.5f,
++MOVE_TO, 12.5f, 3.5f,
++LINE_TO, 3.5f, 12.5f,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_dl.icon
+@@ -0,0 +1,14 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 8, 2,
++LINE_TO, 8, 10,
++MOVE_TO, 4.5f, 7,
++LINE_TO, 8, 10.5f,
++LINE_TO, 11.5f, 7,
++MOVE_TO, 3, 13.5f,
++LINE_TO, 13, 13.5f,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_down.icon
+@@ -0,0 +1,12 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 8, 3,
++LINE_TO, 8, 13,
++MOVE_TO, 4, 9,
++LINE_TO, 8, 13,
++LINE_TO, 12, 9,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_ext.icon
+@@ -0,0 +1,28 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 3, 4.5f,
++LINE_TO, 6.5f, 4.5f,
++LINE_TO, 6.5f, 3,
++LINE_TO, 9.5f, 3,
++LINE_TO, 9.5f, 4.5f,
++LINE_TO, 13, 4.5f,
++LINE_TO, 13, 8,
++LINE_TO, 11.5f, 8,
++LINE_TO, 11.5f, 11,
++LINE_TO, 13, 11,
++LINE_TO, 13, 13.5f,
++LINE_TO, 9.5f, 13.5f,
++LINE_TO, 9.5f, 12,
++LINE_TO, 6.5f, 12,
++LINE_TO, 6.5f, 13.5f,
++LINE_TO, 3, 13.5f,
++LINE_TO, 3, 10,
++LINE_TO, 4.5f, 10,
++LINE_TO, 4.5f, 7,
++LINE_TO, 3, 7,
++CLOSE,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_ext2.icon
+@@ -0,0 +1,17 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 9, 2.5f,
++LINE_TO, 13.5f, 2.5f,
++LINE_TO, 13.5f, 7,
++MOVE_TO, 13.5f, 2.5f,
++LINE_TO, 7.5f, 8.5f,
++MOVE_TO, 11, 9.5f,
++LINE_TO, 11, 13.5f,
++LINE_TO, 3, 13.5f,
++LINE_TO, 3, 5,
++LINE_TO, 6.5f, 5,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_folder.icon
+@@ -0,0 +1,14 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 2, 4,
++LINE_TO, 6, 4,
++LINE_TO, 7.5f, 5.5f,
++LINE_TO, 14, 5.5f,
++LINE_TO, 14, 13,
++LINE_TO, 2, 13,
++CLOSE,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_fwd.icon
+@@ -0,0 +1,12 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 3, 8,
++LINE_TO, 13, 8,
++MOVE_TO, 9, 4,
++LINE_TO, 13, 8,
++LINE_TO, 9, 12,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_gear.icon
+@@ -0,0 +1,32 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 6, 4.5f,
++LINE_TO, 10, 4.5f,
++LINE_TO, 11.5f, 6,
++LINE_TO, 11.5f, 10,
++LINE_TO, 10, 11.5f,
++LINE_TO, 6, 11.5f,
++LINE_TO, 4.5f, 10,
++LINE_TO, 4.5f, 6,
++CLOSE,
++MOVE_TO, 8, 1.5f,
++LINE_TO, 8, 3.5f,
++MOVE_TO, 8, 12.5f,
++LINE_TO, 8, 14.5f,
++MOVE_TO, 1.5f, 8,
++LINE_TO, 3.5f, 8,
++MOVE_TO, 12.5f, 8,
++LINE_TO, 14.5f, 8,
++MOVE_TO, 3.5f, 3.5f,
++LINE_TO, 5, 5,
++MOVE_TO, 11, 11,
++LINE_TO, 12.5f, 12.5f,
++MOVE_TO, 12.5f, 3.5f,
++LINE_TO, 11, 5,
++MOVE_TO, 5, 11,
++LINE_TO, 3.5f, 12.5f,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_hist.icon
+@@ -0,0 +1,19 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 5.5f, 2,
++LINE_TO, 10.5f, 2,
++LINE_TO, 14, 5.5f,
++LINE_TO, 14, 10.5f,
++LINE_TO, 10.5f, 14,
++LINE_TO, 5.5f, 14,
++LINE_TO, 2, 10.5f,
++LINE_TO, 2, 5.5f,
++CLOSE,
++MOVE_TO, 8, 5,
++LINE_TO, 8, 8.5f,
++LINE_TO, 10, 10,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_info.icon
+@@ -0,0 +1,25 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 2, 5,
++LINE_TO, 8, 5,
++MOVE_TO, 11, 5,
++LINE_TO, 14, 5,
++MOVE_TO, 2, 11,
++LINE_TO, 4, 11,
++MOVE_TO, 7, 11,
++LINE_TO, 14, 11,
++MOVE_TO, 8, 3.5f,
++LINE_TO, 11, 3.5f,
++LINE_TO, 11, 6.5f,
++LINE_TO, 8, 6.5f,
++CLOSE,
++MOVE_TO, 4, 9.5f,
++LINE_TO, 7, 9.5f,
++LINE_TO, 7, 12.5f,
++LINE_TO, 4, 12.5f,
++CLOSE,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_link.icon
+@@ -0,0 +1,21 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 6.5f, 4.5f,
++LINE_TO, 5, 4.5f,
++LINE_TO, 2.5f, 7,
++LINE_TO, 2.5f, 9,
++LINE_TO, 5, 11.5f,
++LINE_TO, 6.5f, 11.5f,
++MOVE_TO, 9.5f, 4.5f,
++LINE_TO, 11, 4.5f,
++LINE_TO, 13.5f, 7,
++LINE_TO, 13.5f, 9,
++LINE_TO, 11, 11.5f,
++LINE_TO, 9.5f, 11.5f,
++MOVE_TO, 6, 8,
++LINE_TO, 10, 8,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_max.icon
+@@ -0,0 +1,12 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 3, 3,
++LINE_TO, 13, 3,
++LINE_TO, 13, 13,
++LINE_TO, 3, 13,
++CLOSE,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_min.icon
+@@ -0,0 +1,9 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 3, 12,
++LINE_TO, 13, 12,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_minus.icon
+@@ -0,0 +1,9 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 3, 8,
++LINE_TO, 13, 8,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_mon.icon
+@@ -0,0 +1,16 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 2, 3,
++LINE_TO, 14, 3,
++LINE_TO, 14, 11,
++LINE_TO, 2, 11,
++CLOSE,
++MOVE_TO, 6, 14,
++LINE_TO, 10, 14,
++MOVE_TO, 8, 11,
++LINE_TO, 8, 14,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_more.icon
+@@ -0,0 +1,21 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++FILL_RULE_NONZERO,
++MOVE_TO, 7, 2.5f,
++LINE_TO, 9, 2.5f,
++LINE_TO, 9, 4.5f,
++LINE_TO, 7, 4.5f,
++CLOSE,
++MOVE_TO, 7, 7,
++LINE_TO, 9, 7,
++LINE_TO, 9, 9,
++LINE_TO, 7, 9,
++CLOSE,
++MOVE_TO, 7, 11.5f,
++LINE_TO, 9, 11.5f,
++LINE_TO, 9, 13.5f,
++LINE_TO, 7, 13.5f,
++CLOSE,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_plus.icon
+@@ -0,0 +1,11 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 8, 3,
++LINE_TO, 8, 13,
++MOVE_TO, 3, 8,
++LINE_TO, 13, 8,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_rel.icon
+@@ -0,0 +1,19 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 12.5f, 8.5f,
++LINE_TO, 12.5f, 10,
++LINE_TO, 10.5f, 12.5f,
++LINE_TO, 5.5f, 12.5f,
++LINE_TO, 3.5f, 10,
++LINE_TO, 3.5f, 6,
++LINE_TO, 5.5f, 3.5f,
++LINE_TO, 10.5f, 3.5f,
++LINE_TO, 12.5f, 6,
++MOVE_TO, 12.5f, 3,
++LINE_TO, 12.5f, 6,
++LINE_TO, 9.5f, 6,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_search.icon
+@@ -0,0 +1,18 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 5.5f, 2.5f,
++LINE_TO, 9.5f, 2.5f,
++LINE_TO, 11.5f, 4.5f,
++LINE_TO, 11.5f, 8.5f,
++LINE_TO, 9.5f, 10.5f,
++LINE_TO, 5.5f, 10.5f,
++LINE_TO, 3.5f, 8.5f,
++LINE_TO, 3.5f, 4.5f,
++CLOSE,
++MOVE_TO, 10.5f, 10.5f,
++LINE_TO, 13.5f, 13.5f,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_side.icon
+@@ -0,0 +1,14 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 2, 3,
++LINE_TO, 14, 3,
++LINE_TO, 14, 13,
++LINE_TO, 2, 13,
++CLOSE,
++MOVE_TO, 6, 3,
++LINE_TO, 6, 13,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_spk.icon
+@@ -0,0 +1,18 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 2.5f, 6,
++LINE_TO, 2.5f, 10,
++LINE_TO, 5, 10,
++LINE_TO, 8.5f, 13,
++LINE_TO, 8.5f, 3,
++LINE_TO, 5, 6,
++CLOSE,
++MOVE_TO, 11, 5.5f,
++LINE_TO, 12.5f, 7,
++LINE_TO, 12.5f, 9,
++LINE_TO, 11, 10.5f,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_spkoff.icon
+@@ -0,0 +1,18 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 2.5f, 6,
++LINE_TO, 2.5f, 10,
++LINE_TO, 5, 10,
++LINE_TO, 8.5f, 13,
++LINE_TO, 8.5f, 3,
++LINE_TO, 5, 6,
++CLOSE,
++MOVE_TO, 11, 6,
++LINE_TO, 14, 10,
++MOVE_TO, 14, 6,
++LINE_TO, 11, 10,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_split.icon
+@@ -0,0 +1,17 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 2, 3,
++LINE_TO, 7, 3,
++LINE_TO, 7, 13,
++LINE_TO, 2, 13,
++CLOSE,
++MOVE_TO, 9, 3,
++LINE_TO, 14, 3,
++LINE_TO, 14, 13,
++LINE_TO, 9, 13,
++CLOSE,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_up.icon
+@@ -0,0 +1,12 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 8, 13,
++LINE_TO, 8, 3,
++MOVE_TO, 4, 7,
++LINE_TO, 8, 3,
++LINE_TO, 12, 7,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_win.icon
+@@ -0,0 +1,14 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 2, 3.5f,
++LINE_TO, 14, 3.5f,
++LINE_TO, 14, 12.5f,
++LINE_TO, 2, 12.5f,
++CLOSE,
++MOVE_TO, 2, 6.5f,
++LINE_TO, 14, 6.5f,

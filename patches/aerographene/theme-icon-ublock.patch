@@ -1,0 +1,727 @@
+aerographene: escudo do uBlock no pacote do tema ativo.
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/theme-icons-pixelized.patch,
+helium/core/ublock-install-as-component.patch (extension_ids.h).
+Propósito: ExtensionActionViewModel::GetIconImageSource usa, para o uBlock
+componente, o escudo do tema (default ou pixelized) com o tint
+kColorToolbarButtonIcon. O estado off (setIcon com icon_*-off.png) só chega
+como bitmap: off = nenhum pixel opaco avermelhado -> variante esmaecida.
+
+--- a/chrome/browser/ui/aerographene_theme_icons/BUILD.gn
++++ b/chrome/browser/ui/aerographene_theme_icons/BUILD.gn
+@@ -76,6 +76,10 @@ aggregate_vector_icons("aerographene_theme_vector_icons") {
+     "pixelized_up.icon",
+     "pixelized_win.icon",
+     # aerographene: theme-icon-ublock
++    "default_ublock.icon",
++    "default_ublock_off.icon",
++    "pixelized_ublock.icon",
++    "pixelized_ublock_off.icon",
+   ]
+ }
+ 
+--- a/chrome/browser/ui/aerographene_theme_icons/aerographene_theme_icons.cc
++++ b/chrome/browser/ui/aerographene_theme_icons/aerographene_theme_icons.cc
+@@ -281,4 +281,11 @@ Theme GetActiveTheme() {
+   return g_theme;
+ }
+ 
++const gfx::VectorIcon& GetUBlockIcon(bool off) {
++  if (g_theme == Theme::kPixelized) {
++    return off ? kPixelizedUblockOffIcon : kPixelizedUblockIcon;
++  }
++  return off ? kDefaultUblockOffIcon : kDefaultUblockIcon;
++}
++
+ }  // namespace aerographene_theme_icons
+--- a/chrome/browser/ui/aerographene_theme_icons/aerographene_theme_icons.h
++++ b/chrome/browser/ui/aerographene_theme_icons/aerographene_theme_icons.h
+@@ -6,6 +6,10 @@
+ 
+ #include <string_view>
+ 
++namespace gfx {
++struct VectorIcon;
++}
++
+ namespace aerographene_theme_icons {
+ 
+ enum class Theme { kDefault, kPixelized };
+@@ -18,6 +22,10 @@ void ApplyTheme(std::string_view theme);
+ 
+ Theme GetActiveTheme();
+ 
++// Escudo do uBlock no pacote do tema ativo; |off| = variante esmaecida
++// (uBlock desligado no site).
++const gfx::VectorIcon& GetUBlockIcon(bool off);
++
+ }  // namespace aerographene_theme_icons
+ 
+ #endif  // CHROME_BROWSER_UI_AEROGRAPHENE_THEME_ICONS_AEROGRAPHENE_THEME_ICONS_H_
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_ublock.icon
+@@ -0,0 +1,15 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 3, 2.5f,
++LINE_TO, 13, 2.5f,
++LINE_TO, 13, 8,
++LINE_TO, 8, 13.5f,
++LINE_TO, 3, 8,
++CLOSE,
++MOVE_TO, 8, 5.5f,
++LINE_TO, 8, 10.5f,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_ublock_off.icon
+@@ -0,0 +1,16 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++PATH_COLOR_ALPHA, 0x66,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 3, 2.5f,
++LINE_TO, 13, 2.5f,
++LINE_TO, 13, 8,
++LINE_TO, 8, 13.5f,
++LINE_TO, 3, 8,
++CLOSE,
++MOVE_TO, 8, 5.5f,
++LINE_TO, 8, 10.5f,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/pixelized_ublock.icon
+@@ -0,0 +1,255 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++PATH_COLOR_ALPHA, 0x38,
++FILL_RULE_NONZERO,
++DISABLE_AA,
++MOVE_TO, 4, 3,
++LINE_TO, 12, 3,
++LINE_TO, 12, 4,
++LINE_TO, 4, 4,
++CLOSE,
++MOVE_TO, 4, 4,
++LINE_TO, 12, 4,
++LINE_TO, 12, 5,
++LINE_TO, 4, 5,
++CLOSE,
++MOVE_TO, 4, 5,
++LINE_TO, 7, 5,
++LINE_TO, 7, 6,
++LINE_TO, 4, 6,
++CLOSE,
++MOVE_TO, 9, 5,
++LINE_TO, 12, 5,
++LINE_TO, 12, 6,
++LINE_TO, 9, 6,
++CLOSE,
++MOVE_TO, 4, 6,
++LINE_TO, 7, 6,
++LINE_TO, 7, 7,
++LINE_TO, 4, 7,
++CLOSE,
++MOVE_TO, 9, 6,
++LINE_TO, 12, 6,
++LINE_TO, 12, 7,
++LINE_TO, 9, 7,
++CLOSE,
++MOVE_TO, 4, 7,
++LINE_TO, 7, 7,
++LINE_TO, 7, 8,
++LINE_TO, 4, 8,
++CLOSE,
++MOVE_TO, 9, 7,
++LINE_TO, 12, 7,
++LINE_TO, 12, 8,
++LINE_TO, 9, 8,
++CLOSE,
++MOVE_TO, 4, 8,
++LINE_TO, 7, 8,
++LINE_TO, 7, 9,
++LINE_TO, 4, 9,
++CLOSE,
++MOVE_TO, 9, 8,
++LINE_TO, 12, 8,
++LINE_TO, 12, 9,
++LINE_TO, 9, 9,
++CLOSE,
++MOVE_TO, 5, 9,
++LINE_TO, 11, 9,
++LINE_TO, 11, 10,
++LINE_TO, 5, 10,
++CLOSE,
++MOVE_TO, 6, 10,
++LINE_TO, 10, 10,
++LINE_TO, 10, 11,
++LINE_TO, 6, 11,
++CLOSE,
++MOVE_TO, 7, 11,
++LINE_TO, 9, 11,
++LINE_TO, 9, 12,
++LINE_TO, 7, 12,
++CLOSE,
++NEW_PATH,
++PATH_COLOR_ALPHA, 0x80,
++FILL_RULE_NONZERO,
++DISABLE_AA,
++MOVE_TO, 13, 3,
++LINE_TO, 14, 3,
++LINE_TO, 14, 4,
++LINE_TO, 13, 4,
++CLOSE,
++MOVE_TO, 13, 4,
++LINE_TO, 14, 4,
++LINE_TO, 14, 5,
++LINE_TO, 13, 5,
++CLOSE,
++MOVE_TO, 13, 5,
++LINE_TO, 14, 5,
++LINE_TO, 14, 6,
++LINE_TO, 13, 6,
++CLOSE,
++MOVE_TO, 13, 6,
++LINE_TO, 14, 6,
++LINE_TO, 14, 7,
++LINE_TO, 13, 7,
++CLOSE,
++MOVE_TO, 13, 7,
++LINE_TO, 14, 7,
++LINE_TO, 14, 8,
++LINE_TO, 13, 8,
++CLOSE,
++MOVE_TO, 13, 8,
++LINE_TO, 14, 8,
++LINE_TO, 14, 9,
++LINE_TO, 13, 9,
++CLOSE,
++MOVE_TO, 12, 9,
++LINE_TO, 14, 9,
++LINE_TO, 14, 10,
++LINE_TO, 12, 10,
++CLOSE,
++MOVE_TO, 11, 10,
++LINE_TO, 13, 10,
++LINE_TO, 13, 11,
++LINE_TO, 11, 11,
++CLOSE,
++MOVE_TO, 10, 11,
++LINE_TO, 12, 11,
++LINE_TO, 12, 12,
++LINE_TO, 10, 12,
++CLOSE,
++MOVE_TO, 9, 12,
++LINE_TO, 11, 12,
++LINE_TO, 11, 13,
++LINE_TO, 9, 13,
++CLOSE,
++MOVE_TO, 8, 13,
++LINE_TO, 10, 13,
++LINE_TO, 10, 14,
++LINE_TO, 8, 14,
++CLOSE,
++NEW_PATH,
++FILL_RULE_NONZERO,
++DISABLE_AA,
++MOVE_TO, 3, 2,
++LINE_TO, 13, 2,
++LINE_TO, 13, 3,
++LINE_TO, 3, 3,
++CLOSE,
++MOVE_TO, 3, 3,
++LINE_TO, 4, 3,
++LINE_TO, 4, 4,
++LINE_TO, 3, 4,
++CLOSE,
++MOVE_TO, 12, 3,
++LINE_TO, 13, 3,
++LINE_TO, 13, 4,
++LINE_TO, 12, 4,
++CLOSE,
++MOVE_TO, 3, 4,
++LINE_TO, 4, 4,
++LINE_TO, 4, 5,
++LINE_TO, 3, 5,
++CLOSE,
++MOVE_TO, 12, 4,
++LINE_TO, 13, 4,
++LINE_TO, 13, 5,
++LINE_TO, 12, 5,
++CLOSE,
++MOVE_TO, 3, 5,
++LINE_TO, 4, 5,
++LINE_TO, 4, 6,
++LINE_TO, 3, 6,
++CLOSE,
++MOVE_TO, 7, 5,
++LINE_TO, 9, 5,
++LINE_TO, 9, 6,
++LINE_TO, 7, 6,
++CLOSE,
++MOVE_TO, 12, 5,
++LINE_TO, 13, 5,
++LINE_TO, 13, 6,
++LINE_TO, 12, 6,
++CLOSE,
++MOVE_TO, 3, 6,
++LINE_TO, 4, 6,
++LINE_TO, 4, 7,
++LINE_TO, 3, 7,
++CLOSE,
++MOVE_TO, 7, 6,
++LINE_TO, 9, 6,
++LINE_TO, 9, 7,
++LINE_TO, 7, 7,
++CLOSE,
++MOVE_TO, 12, 6,
++LINE_TO, 13, 6,
++LINE_TO, 13, 7,
++LINE_TO, 12, 7,
++CLOSE,
++MOVE_TO, 3, 7,
++LINE_TO, 4, 7,
++LINE_TO, 4, 8,
++LINE_TO, 3, 8,
++CLOSE,
++MOVE_TO, 7, 7,
++LINE_TO, 9, 7,
++LINE_TO, 9, 8,
++LINE_TO, 7, 8,
++CLOSE,
++MOVE_TO, 12, 7,
++LINE_TO, 13, 7,
++LINE_TO, 13, 8,
++LINE_TO, 12, 8,
++CLOSE,
++MOVE_TO, 3, 8,
++LINE_TO, 4, 8,
++LINE_TO, 4, 9,
++LINE_TO, 3, 9,
++CLOSE,
++MOVE_TO, 7, 8,
++LINE_TO, 9, 8,
++LINE_TO, 9, 9,
++LINE_TO, 7, 9,
++CLOSE,
++MOVE_TO, 12, 8,
++LINE_TO, 13, 8,
++LINE_TO, 13, 9,
++LINE_TO, 12, 9,
++CLOSE,
++MOVE_TO, 4, 9,
++LINE_TO, 5, 9,
++LINE_TO, 5, 10,
++LINE_TO, 4, 10,
++CLOSE,
++MOVE_TO, 11, 9,
++LINE_TO, 12, 9,
++LINE_TO, 12, 10,
++LINE_TO, 11, 10,
++CLOSE,
++MOVE_TO, 5, 10,
++LINE_TO, 6, 10,
++LINE_TO, 6, 11,
++LINE_TO, 5, 11,
++CLOSE,
++MOVE_TO, 10, 10,
++LINE_TO, 11, 10,
++LINE_TO, 11, 11,
++LINE_TO, 10, 11,
++CLOSE,
++MOVE_TO, 6, 11,
++LINE_TO, 7, 11,
++LINE_TO, 7, 12,
++LINE_TO, 6, 12,
++CLOSE,
++MOVE_TO, 9, 11,
++LINE_TO, 10, 11,
++LINE_TO, 10, 12,
++LINE_TO, 9, 12,
++CLOSE,
++MOVE_TO, 7, 12,
++LINE_TO, 9, 12,
++LINE_TO, 9, 13,
++LINE_TO, 7, 13,
++CLOSE,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/pixelized_ublock_off.icon
+@@ -0,0 +1,256 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++PATH_COLOR_ALPHA, 0x16,
++FILL_RULE_NONZERO,
++DISABLE_AA,
++MOVE_TO, 4, 3,
++LINE_TO, 12, 3,
++LINE_TO, 12, 4,
++LINE_TO, 4, 4,
++CLOSE,
++MOVE_TO, 4, 4,
++LINE_TO, 12, 4,
++LINE_TO, 12, 5,
++LINE_TO, 4, 5,
++CLOSE,
++MOVE_TO, 4, 5,
++LINE_TO, 7, 5,
++LINE_TO, 7, 6,
++LINE_TO, 4, 6,
++CLOSE,
++MOVE_TO, 9, 5,
++LINE_TO, 12, 5,
++LINE_TO, 12, 6,
++LINE_TO, 9, 6,
++CLOSE,
++MOVE_TO, 4, 6,
++LINE_TO, 7, 6,
++LINE_TO, 7, 7,
++LINE_TO, 4, 7,
++CLOSE,
++MOVE_TO, 9, 6,
++LINE_TO, 12, 6,
++LINE_TO, 12, 7,
++LINE_TO, 9, 7,
++CLOSE,
++MOVE_TO, 4, 7,
++LINE_TO, 7, 7,
++LINE_TO, 7, 8,
++LINE_TO, 4, 8,
++CLOSE,
++MOVE_TO, 9, 7,
++LINE_TO, 12, 7,
++LINE_TO, 12, 8,
++LINE_TO, 9, 8,
++CLOSE,
++MOVE_TO, 4, 8,
++LINE_TO, 7, 8,
++LINE_TO, 7, 9,
++LINE_TO, 4, 9,
++CLOSE,
++MOVE_TO, 9, 8,
++LINE_TO, 12, 8,
++LINE_TO, 12, 9,
++LINE_TO, 9, 9,
++CLOSE,
++MOVE_TO, 5, 9,
++LINE_TO, 11, 9,
++LINE_TO, 11, 10,
++LINE_TO, 5, 10,
++CLOSE,
++MOVE_TO, 6, 10,
++LINE_TO, 10, 10,
++LINE_TO, 10, 11,
++LINE_TO, 6, 11,
++CLOSE,
++MOVE_TO, 7, 11,
++LINE_TO, 9, 11,
++LINE_TO, 9, 12,
++LINE_TO, 7, 12,
++CLOSE,
++NEW_PATH,
++PATH_COLOR_ALPHA, 0x33,
++FILL_RULE_NONZERO,
++DISABLE_AA,
++MOVE_TO, 13, 3,
++LINE_TO, 14, 3,
++LINE_TO, 14, 4,
++LINE_TO, 13, 4,
++CLOSE,
++MOVE_TO, 13, 4,
++LINE_TO, 14, 4,
++LINE_TO, 14, 5,
++LINE_TO, 13, 5,
++CLOSE,
++MOVE_TO, 13, 5,
++LINE_TO, 14, 5,
++LINE_TO, 14, 6,
++LINE_TO, 13, 6,
++CLOSE,
++MOVE_TO, 13, 6,
++LINE_TO, 14, 6,
++LINE_TO, 14, 7,
++LINE_TO, 13, 7,
++CLOSE,
++MOVE_TO, 13, 7,
++LINE_TO, 14, 7,
++LINE_TO, 14, 8,
++LINE_TO, 13, 8,
++CLOSE,
++MOVE_TO, 13, 8,
++LINE_TO, 14, 8,
++LINE_TO, 14, 9,
++LINE_TO, 13, 9,
++CLOSE,
++MOVE_TO, 12, 9,
++LINE_TO, 14, 9,
++LINE_TO, 14, 10,
++LINE_TO, 12, 10,
++CLOSE,
++MOVE_TO, 11, 10,
++LINE_TO, 13, 10,
++LINE_TO, 13, 11,
++LINE_TO, 11, 11,
++CLOSE,
++MOVE_TO, 10, 11,
++LINE_TO, 12, 11,
++LINE_TO, 12, 12,
++LINE_TO, 10, 12,
++CLOSE,
++MOVE_TO, 9, 12,
++LINE_TO, 11, 12,
++LINE_TO, 11, 13,
++LINE_TO, 9, 13,
++CLOSE,
++MOVE_TO, 8, 13,
++LINE_TO, 10, 13,
++LINE_TO, 10, 14,
++LINE_TO, 8, 14,
++CLOSE,
++NEW_PATH,
++PATH_COLOR_ALPHA, 0x66,
++FILL_RULE_NONZERO,
++DISABLE_AA,
++MOVE_TO, 3, 2,
++LINE_TO, 13, 2,
++LINE_TO, 13, 3,
++LINE_TO, 3, 3,
++CLOSE,
++MOVE_TO, 3, 3,
++LINE_TO, 4, 3,
++LINE_TO, 4, 4,
++LINE_TO, 3, 4,
++CLOSE,
++MOVE_TO, 12, 3,
++LINE_TO, 13, 3,
++LINE_TO, 13, 4,
++LINE_TO, 12, 4,
++CLOSE,
++MOVE_TO, 3, 4,
++LINE_TO, 4, 4,
++LINE_TO, 4, 5,
++LINE_TO, 3, 5,
++CLOSE,
++MOVE_TO, 12, 4,
++LINE_TO, 13, 4,
++LINE_TO, 13, 5,
++LINE_TO, 12, 5,
++CLOSE,
++MOVE_TO, 3, 5,
++LINE_TO, 4, 5,
++LINE_TO, 4, 6,
++LINE_TO, 3, 6,
++CLOSE,
++MOVE_TO, 7, 5,
++LINE_TO, 9, 5,
++LINE_TO, 9, 6,
++LINE_TO, 7, 6,
++CLOSE,
++MOVE_TO, 12, 5,
++LINE_TO, 13, 5,
++LINE_TO, 13, 6,
++LINE_TO, 12, 6,
++CLOSE,
++MOVE_TO, 3, 6,
++LINE_TO, 4, 6,
++LINE_TO, 4, 7,
++LINE_TO, 3, 7,
++CLOSE,
++MOVE_TO, 7, 6,
++LINE_TO, 9, 6,
++LINE_TO, 9, 7,
++LINE_TO, 7, 7,
++CLOSE,
++MOVE_TO, 12, 6,
++LINE_TO, 13, 6,
++LINE_TO, 13, 7,
++LINE_TO, 12, 7,
++CLOSE,
++MOVE_TO, 3, 7,
++LINE_TO, 4, 7,
++LINE_TO, 4, 8,
++LINE_TO, 3, 8,
++CLOSE,
++MOVE_TO, 7, 7,
++LINE_TO, 9, 7,
++LINE_TO, 9, 8,
++LINE_TO, 7, 8,
++CLOSE,
++MOVE_TO, 12, 7,
++LINE_TO, 13, 7,
++LINE_TO, 13, 8,
++LINE_TO, 12, 8,
++CLOSE,
++MOVE_TO, 3, 8,
++LINE_TO, 4, 8,
++LINE_TO, 4, 9,
++LINE_TO, 3, 9,
++CLOSE,
++MOVE_TO, 7, 8,
++LINE_TO, 9, 8,
++LINE_TO, 9, 9,
++LINE_TO, 7, 9,
++CLOSE,
++MOVE_TO, 12, 8,
++LINE_TO, 13, 8,
++LINE_TO, 13, 9,
++LINE_TO, 12, 9,
++CLOSE,
++MOVE_TO, 4, 9,
++LINE_TO, 5, 9,
++LINE_TO, 5, 10,
++LINE_TO, 4, 10,
++CLOSE,
++MOVE_TO, 11, 9,
++LINE_TO, 12, 9,
++LINE_TO, 12, 10,
++LINE_TO, 11, 10,
++CLOSE,
++MOVE_TO, 5, 10,
++LINE_TO, 6, 10,
++LINE_TO, 6, 11,
++LINE_TO, 5, 11,
++CLOSE,
++MOVE_TO, 10, 10,
++LINE_TO, 11, 10,
++LINE_TO, 11, 11,
++LINE_TO, 10, 11,
++CLOSE,
++MOVE_TO, 6, 11,
++LINE_TO, 7, 11,
++LINE_TO, 7, 12,
++LINE_TO, 6, 12,
++CLOSE,
++MOVE_TO, 9, 11,
++LINE_TO, 10, 11,
++LINE_TO, 10, 12,
++LINE_TO, 9, 12,
++CLOSE,
++MOVE_TO, 7, 12,
++LINE_TO, 9, 12,
++LINE_TO, 9, 13,
++LINE_TO, 7, 13,
++CLOSE,
+--- a/chrome/browser/ui/extensions/BUILD.gn
++++ b/chrome/browser/ui/extensions/BUILD.gn
+@@ -192,6 +192,7 @@ source_set("impl") {
+     "//chrome/browser/tab_list",
+     "//chrome/browser/ui:simple_message_box_headers",
+     "//chrome/browser/ui:ui_features",
++    "//chrome/browser/ui/aerographene_theme_icons",
+     "//chrome/browser/ui/browser_window",
+     "//chrome/browser/ui/browser_window:create_browser_window",
+     "//chrome/browser/ui/color:color_headers",
+--- a/chrome/browser/ui/extensions/extension_action_view_model.cc
++++ b/chrome/browser/ui/extensions/extension_action_view_model.cc
+@@ -4,6 +4,7 @@
+ 
+ #include "chrome/browser/ui/extensions/extension_action_view_model.h"
+ 
++#include <algorithm>
+ #include <memory>
+ #include <string>
+ #include <utility>
+@@ -25,14 +26,17 @@
+ #include "chrome/browser/extensions/extension_view_host.h"
+ #include "chrome/browser/extensions/extension_view_host_factory.h"
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/aerographene_theme_icons/aerographene_theme_icons.h"
+ #include "chrome/browser/tab_list/tab_list_interface.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/color/chrome_color_id.h"
+ #include "chrome/browser/ui/extensions/extension_action_delegate.h"
+ #include "chrome/browser/ui/extensions/extension_popup_types.h"
+ #include "chrome/browser/ui/extensions/icon_with_badge_image_source.h"
+ #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
+ #include "chrome/browser/ui/ui_features.h"
+ #include "chrome/grit/generated_resources.h"
++#include "components/helium_services/extension_ids.h"
+ #include "components/sessions/content/session_tab_helper.h"
+ #include "content/public/browser/web_contents.h"
+ #include "extensions/browser/extension_action.h"
+@@ -49,7 +53,11 @@
+ #include "ui/base/l10n/l10n_util.h"
+ #include "ui/base/models/image_model.h"
+ #include "ui/color/color_provider_manager.h"
++#include "third_party/skia/include/core/SkBitmap.h"
++#include "ui/color/color_provider.h"
++#include "ui/gfx/image/image.h"
+ #include "ui/gfx/image/image_skia.h"
++#include "ui/gfx/paint_vector_icon.h"
+ #include "ui/gfx/native_ui_types.h"
+ #include "ui/native_theme/native_theme.h"
+ 
+@@ -773,6 +781,38 @@ void ExtensionActionViewModel::TriggerPopup(PopupShowAction show_action,
+                           std::move(callback));
+ }
+ 
++namespace {
++
++// aerographene: o uBlock troca o ícone com setIcon(path: icon_*-off.png) e o
++// navegador só recebe o ImageData, sem o caminho. O ícone ligado é vermelho e
++// o desligado é cinza, então "off" = nenhum pixel opaco avermelhado. Ícone
++// ainda não carregado conta como ligado.
++bool IsUBlockOffIcon(const gfx::Image& image) {
++  if (image.IsEmpty()) {
++    return false;
++  }
++  const SkBitmap* bitmap = image.ToSkBitmap();
++  if (!bitmap || bitmap->drawsNothing()) {
++    return false;
++  }
++  for (int y = 0; y < bitmap->height(); ++y) {
++    for (int x = 0; x < bitmap->width(); ++x) {
++      const SkColor c = bitmap->getColor(x, y);
++      if (SkColorGetA(c) < 128) {
++        continue;
++      }
++      const int r = SkColorGetR(c);
++      const int gb = std::max(SkColorGetG(c), SkColorGetB(c));
++      if (r - gb > 48) {
++        return false;
++      }
++    }
++  }
++  return true;
++}
++
++}  // namespace
++
+ void ExtensionActionViewModel::CloseMenuTask() {
+   if (delegate_) {
+     delegate_->CloseExtensionsMenuIfOpen();
+@@ -800,6 +840,22 @@ ExtensionActionViewModel::GetIconImageSource(content::WebContents* web_contents,
+   int tab_id = sessions::SessionTabHelper::IdForTab(web_contents).id();
+   image_source->SetIcon(icon_factory_.GetIcon(tab_id));
+ 
++  // aerographene: o uBlock componente usa o escudo do tema ativo, com o tint
++  // da toolbar; o estado off (por site) vira a variante esmaecida.
++  if (extension_->id() == helium::kUBlockOriginComponentId) {
++    const ui::ColorProvider* color_provider =
++        web_contents ? &web_contents->GetColorProvider()
++                     : ui::ColorProviderManager::Get().GetColorProviderFor(
++                           ui::NativeTheme::GetInstanceForNativeUi()
++                               ->GetColorProviderKey(nullptr));
++    const SkColor color = color_provider
++                              ? color_provider->GetColor(kColorToolbarButtonIcon)
++                              : gfx::kPlaceholderColor;
++    const bool off = IsUBlockOffIcon(icon_factory_.GetIcon(tab_id));
++    image_source->SetIcon(gfx::Image(gfx::CreateVectorIcon(
++        aerographene_theme_icons::GetUBlockIcon(off), 16, color)));
++  }
++
+   std::unique_ptr<IconWithBadgeImageSource::Badge> badge;
+   std::string badge_text = extension_action_->GetDisplayBadgeText(tab_id);
+   if (!badge_text.empty()) {
