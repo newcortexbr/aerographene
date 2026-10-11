@@ -41,6 +41,7 @@ Regra de desempenho: nenhuma mudança piora mais de 2% a linha de base; uma muda
 
 - item 8: os temas da v0.1 são o default e o pixelized (substituem nebula e high-contrast). Meta objetiva: seguir exatamente os mockups em `theming/1/design-language/` (default e pixelized).
 - item 11: uBlock sempre ligado por padrão. Ícone da extensão acompanha o pacote de ícones do tema ativo.
+- temas são claros ou escuros por natureza: cada tema define o próprio esquema e não há alternância claro/escuro nem "seguir o sistema". Os dois temas da v0.1 são escuros; o navegador abre no escuro.
 - teste de uso real de spaces, command bar, peek e split view fica para a transição v0.1 → v0.2.
 
 ## em aberto
