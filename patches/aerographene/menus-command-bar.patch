@@ -71,13 +71,15 @@ Compilação parcial e runtime: ver patches/README.md.
      {"base", SkColorSetRGB(0x0A, 0x0A, 0x0A)},
 --- a/chrome/browser/ui/views/location_bar/location_bar_view.cc
 +++ b/chrome/browser/ui/views/location_bar/location_bar_view.cc
-@@ -1448,6 +1448,12 @@
+@@ -1455,6 +1455,14 @@
      border_color = color_provider->GetColor(kColorLocationBarBorderOnMismatch);
    }
  
 +  // aerographene: the focused field (command bar open) has a 1px accent
-+  // outline (mockup .pal .in:focus-within).
-+  if (!is_popup_mode_ && !high_contrast && is_caret_visible) {
++  // outline in the default theme (mockup .pal .in:focus-within). The flat theme
++  // (radius 0, accent = white) keeps its line color.
++  if (!is_popup_mode_ && !high_contrast && is_caret_visible &&
++      views::LayoutProvider::GetAerographeneControlRadius() != 0) {
 +    border_color = color_provider->GetColor(ui::kColorFocusableBorderFocused);
 +  }
 +
@@ -411,13 +413,15 @@ Compilação parcial e runtime: ver patches/README.md.
  
 --- a/ui/views/controls/menu/menu_scroll_view_container.cc
 +++ b/ui/views/controls/menu/menu_scroll_view_container.cc
-@@ -489,8 +489,12 @@
+@@ -489,8 +489,14 @@
    bubble_border->SetColor(id);
  
    const MenuConfig& menu_config = MenuConfig::instance();
-+  // aerographene: the flat theme (pixelized, control radius 0) has no shadow,
-+  // only the 1px stroke.
-+  const bool aero_flat = LayoutProvider::GetAerographeneControlRadius() == 0;
++  // aerographene: menus have no shadow in either theme, only the 1px stroke.
++  // The shadow margin made the widget larger than the panel, and where the
++  // window has no alpha channel (no compositor) it showed as an opaque black
++  // block behind the menu.
++  const bool aero_flat = LayoutProvider::GetAerographeneControlRadius() >= 0;
    bubble_border->set_md_shadow_elevation(
 -      content_view_->GetMenuItem()->GetParentMenuItem()
 +      aero_flat ? 0
@@ -427,20 +431,21 @@ Compilação parcial e runtime: ver patches/README.md.
    bubble_border->set_draw_border_stroke(menu_config.use_outer_border);
 --- a/ui/views/controls/menu/submenu_view.cc
 +++ b/ui/views/controls/menu/submenu_view.cc
-@@ -298,6 +298,19 @@
+@@ -298,6 +298,20 @@
      width = std::max(touchable_minimum_width, width);
    }
  
-+  // aerographene (mockups M-r01a/c: 247-254px): menus are held to a narrow
-+  // column; longer labels are elided by DrawStringRectWithFlags. Comboboxes
-+  // and ash-style menus keep their natural width.
++  // aerographene (mockups M-r01a/c: 247px minimum): menus are at least as wide
++  // as the mockup column and grow with their labels up to 320px; only longer
++  // labels are elided. Comboboxes and ash-style menus keep their natural
++  // width.
 +  if (const MenuController* controller =
 +          parent_menu_item_->GetMenuController();
 +      controller && !controller->IsCombobox() &&
 +      !controller->use_ash_system_ui_layout() &&
 +      LayoutProvider::GetAerographeneControlRadius() >= 0) {
 +    constexpr int kAeroMenuMinWidth = 247;
-+    constexpr int kAeroMenuMaxWidth = 254;
++    constexpr int kAeroMenuMaxWidth = 320;
 +    width = std::clamp(width, kAeroMenuMinWidth, kAeroMenuMaxWidth);
 +  }
 +
