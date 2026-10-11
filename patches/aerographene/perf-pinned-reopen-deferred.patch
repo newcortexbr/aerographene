@@ -1,0 +1,71 @@
+aerographene: reabrir pinned no startup sem carregar as de fundo.
+
+Origem: aerographene (original), reutiliza o mecanismo de
+AddDeferredPinnedStartupTab (helium/core/lazy-session-restore.patch).
+Licença: GPL-3.0.
+Propósito: PinnedTabMirror::AdoptStartupTabs reabria entradas open=1 com
+chrome::AddTabAt, que navega na hora; as pinned vindas do pref já usam
+chrome::AddRestoredTab(..., select=false, pin=true, kDeferUntilActivation) e só
+carregam ao ativar. Agora o reabrir usa o mesmo caminho: a aba é criada com
+uma SerializedNavigationEntry (virtual_url), pinned, na mesma posição, ainda
+mapeada à entrada via next_entry_; favicon é buscado sem carregar a aba.
+Aba ativa: NavigationControllerImpl::SetActive(true) chama LoadIfNecessary
+quando needs_reload_, então a pinned ativada no fim de AdoptStartupTabs (no
+lugar da NTP intocada fechada) carrega ao ser ativada. Nada muda para abas
+comuns nem para session restore. Sem teste em runtime.
+Depende de: perf-pinned-batch (aplica por último).
+
+---
+--- a/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc
++++ b/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc
+@@ -10,6 +10,7 @@
+ #include <vector>
+ 
+ #include "base/auto_reset.h"
++#include "base/containers/span.h"
+ #include "base/functional/bind.h"
+ #include "base/location.h"
+ #include "base/task/single_thread_task_runner.h"
+@@ -17,11 +18,14 @@
+ #include "content/public/browser/navigation_entry.h"
+ #include "chrome/browser/lifetime/application_lifetime_desktop.h"
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/browser_tabrestore.h"
+ #include "chrome/browser/ui/browser_tabstrip.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
+ #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
+ #include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "components/sessions/core/serialized_navigation_entry.h"
++#include "components/sessions/core/serialized_user_agent_override.h"
+ #include "content/public/browser/web_contents.h"
+ #include "url/gurl.h"
+ #include "url/origin.h"
+@@ -365,9 +369,24 @@
+       // Reopen what was open at the last quit, as a pinned tab mapped to
+       // this very entry.
+       next_entry_ = candidate.uuid;
+-      chrome::AddTabAt(target, candidate.url, strip->IndexOfFirstNonPinnedTab(),
+-                       /*foreground=*/false, /*group=*/std::nullopt,
+-                       /*pinned=*/true);
++      // Same as the Helium startup pinned tabs (AddDeferredPinnedStartupTab):
++      // a background restored tab that loads only when activated, so the
++      // reopened pinned tabs cost no startup CPU/network/RAM. The tab that
++      // ends up active (ActivateTabAt below) loads on activation.
++      sessions::SerializedNavigationEntry navigation;
++      navigation.set_index(0);
++      navigation.set_virtual_url(candidate.url);
++      chrome::AddRestoredTab(
++          target, base::span_from_ref(navigation),
++          strip->IndexOfFirstNonPinnedTab(), /*selected_navigation=*/0,
++          /*extension_app_id=*/std::string(), /*group=*/std::nullopt,
++          /*select=*/false, /*pin=*/true,
++          /*last_active_time_ticks=*/base::TimeTicks(),
++          /*last_active_time=*/base::Time(), /*storage_namespace=*/nullptr,
++          /*user_agent_override=*/sessions::SerializedUserAgentOverride(),
++          /*extra_data=*/{}, /*from_session_restore=*/false,
++          /*is_active_browser=*/std::nullopt,
++          chrome::RestoredTabLoadPolicy::kDeferUntilActivation);
+       next_entry_.reset();
+       reopened = true;
+     }
