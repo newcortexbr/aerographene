@@ -1,0 +1,280 @@
+aerographene: barra de URL como no mockup (SCOPE, fidelidade de 11/10/2026).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: LocationBarView/OmniboxViewViews/PageActionView. (1) altura 30 px
+(fora do modo popup; antes kLocationBarHeight = 34) e borda de 1 px sempre
+visível com kColorLocationBarBorder (token omnibox_border do tema: default
+rgba(108,182,255,.26) como o .url do mockup, pixelized branco 14%); raio e
+fundo já vêm do tema (theme-radius, token omnibox); as extremidades
+arredondadas (height/2) viram o raio do tema. (2) texto centralizado
+(Textfield::ALIGN_CENTER no OmniboxViewViews::Init) e área do texto espelhada
+no lado inicial para ficar no centro da barra mesmo com botões na ponta final.
+(3) sem chip de informações/segurança à esquerda: LocationIconView só continua
+quando mostra rótulo de aviso ("Não seguro"). (4) sem estrela: PageActionView
+força invisível para kActionBookmarkThisTab. (5) dois botões de 28 px na ponta
+final: ajustes do site (vector_icons::kTuneIcon, abre o PageInfo via
+ShowPageInfoDialog) e copiar link (vector_icons::kLinkIcon, que o tema já
+troca; copia GetVirtualURL da aba). Tooltips reutilizam IDS_TOOLTIP_LOCATION_ICON
+e IDS_TAB_CXMENU_COPY_URL (sem IDs novos). Sem mudança no clique do mouse:
+OmniboxViewViews::OnMousePressed/OnMouseReleased já selecionam toda a URL e
+abrem o popup de sugestões (a command bar com ícones por tipo) com a barra
+sem foco; Ctrl+L segue por SetFocus. Pendente: fonte 12/13 px da barra e
+ícone de ajustes no estilo do tema (kTuneIcon usa o traço upstream).
+Depende de: aerographene/omnibox-centered.patch, theme-radius, theme-icons-*.
+
+--- a/chrome/browser/ui/views/location_bar/location_bar_view.cc
++++ b/chrome/browser/ui/views/location_bar/location_bar_view.cc
+@@ -107,6 +107,7 @@
+ #include "components/omnibox/browser/omnibox_prefs.h"
+ #include "components/omnibox/browser/page_classification_functions.h"
+ #include "components/omnibox/browser/vector_icons.h"
++#include "components/vector_icons/vector_icons.h"
+ #include "components/omnibox/common/input_state.h"
+ #include "components/omnibox/common/omnibox_feature_configs.h"
+ #include "components/omnibox/common/omnibox_features.h"
+@@ -137,6 +138,7 @@
+ #include "ui/compositor/layer.h"
+ #include "ui/compositor/paint_recorder.h"
+ #include "ui/events/event.h"
++#include "ui/base/clipboard/scoped_clipboard_writer.h"
+ #include "ui/gfx/animation/slide_animation.h"
+ #include "ui/gfx/canvas.h"
+ #include "ui/gfx/geometry/skia_conversions.h"
+@@ -177,6 +179,11 @@
+ // The padding between the content setting icons and other trailing decorations.
+ constexpr int kContentSettingIntraItemPadding = 8;
+ 
++// aerographene: bar height 30 (mockups; toolbar 44) and in-bar button box 28.
++constexpr int kAerographeneLocationBarHeight = 30;
++constexpr int kAerographeneButtonSize = 28;
++constexpr int kAerographeneButtonIconSize = 16;
++
+ // Capsule dimensions and padding for the elevated page action toolbar.
+ constexpr int kPageActionCapsuleEdgePadding = 2;
+ constexpr int kPageActionCapsuleVerticalPadding = 2;
+@@ -487,6 +494,24 @@
+   clear_all_button_ = AddChildView(std::move(clear_all_button));
+   RefreshClearAllButtonIcon();
+ 
++  // aerographene: site settings and copy link live inside the bar.
++  if (!is_popup_mode_) {
++    auto site_settings_button = views::CreateVectorImageButton(
++        base::BindRepeating(
++            base::IgnoreResult(&LocationBarView::ShowPageInfoDialog),
++            base::Unretained(this)));
++    site_settings_button->SetTooltipText(
++        l10n_util::GetStringUTF16(IDS_TOOLTIP_LOCATION_ICON));
++    site_settings_button_ = AddChildView(std::move(site_settings_button));
++
++    auto copy_link_button = views::CreateVectorImageButton(base::BindRepeating(
++        &LocationBarView::OnCopyLinkPressed, base::Unretained(this)));
++    copy_link_button->SetTooltipText(
++        l10n_util::GetStringUTF16(IDS_TAB_CXMENU_COPY_URL));
++    copy_link_button_ = AddChildView(std::move(copy_link_button));
++    RefreshAerographeneButtonIcons();
++  }
++
+   auto ai_mode_hint_label = std::make_unique<views::Label>(
+       std::u16string(), CONTEXT_OMNIBOX_PRIMARY, views::style::STYLE_PRIMARY);
+   ai_mode_hint_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+@@ -678,7 +703,9 @@
+ }
+ 
+ gfx::Size LocationBarView::GetMinimumSize() const {
+-  const int height = GetLayoutConstant(LayoutConstant::kLocationBarHeight);
++  const int height = is_popup_mode_
++                         ? GetLayoutConstant(LayoutConstant::kLocationBarHeight)
++                         : kAerographeneLocationBarHeight;
+   if (!IsInitialized()) {
+     return gfx::Size(0, height);
+   }
+@@ -705,7 +732,9 @@
+ 
+ gfx::Size LocationBarView::CalculatePreferredSize(
+     const views::SizeBounds& available_size) const {
+-  const int height = GetLayoutConstant(LayoutConstant::kLocationBarHeight);
++  const int height = is_popup_mode_
++                         ? GetLayoutConstant(LayoutConstant::kLocationBarHeight)
++                         : kAerographeneLocationBarHeight;
+   if (!IsInitialized()) {
+     return gfx::Size(0, height);
+   }
+@@ -834,16 +863,19 @@
+     selected_keyword_view_->SetKeyword(keyword);
+   } else if (location_icon_view_->GetShowText() &&
+              !ShouldChipOverrideLocationIcon()) {
++    // aerographene: only warning labels (e.g. "Not secure") keep the chip.
+     location_icon_view_->SetVisible(true);
+     leading_decorations.AddDecoration(
+         vertical_padding, location_height, false, kLeadingDecorationMaxFraction,
+         /*intra_item_padding=*/0, icon_left, location_icon_view_);
+-  } else if (!ShouldChipOverrideLocationIcon()) {
++  } else if (!ShouldChipOverrideLocationIcon() && is_popup_mode_) {
+     location_icon_view_->SetVisible(true);
+     leading_decorations.AddDecoration(vertical_padding, location_height, false,
+                                       0, /*intra_item_padding=*/0, icon_left,
+                                       location_icon_view_);
+   } else {
++    // aerographene: no page info chip on the left; site settings is the
++    // button at the trailing end.
+     location_icon_view_->SetVisible(false);
+   }
+ 
+@@ -856,6 +888,19 @@
+     }
+   };
+ 
++  // aerographene: copy link (outermost) and site settings at the trailing end.
++  const int button_padding =
++      std::max((height() - kAerographeneButtonSize) / 2, 0);
++  for (views::ImageButton* button :
++       {copy_link_button_.get(), site_settings_button_.get()}) {
++    if (button) {
++      trailing_decorations.AddDecoration(
++          button_padding, std::min(kAerographeneButtonSize, height()),
++          /*auto_collapse=*/false, /*max_fraction=*/0,
++          /*intra_item_padding=*/0, /*edge_padding=*/button_padding, button);
++    }
++  }
++
+   if (features::IsPageActionsElevatedToolbarEnabled()) {
+     if (page_action_container_ && page_action_container_->GetVisible()) {
+       const bool is_capsule_active = page_action_container_->IsCapsuleActive();
+@@ -931,6 +976,18 @@
+   // the rounded ends.
+   location_bounds.Intersect(GetLocalBoundsWithoutEndcaps());
+ 
++  // aerographene: the text is centered, so mirror the width taken by the
++  // trailing decorations on the leading side to keep it centered in the bar.
++  if (!is_popup_mode_) {
++    const int trailing_taken = width() - location_bounds.right();
++    const int leading_taken = location_bounds.x();
++    if (trailing_taken > leading_taken && location_bounds.width() > 0) {
++      const int extra = std::min(trailing_taken - leading_taken,
++                                 location_bounds.width() / 2);
++      location_bounds.Inset(gfx::Insets::TLBR(0, extra, 0, 0));
++    }
++  }
++
+   if (!ime_inline_autocomplete_view_->GetVisible() &&
+       !omnibox_additional_text_view_->GetVisible()) {
+     // Short circuit the below logic when the additional views aren't visible.
+@@ -1011,6 +1068,7 @@
+ 
+   RefreshBackground();
+   RefreshClearAllButtonIcon();
++  RefreshAerographeneButtonIcons();
+ }
+ 
+ void LocationBarView::ChildPreferredSizeChanged(views::View* child) {
+@@ -1338,7 +1396,7 @@
+ }
+ 
+ gfx::Rect LocationBarView::GetLocalBoundsWithoutEndcaps() const {
+-  const int border_radius = height() / 2;
++  const int border_radius = is_popup_mode_ ? height() / 2 : GetBorderRadius();
+   gfx::Rect bounds_without_endcaps(GetLocalBounds());
+   bounds_without_endcaps.Inset(gfx::Insets::VH(0, border_radius));
+   return bounds_without_endcaps;
+@@ -1373,7 +1431,10 @@
+     background_color_ = gfx::Tween::ColorValueBetween(opacity, normal, hovered);
+   }
+ 
+-  SkColor border_color = SK_ColorTRANSPARENT;
++  // aerographene: the bar always has a 1px theme line (mockups).
++  SkColor border_color =
++      is_popup_mode_ ? SK_ColorTRANSPARENT
++                     : color_provider->GetColor(kColorLocationBarBorder);
+   if (high_contrast) {
+     // High contrast schemes get a border stroke even on a rounded omnibox.
+     border_color =
+@@ -1525,6 +1586,37 @@
+       GetLayoutInsets(LOCATION_BAR_ICON_INTERIOR_PADDING)));
+ }
+ 
++void LocationBarView::RefreshAerographeneButtonIcons() {
++  // The Link icon is themed by the theme icon maps (theme-icons-*); Tune
++  // (sliders) keeps the upstream shape.
++  const std::pair<views::ImageButton*, const gfx::VectorIcon*> buttons[] = {
++      {site_settings_button_.get(), &vector_icons::kTuneIcon},
++      {copy_link_button_.get(), &vector_icons::kLinkIcon},
++  };
++  for (const auto& [button, icon] : buttons) {
++    if (!button) {
++      continue;
++    }
++    SetImageFromVectorIconWithColor(
++        button, *icon, kAerographeneButtonIconSize,
++        views::IconColors(kColorToolbarButtonIcon,
++                          kColorToolbarButtonIconInactive));
++    button->SetBorder(views::CreateEmptyBorder(gfx::Insets(
++        (kAerographeneButtonSize - kAerographeneButtonIconSize) / 2)));
++  }
++}
++
++void LocationBarView::OnCopyLinkPressed() {
++  content::WebContents* contents = GetWebContents();
++  if (!contents) {
++    return;
++  }
++  content::NavigationEntry* entry = contents->GetController().GetVisibleEntry();
++  const GURL& url = entry ? entry->GetVirtualURL() : contents->GetVisibleURL();
++  ui::ScopedClipboardWriter writer(ui::ClipboardBuffer::kCopyPaste);
++  writer.WriteText(base::UTF8ToUTF16(url.spec()));
++}
++
+ bool LocationBarView::ShouldShowKeywordBubble() const {
+   return GetOmniboxController()->edit_model()->is_keyword_selected();
+ }
+--- a/chrome/browser/ui/views/location_bar/location_bar_view.h
++++ b/chrome/browser/ui/views/location_bar/location_bar_view.h
+@@ -371,6 +371,10 @@
+   // Updates the color of the icon for the "clear all" button.
+   void RefreshClearAllButtonIcon();
+ 
++  // aerographene: in-bar buttons (site settings, copy link).
++  void RefreshAerographeneButtonIcons();
++  void OnCopyLinkPressed();
++
+   // Returns true if a keyword is selected in the model.
+   bool ShouldShowKeywordBubble() const;
+ 
+@@ -585,6 +589,11 @@
+   // user to clear all text.
+   raw_ptr<views::ImageButton> clear_all_button_ = nullptr;
+ 
++  // aerographene: site settings (sliders) and copy link buttons, shown at the
++  // trailing end of the bar in place of the page info chip and the star.
++  raw_ptr<views::ImageButton> site_settings_button_ = nullptr;
++  raw_ptr<views::ImageButton> copy_link_button_ = nullptr;
++
+   // A label to show the AI Mode hint text.
+   raw_ptr<views::Label> ai_mode_hint_label_ = nullptr;
+ 
+--- a/chrome/browser/ui/views/omnibox/omnibox_view_views.cc
++++ b/chrome/browser/ui/views/omnibox/omnibox_view_views.cc
+@@ -284,6 +284,10 @@
+   SetTextInputType(GetPreferredTextInputType());
+   GetRenderText()->SetElideBehavior(gfx::ELIDE_TAIL);
+   GetRenderText()->set_symmetric_selection_visual_bounds(true);
++  if (!popup_window_mode_) {
++    // aerographene: centered URL text (mockups).
++    SetHorizontalAlignment(gfx::ALIGN_CENTER);
++  }
+   InstallPlaceholderText();
+   scoped_template_url_service_observation_.Observe(
+       controller()->client()->GetTemplateURLService());
+--- a/chrome/browser/ui/views/page_action/page_action_view.cc
++++ b/chrome/browser/ui/views/page_action/page_action_view.cc
+@@ -185,7 +185,10 @@
+ 
+ void PageActionView::OnPageActionModelChanged(
+     const PageActionModelInterface& model) {
+-  const bool visible = model.GetVisible();
++  // aerographene: no bookmark star in the location bar; site settings and
++  // copy link replace it.
++  const bool visible = model.GetVisible() &&
++                       action_item_->GetActionId() != kActionBookmarkThisTab;
+   const bool declared_changed = (declared_visible_ != visible);
+   declared_visible_ = visible;
+   SetEnabled(visible);
