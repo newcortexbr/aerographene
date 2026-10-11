@@ -1,0 +1,379 @@
+aerographene: pinned sem cópia da árvore nos caminhos quentes.
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: reduzir trabalho sem mudar comportamento. PinnedModel::GetPinned()/
+Find() copiam a árvore (GURL, títulos, filhos) e eram usados para perguntas
+pequenas. Novos acessores sem cópia no PinnedModel: GetTopLevelIndex, GetLabel,
+IsOpen, FindURL; GetURL passa a devolver const GURL&. Usos trocados: AlignOrder
+(todo kMoved de aba pinned, antes O(N²) com cópia), OpenClosedEntry,
+GetPinnedLabel (por aba a cada notificação). OnTabChangedAt faz uma só
+resolução e SameOriginAndPath só monta url::Origin quando scheme/host/porta
+http(s) diferem (Origin segue como fallback exato). RefreshPersistedSpans só
+invalida o layout se TabView::SetPinnedSpan/SetPinnedLabel (agora bool)
+mudaram algo; AerographeneClosedPinnedView::Update só mexe na view se
+tooltip/texto/span/favicon mudaram. Sem novos observers nem mudança de ordem
+de notificação.
+Arquivos: chrome/browser/ui/tabs/aerographene/pinned_model.{h,cc},
+pinned_model_unittest.cc (teste dos acessores), pinned_tab_mirror.cc,
+views/tabs/common/pinned_tab_container_view.cc, tab_view.{h,cc}.
+Depende de: pinned-model, pinned-model-tabstrip, pinned-closed, pinned-label e
+os demais patches pinned da série (aplica por último).
+
+---
+diff -ruN a/chrome/browser/ui/tabs/aerographene/pinned_model.cc b/chrome/browser/ui/tabs/aerographene/pinned_model.cc
+--- a/chrome/browser/ui/tabs/aerographene/pinned_model.cc
++++ b/chrome/browser/ui/tabs/aerographene/pinned_model.cc
+@@ -122,9 +122,47 @@
+   return ReadSpan(node);
+ }
+ 
+-GURL PinnedModel::GetURL(const base::Uuid& uuid) const {
++const GURL& PinnedModel::GetURL(const base::Uuid& uuid) const {
++  const GURL* url = FindURL(uuid);
++  return url ? *url : GURL::EmptyGURL();
++}
++
++const GURL* PinnedModel::FindURL(const base::Uuid& uuid) const {
++  const BookmarkNode* node = Resolve(uuid);
++  if (!node) {
++    return nullptr;
++  }
++  return node->is_url() ? &node->url() : &GURL::EmptyGURL();
++}
++
++int PinnedModel::GetTopLevelIndex(const base::Uuid& uuid) const {
++  const BookmarkNode* node = Resolve(uuid);
++  if (!node || node->parent() != root_) {
++    return -1;
++  }
++  int index = 0;
++  for (const auto& child : root_->children()) {
++    if (child.get() == node) {
++      return index;
++    }
++    if (child->is_url() || IsDrawer(child.get())) {
++      ++index;
++    }
++  }
++  return -1;
++}
++
++std::string PinnedModel::GetLabel(const base::Uuid& uuid) const {
++  std::string label;
++  if (const BookmarkNode* node = Resolve(uuid)) {
++    node->GetMetaInfo(kPinnedLabelMetaKey, &label);
++  }
++  return label;
++}
++
++bool PinnedModel::IsOpen(const base::Uuid& uuid) const {
+   const BookmarkNode* node = Resolve(uuid);
+-  return node && node->is_url() ? node->url() : GURL();
++  return node && node->is_url() && HasFlag(node, kPinnedOpenMetaKey);
+ }
+ 
+ std::optional<base::Uuid> PinnedModel::AddPinned(const GURL& url,
+diff -ruN a/chrome/browser/ui/tabs/aerographene/pinned_model.h b/chrome/browser/ui/tabs/aerographene/pinned_model.h
+--- a/chrome/browser/ui/tabs/aerographene/pinned_model.h
++++ b/chrome/browser/ui/tabs/aerographene/pinned_model.h
+@@ -100,8 +100,19 @@
+   // Cheap lookups that do not build a PinnedItem.
+   bool Contains(const base::Uuid& uuid) const;
+   std::optional<int> GetSpan(const base::Uuid& uuid) const;
+-  // Empty for folders and unknown entries.
+-  GURL GetURL(const base::Uuid& uuid) const;
++  // Empty for folders and unknown entries. The reference stays valid until the
++  // model changes.
++  const GURL& GetURL(const base::Uuid& uuid) const;
++  // Null for unknown entries; the (empty) URL of a folder otherwise. Same
++  // lifetime as GetURL().
++  const GURL* FindURL(const base::Uuid& uuid) const;
++  // Index among the top-level entries (as in GetPinned()), or -1 for entries
++  // inside a drawer and unknown entries. Does not copy the tree.
++  int GetTopLevelIndex(const base::Uuid& uuid) const;
++  // Label of the entry; empty if unset or unknown.
++  std::string GetLabel(const base::Uuid& uuid) const;
++  // aerographene.open=1 on a URL entry; false for folders and unknown entries.
++  bool IsOpen(const base::Uuid& uuid) const;
+ 
+   // `parent` invalid = top level; otherwise it must be a drawer folder. `index`
+   // is clamped to the end. Return the new entry's uuid or nullopt on failure.
+diff -ruN a/chrome/browser/ui/tabs/aerographene/pinned_model_unittest.cc b/chrome/browser/ui/tabs/aerographene/pinned_model_unittest.cc
+--- a/chrome/browser/ui/tabs/aerographene/pinned_model_unittest.cc
++++ b/chrome/browser/ui/tabs/aerographene/pinned_model_unittest.cc
+@@ -135,6 +135,35 @@
+   EXPECT_EQ(1u, model_->GetPinned().size());
+ }
+ 
++TEST_F(PinnedModelTest, CheapAccessorsMatchSnapshots) {
++  auto a = model_->AddPinned(GURL("https://a.test/"), u"A", base::Uuid(), 0);
++  auto folder = model_->AddFolder(u"F", 1);
++  ASSERT_TRUE(a);
++  ASSERT_TRUE(folder);
++  auto b = model_->AddPinned(GURL("https://b.test/"), u"B", *folder, 0);
++  ASSERT_TRUE(b);
++  EXPECT_TRUE(model_->SetLabel(*a, "label"));
++
++  EXPECT_EQ(0, model_->GetTopLevelIndex(*a));
++  EXPECT_EQ(1, model_->GetTopLevelIndex(*folder));
++  EXPECT_EQ(-1, model_->GetTopLevelIndex(*b));
++  EXPECT_EQ(-1, model_->GetTopLevelIndex(base::Uuid::GenerateRandomV4()));
++
++  EXPECT_EQ("label", model_->GetLabel(*a));
++  EXPECT_TRUE(model_->GetLabel(*b).empty());
++  EXPECT_TRUE(model_->GetLabel(base::Uuid::GenerateRandomV4()).empty());
++
++  EXPECT_EQ(GURL("https://a.test/"), model_->GetURL(*a));
++  EXPECT_TRUE(model_->GetURL(*folder).is_empty());
++  ASSERT_TRUE(model_->FindURL(*folder));
++  EXPECT_FALSE(model_->FindURL(base::Uuid::GenerateRandomV4()));
++
++  EXPECT_FALSE(model_->IsOpen(*a));
++  EXPECT_TRUE(model_->SetOpen(*a, true));
++  EXPECT_TRUE(model_->IsOpen(*a));
++  EXPECT_FALSE(model_->IsOpen(*folder));
++}
++
+ TEST_F(PinnedModelTest, IgnoresNodesOutsideSpaceFolder) {
+   const BookmarkNode* outside = bookmarks_->AddNewURL(
+       bookmarks_->bookmark_bar_node(), 0, u"O", GURL("https://o.test/"));
+diff -ruN a/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc b/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc
+--- a/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc
++++ b/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc
+@@ -45,7 +45,17 @@
+ // (fragment, pushState/replaceState keeping the path) and query changes do not
+ // rewrite the bookmark, so SPAs do not hit the BookmarkModel on every change.
+ bool SameOriginAndPath(const GURL& a, const GURL& b) {
+-  return url::Origin::Create(a).IsSameOriginWith(b) && a.path() == b.path();
++  if (a.path() != b.path()) {
++    return false;
++  }
++  // Same scheme, host and port of an http(s) URL is the same origin; only
++  // build the Origin for the remaining cases.
++  if (a.SchemeIsHTTPOrHTTPS() && a.scheme() == b.scheme() &&
++      a.host() == b.host() &&
++      a.EffectiveIntPort() == b.EffectiveIntPort()) {
++    return true;
++  }
++  return url::Origin::Create(a).IsSameOriginWith(b);
+ }
+ 
+ TabStripModel* GetTabStrip(tabs::TabInterface* tab) {
+@@ -53,16 +63,6 @@
+   return browser ? browser->GetTabStripModel() : nullptr;
+ }
+ 
+-// Index of `uuid` among the top-level entries, or -1.
+-int TopLevelIndex(const std::vector<PinnedItem>& items, const base::Uuid& uuid) {
+-  for (size_t i = 0; i < items.size(); ++i) {
+-    if (items[i].uuid == uuid) {
+-      return static_cast<int>(i);
+-    }
+-  }
+-  return -1;
+-}
+-
+ }  // namespace
+ 
+ PinnedTabMirror::PinnedTabMirror(Profile* profile, PinnedModel* model)
+@@ -116,13 +116,10 @@
+       !model_->IsLoaded()) {
+     return false;
+   }
+-  const std::vector<PinnedItem> items = model_->GetPinned();
+-  const int target = TopLevelIndex(items, uuid);
+-  std::optional<PinnedItem> item = model_->Find(uuid);
+-  if (!item) {
+-    return false;
+-  }
+-  if (item->is_folder || item->open || !item->url.is_valid()) {
++  const int target = model_->GetTopLevelIndex(uuid);
++  // Empty for drawer folders and unknown entries.
++  const GURL url = model_->GetURL(uuid);
++  if (!url.is_valid() || model_->IsOpen(uuid)) {
+     return false;
+   }
+   for (const auto& [handle, mapped] : tab_nodes_) {
+@@ -139,12 +136,11 @@
+   for (int i = 0; target >= 0 && i < pinned_count; ++i) {
+     const std::optional<base::Uuid> entry =
+         GetEntryForTab(strip->GetTabAtIndex(i));
+-    if (entry && TopLevelIndex(items, *entry) > target) {
++    if (entry && model_->GetTopLevelIndex(*entry) > target) {
+       index = i;
+       break;
+     }
+   }
+-  const GURL url = item->url;
+   next_entry_ = uuid;
+   // Inserted already pinned: Associate() runs from the insertion.
+   chrome::AddTabAt(browser, url, index, /*foreground=*/true,
+@@ -215,16 +211,19 @@
+       !model_->IsLoaded()) {
+     return;
+   }
+-  const std::optional<base::Uuid> uuid = GetEntryForTab(tab);
+-  if (!uuid) {
++  const auto it = tab_nodes_.find(tab->GetHandle());
++  const GURL* stored = it != tab_nodes_.end() ? model_->FindURL(it->second)
++                                              : nullptr;
++  if (!stored) {
+     Associate(tab);
+     return;
+   }
+   const GURL url = GetTabURL(tab);
+-  const GURL stored = model_->GetURL(*uuid);
+-  if (url.is_valid() && stored.is_valid() && !SameOriginAndPath(stored, url)) {
++  if (url.is_valid() && stored->is_valid() &&
++      !SameOriginAndPath(*stored, url)) {
++    const base::Uuid uuid = it->second;
+     base::AutoReset<bool> writing(&writing_, true);
+-    model_->SetURL(*uuid, url);
++    model_->SetURL(uuid, url);
+   }
+ }
+ 
+@@ -503,8 +502,7 @@
+   if (index < 0 || index >= pinned_count) {
+     return;
+   }
+-  const std::vector<PinnedItem> items = model_->GetPinned();
+-  const int self = TopLevelIndex(items, *uuid);
++  const int self = model_->GetTopLevelIndex(*uuid);
+   if (self < 0) {
+     // Entries inside a drawer keep their place.
+     return;
+@@ -514,7 +512,7 @@
+     for (int i = index + step; i >= 0 && i < pinned_count; i += step) {
+       if (const std::optional<base::Uuid> other =
+               GetEntryForTab(strip->GetTabAtIndex(i))) {
+-        const int pos = TopLevelIndex(items, *other);
++        const int pos = model_->GetTopLevelIndex(*other);
+         if (pos >= 0) {
+           return pos;
+         }
+diff -ruN a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
+--- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
++++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
+@@ -111,9 +111,7 @@
+       model ? model->tab_mirror() : nullptr;
+   const std::optional<base::Uuid> uuid =
+       mirror ? mirror->GetEntryForTab(tab) : std::nullopt;
+-  const std::optional<aerographene::PinnedItem> item =
+-      uuid ? model->Find(*uuid) : std::nullopt;
+-  return item ? base::UTF8ToUTF16(item->label) : std::u16string();
++  return uuid ? base::UTF8ToUTF16(model->GetLabel(*uuid)) : std::u16string();
+ }
+ }  // namespace
+ 
+@@ -150,14 +148,29 @@
+     uuid_ = item.uuid;
+     model_index_ = model_index;
+     folder_ = folder;
+-    span_ = std::max(item.span, 1);
+-    favicon_ = favicon.IsEmpty() ? gfx::ImageSkia() : favicon.AsImageSkia();
++    const int span = std::max(item.span, 1);
++    const gfx::ImageSkia favicon_skia =
++        favicon.IsEmpty() ? gfx::ImageSkia() : favicon.AsImageSkia();
+     const std::u16string name =
+         item.title.empty() ? base::UTF8ToUTF16(item.url.spec()) : item.title;
+-    text_ = item.label.empty() ? name : base::UTF8ToUTF16(item.label);
+-    SetTooltipText(name);
+-    GetViewAccessibility().SetName(text_);
+-    SchedulePaint();
++    std::u16string text =
++        item.label.empty() ? name : base::UTF8ToUTF16(item.label);
++    // Update() runs for every placeholder on each model change; touch the
++    // view only for what changed.
++    if (name != tooltip_) {
++      tooltip_ = name;
++      SetTooltipText(name);
++    }
++    if (text != text_) {
++      text_ = std::move(text);
++      GetViewAccessibility().SetName(text_);
++      SchedulePaint();
++    }
++    if (span != span_ || !favicon_skia.BackedBySameObjectAs(favicon_)) {
++      span_ = span;
++      favicon_ = favicon_skia;
++      SchedulePaint();
++    }
+   }
+ 
+   const base::Uuid& uuid() const { return uuid_; }
+@@ -263,6 +276,7 @@
+   base::Uuid folder_;
+   int span_ = 1;
+   gfx::ImageSkia favicon_;
++  std::u16string tooltip_;
+   std::u16string text_;
+   base::RepeatingClosure rename_callback_;
+   base::RepeatingClosure folder_callback_;
+@@ -1349,13 +1363,16 @@
+ }
+ 
+ void PinnedTabContainerView::RefreshPersistedSpans() {
++  bool changed = false;
+   for (views::View* child : children()) {
+     if (auto* tab_view = views::AsViewClass<TabView>(child)) {
+-      tab_view->SetPinnedSpan(GetTabSpan(child));
+-      tab_view->SetPinnedLabel(GetPinnedLabel(child));
++      changed |= tab_view->SetPinnedSpan(GetTabSpan(child));
++      changed |= tab_view->SetPinnedLabel(GetPinnedLabel(child));
+     }
+   }
+-  InvalidateLayout();
++  if (changed) {
++    InvalidateLayout();
++  }
+ }
+ 
+ BEGIN_METADATA(PinnedTabContainerView)
+diff -ruN a/chrome/browser/ui/views/tabs/common/tab_view.cc b/chrome/browser/ui/views/tabs/common/tab_view.cc
+--- a/chrome/browser/ui/views/tabs/common/tab_view.cc
++++ b/chrome/browser/ui/views/tabs/common/tab_view.cc
+@@ -1286,20 +1286,22 @@
+   return collapsed_ && width > CollapsedWidth();
+ }
+ 
+-void TabView::SetPinnedSpan(int span) {
++bool TabView::SetPinnedSpan(int span) {
+   if (pinned_span_ == span) {
+-    return;
++    return false;
+   }
+   pinned_span_ = span;
+   InvalidateLayout();
++  return true;
+ }
+ 
+-void TabView::SetPinnedLabel(std::u16string label) {
++bool TabView::SetPinnedLabel(std::u16string label) {
+   if (pinned_label_ == label) {
+-    return;
++    return false;
+   }
+   pinned_label_ = std::move(label);
+   UpdateTitle(tab_data_.title, tab_data_.should_render_loading_title);
++  return true;
+ }
+ 
+ bool TabView::ShowsPinnedTitle() const {
+diff -ruN a/chrome/browser/ui/views/tabs/common/tab_view.h b/chrome/browser/ui/views/tabs/common/tab_view.h
+--- a/chrome/browser/ui/views/tabs/common/tab_view.h
++++ b/chrome/browser/ui/views/tabs/common/tab_view.h
+@@ -108,10 +108,11 @@
+   bool pinned() const { return pinned_; }
+   // Horizontal grid cells a pinned tab occupies in the vertical pinned grid;
+   // the title shows from 2 cells up. Set by `PinnedTabContainerView`.
+-  void SetPinnedSpan(int span);
++  // Both setters return true when the value changed.
++  bool SetPinnedSpan(int span);
+   // Text shown instead of the page title while the tab is pinned; empty uses
+   // the page title. Set by `PinnedTabContainerView` from the pinned model.
+-  void SetPinnedLabel(std::u16string label);
++  bool SetPinnedLabel(std::u16string label);
+   const tabs::TabInterface* GetTabInterface() const;
+ 
+   GlowHoverController* GetHoverControllerForTesting() {
