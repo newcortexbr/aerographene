@@ -133,7 +133,7 @@ Não verificado em runtime: tudo acima (só compilação dos .cc tocados).
  float TabStyle::GetSelectedTabOpacity() const {
 --- /dev/null
 +++ b/chrome/browser/ui/views/frame/aerographene_topbar_row.cc
-@@ -0,0 +1,538 @@
+@@ -0,0 +1,534 @@
 +// Copyright 2026 The Aerographene Authors
 +// You can use, redistribute, and/or modify this source code under
 +// the terms of the GPL-3.0 license that can be found in the LICENSE file.
@@ -434,8 +434,9 @@ Não verificado em runtime: tudo acima (só compilação dos .cc tocados).
 +  if (model_) {
 +    model_observation_.Observe(model_);
 +  }
++  // TabStripModelObserver unregisters itself from the model on destruction.
 +  if (TabStripModel* const tab_strip_model = browser->GetTabStripModel()) {
-+    tab_strip_model_observation_.Observe(tab_strip_model);
++    tab_strip_model->AddObserver(this);
 +  }
 +  // The owner reads has_content() after construction; no notification yet.
 +  Rebuild(/*notify=*/false);
@@ -510,11 +511,6 @@ Não verificado em runtime: tudo acima (só compilação dos .cc tocados).
 +    const TabStripModelChange& change,
 +    const TabStripSelectionChange& selection) {
 +  RefreshActive();
-+}
-+
-+void AerographeneTopbarRow::OnTabStripModelDestroyed(
-+    TabStripModel* tab_strip_model) {
-+  tab_strip_model_observation_.Reset();
 +}
 +
 +void AerographeneTopbarRow::ExecuteCommand(int command_id, int event_flags) {
@@ -674,7 +670,7 @@ Não verificado em runtime: tudo acima (só compilação dos .cc tocados).
 +END_METADATA
 --- /dev/null
 +++ b/chrome/browser/ui/views/frame/aerographene_topbar_row.h
-@@ -0,0 +1,115 @@
+@@ -0,0 +1,112 @@
 +// Copyright 2026 The Aerographene Authors
 +// You can use, redistribute, and/or modify this source code under
 +// the terms of the GPL-3.0 license that can be found in the LICENSE file.
@@ -749,7 +745,6 @@ Não verificado em runtime: tudo acima (só compilação dos .cc tocados).
 +      TabStripModel* tab_strip_model,
 +      const TabStripModelChange& change,
 +      const TabStripSelectionChange& selection) override;
-+  void OnTabStripModelDestroyed(TabStripModel* tab_strip_model) override;
 +
 +  // ui::SimpleMenuModel::Delegate:
 +  void ExecuteCommand(int command_id, int event_flags) override;
@@ -784,8 +779,6 @@ Não verificado em runtime: tudo acima (só compilação dos .cc tocados).
 +  base::ScopedObservation<aerographene::PinnedModel,
 +                          aerographene::PinnedModel::Observer>
 +      model_observation_{this};
-+  base::ScopedObservation<TabStripModel, TabStripModelObserver>
-+      tab_strip_model_observation_{this};
 +  base::WeakPtrFactory<AerographeneTopbarRow> weak_factory_{this};
 +};
 +
