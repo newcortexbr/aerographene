@@ -81,15 +81,17 @@ Depende de aerographene/cold-data-history-ui.patch.
    void OnDatabaseError(int error, sql::Statement* stmt);
 --- a/components/history/core/browser/cold_history_database.cc
 +++ b/components/history/core/browser/cold_history_database.cc
-@@ -9,6 +9,7 @@
+@@ -8,7 +8,9 @@
+ #include "base/files/file_util.h"
  #include "base/functional/bind.h"
  #include "base/logging.h"
++#include "base/strings/cstring_view.h"
  #include "components/database_utils/url_converter.h"
 +#include "components/history/core/browser/download_row.h"
  #include "sql/recovery.h"
  #include "sql/statement.h"
  #include "sql/transaction.h"
-@@ -24,7 +25,11 @@
+@@ -24,7 +26,11 @@
  }  // namespace
  
  ColdHistoryDatabase::ColdHistoryDatabase(const base::FilePath& path)
@@ -102,7 +104,7 @@ Depende de aerographene/cold-data-history-ui.patch.
        db_(sql::DatabaseOptions().set_exclusive_locking(true).set_cache_size(
                250),
            // Reuses the History tag (the tag list is generated from the
-@@ -69,7 +74,25 @@
+@@ -69,7 +75,25 @@
      return false;
    }
    if (!CreateURLTable(/*is_temporary=*/false) || !CreateMainURLIndex() ||
@@ -129,7 +131,7 @@ Depende de aerographene/cold-data-history-ui.patch.
      return false;
    }
    return transaction.Commit();
-@@ -208,6 +231,106 @@
+@@ -208,6 +232,107 @@
    return statement.Run();
  }
  
@@ -187,10 +189,11 @@ Depende de aerographene/cold-data-history-ui.patch.
 +      return false;
 +    }
 +    const int64_t new_id = max_id.ColumnInt64(0) + 1;
-+    for (const char* sql :
-+         {"UPDATE downloads SET id = ? WHERE id = ?",
-+          "UPDATE downloads_url_chains SET id = ? WHERE id = ?",
-+          "UPDATE downloads_slices SET download_id = ? WHERE download_id = ?"}) {
++    static constexpr base::cstring_view kRenumber[] = {
++        "UPDATE downloads SET id = ? WHERE id = ?",
++        "UPDATE downloads_url_chains SET id = ? WHERE id = ?",
++        "UPDATE downloads_slices SET download_id = ? WHERE download_id = ?"};
++    for (base::cstring_view sql : kRenumber) {
 +      sql::Statement renumber(db_.GetUniqueStatement(sql));
 +      renumber.BindInt64(0, new_id);
 +      renumber.BindInt64(1, row.id);
@@ -236,7 +239,7 @@ Depende de aerographene/cold-data-history-ui.patch.
  bool ColdHistoryDatabase::ChangeURLID(URLID old_id, URLID new_id) {
    sql::Statement visits(db_.GetCachedStatement(
        SQL_FROM_HERE, "UPDATE visits SET url = ? WHERE url = ?"));
-@@ -218,10 +341,19 @@
+@@ -218,10 +343,19 @@
        "UPDATE OR IGNORE keyword_search_terms SET url_id = ? WHERE url_id = ?"));
    terms.BindInt64(0, new_id);
    terms.BindInt64(1, old_id);
@@ -257,7 +260,7 @@ Depende de aerographene/cold-data-history-ui.patch.
  }
  
  bool ColdHistoryDatabase::MoveURLRowOut(URLID cold_id, URLID hot_id) {
-@@ -258,8 +390,18 @@
+@@ -258,8 +392,18 @@
          SQL_FROM_HERE, "DELETE FROM keyword_search_terms WHERE url_id = ?"));
      terms.BindInt64(0, id);
      ok = terms.Run() && ok;
@@ -277,7 +280,7 @@ Depende de aerographene/cold-data-history-ui.patch.
  }
  
  bool ColdHistoryDatabase::DeleteOrphans() {
-@@ -270,7 +412,11 @@
+@@ -270,7 +414,11 @@
               "DELETE FROM urls WHERE id NOT IN (SELECT url FROM visits)") &&
           db_.Execute(
               "DELETE FROM keyword_search_terms WHERE url_id NOT IN "
