@@ -75,3 +75,4 @@ aerographene/newtab-home.patch
 aerographene/space-switch-in-place.patch
 aerographene/arc-import-pinned.patch
 aerographene/perf-pinned-nocopy.patch
+aerographene/perf-pinned-batch.patch
