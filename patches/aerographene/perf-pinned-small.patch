@@ -1,0 +1,106 @@
+aerographene: perf-pinned-small. Sem mudança de comportamento.
+1) AerographenePinnedFolderView::Update só reaplica tooltip, nome de
+acessibilidade, estado expandido e SchedulePaint quando texto ou expanded
+mudam (ou na primeira chamada).
+2) IsPinnedFolder (bookmark_bar_view.cc, bookmark_menu_delegate.cc) lê a meta
+info sem copiar a string: GetMetaInfoMap() + find, comparando string_view.
+Depende de pinned-folder, pinned-barskip, perf-startup-layout.
+
+--- a/chrome/browser/ui/views/bookmarks/bookmark_bar_view.cc
++++ b/chrome/browser/ui/views/bookmarks/bookmark_bar_view.cc
+@@ -301,9 +301,16 @@
+ // aerographene::kPinnedMetaKey (pinned_model.h), duplicated to avoid a
+ // dependency from views/bookmarks on ui/tabs.
+ bool IsPinnedFolder(const BookmarkNode* node) {
+-  std::string value;
+-  return node->is_folder() &&
+-         node->GetMetaInfo("aerographene.pinned", &value) && value == "1";
++  if (!node->is_folder()) {
++    return false;
++  }
++  // No-copy read: GetMetaInfo() would copy the value string on every call.
++  const BookmarkNode::MetaInfoMap* map = node->GetMetaInfoMap();
++  if (!map) {
++    return false;
++  }
++  const auto it = map->find("aerographene.pinned");
++  return it != map->end() && std::string_view(it->second) == "1";
+ }
+ }  // namespace
+ 
+--- a/chrome/browser/ui/views/bookmarks/bookmark_menu_delegate.cc
++++ b/chrome/browser/ui/views/bookmarks/bookmark_menu_delegate.cc
+@@ -8,6 +8,7 @@
+ #include <memory>
+ #include <optional>
+ #include <string>
++#include <string_view>
+ 
+ #include "base/containers/fixed_flat_set.h"
+ #include "base/containers/to_vector.h"
+@@ -95,9 +96,16 @@
+ // in bookmark menus. Key is aerographene::kPinnedMetaKey (pinned_model.h),
+ // duplicated to avoid a dependency from views/bookmarks on ui/tabs.
+ bool IsPinnedFolder(const BookmarkNode* node) {
+-  std::string value;
+-  return node->is_folder() &&
+-         node->GetMetaInfo("aerographene.pinned", &value) && value == "1";
++  if (!node->is_folder()) {
++    return false;
++  }
++  // No-copy read: GetMetaInfo() would copy the value string on every call.
++  const BookmarkNode::MetaInfoMap* map = node->GetMetaInfoMap();
++  if (!map) {
++    return false;
++  }
++  const auto it = map->find("aerographene.pinned");
++  return it != map->end() && std::string_view(it->second) == "1";
+ }
+ 
+ size_t SubmenuIndexOf(const MenuItemView* parent, const views::View* child) {
+--- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
++++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
+@@ -310,19 +310,25 @@
+   // Returns whether the index or the expanded state (grid layout) changed.
+   bool Update(const aerographene::PinnedItem& item, int model_index) {
+     uuid_ = item.uuid;
+-    const bool layout_changed =
+-        model_index_ != model_index || expanded_ != item.expanded;
++    const bool expanded_changed = expanded_ != item.expanded;
++    const bool layout_changed = model_index_ != model_index || expanded_changed;
+     model_index_ = model_index;
+     expanded_ = item.expanded;
+-    text_ = item.label.empty() ? item.title : base::UTF8ToUTF16(item.label);
+-    SetTooltipText(text_);
+-    GetViewAccessibility().SetName(text_);
+-    if (expanded_) {
+-      GetViewAccessibility().SetIsExpanded();
+-    } else {
+-      GetViewAccessibility().SetIsCollapsed();
++    std::u16string text =
++        item.label.empty() ? item.title : base::UTF8ToUTF16(item.label);
++    // Tooltip, accessibility and paint depend only on text and expanded state.
++    if (!applied_ || text != text_ || expanded_changed) {
++      applied_ = true;
++      text_ = std::move(text);
++      SetTooltipText(text_);
++      GetViewAccessibility().SetName(text_);
++      if (expanded_) {
++        GetViewAccessibility().SetIsExpanded();
++      } else {
++        GetViewAccessibility().SetIsCollapsed();
++      }
++      SchedulePaint();
+     }
+-    SchedulePaint();
+     return layout_changed;
+   }
+ 
+@@ -403,6 +409,7 @@
+   base::Uuid uuid_;
+   int model_index_ = 0;
+   bool expanded_ = false;
++  bool applied_ = false;
+   std::u16string text_;
+ };
+ 
