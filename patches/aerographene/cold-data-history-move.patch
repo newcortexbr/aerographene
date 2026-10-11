@@ -1,0 +1,262 @@
+aerographene: a expiração do histórico move para History-Cold em vez de apagar (ADR 0007, fatia 2).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: ADR 0007 fatia 2. O expirer usa aerographene.cold_after_days (via
+HistoryDatabaseParams) e, em ExpireSomeOldHistory, copia visitas, linhas de
+urls e keyword_search_terms do lote para o frio e faz commit do frio antes de
+apagar do quente; se o frio falha, nada sai do quente. Linhas de urls que
+ficam no quente (outras visitas, pinadas) são tiradas da cópia fria. Crash
+entre o commit do frio e o do quente deixa duplicata ignorada no reenvio.
+Notificação segue DELETION_EXPIRED. O frio abre sob demanda (primeiro lote,
+>= 30 s depois do Init) ou numa exclusão do usuário se o arquivo existe;
+InitImpl só guarda o caminho. IsExpiredVisitTime (importação/sync) segue em
+90 dias. Exclusão do usuário: DeleteAllHistory apaga o arquivo;
+ExpireHistoryBetween/ExpireHistory e DeleteURLs apagam o intervalo/URLs no
+frio. Respeita keep-old-history (sem expiração, sem frio).
+Depende de aerographene/cold-data-store.patch.
+
+
+--- a/components/history/core/browser/expire_history_backend.cc
++++ b/components/history/core/browser/expire_history_backend.cc
+@@ -24,6 +24,7 @@
+ #include "base/time/time.h"
+ #include "build/build_config.h"
+ #include "components/favicon/core/favicon_database.h"
++#include "components/history/core/browser/cold_history_database.h"
+ #include "components/history/core/browser/features.h"
+ #include "components/history/core/browser/history_backend_client.h"
+ #include "components/history/core/browser/history_backend_notifier.h"
+@@ -181,6 +182,65 @@ void ExpireHistoryBackend::SetDatabases(HistoryDatabase* main_db,
+                                         favicon::FaviconDatabase* favicon_db) {
+   main_db_ = main_db;
+   favicon_db_ = favicon_db;
++  if (!main_db_) {
++    cold_db_.reset();
++  }
++}
++
++void ExpireHistoryBackend::SetColdDatabasePath(const base::FilePath& path) {
++  cold_db_.reset();
++  cold_db_path_ = path;
++}
++
++ColdHistoryDatabase* ExpireHistoryBackend::GetColdDatabase(bool create) {
++  if (cold_db_path_.empty()) {
++    return nullptr;
++  }
++  if (!cold_db_) {
++    cold_db_ = std::make_unique<ColdHistoryDatabase>(cold_db_path_);
++  }
++  return cold_db_->Open(create) ? cold_db_.get() : nullptr;
++}
++
++void ExpireHistoryBackend::DeleteColdDatabase() {
++  if (cold_db_path_.empty()) {
++    return;
++  }
++  if (!cold_db_) {
++    cold_db_ = std::make_unique<ColdHistoryDatabase>(cold_db_path_);
++  }
++  cold_db_->CloseAndDelete();
++  cold_db_.reset();
++}
++
++bool ExpireHistoryBackend::CopyToCold(const VisitVector& visits,
++                                      std::set<URLID>* copied_url_ids) {
++  ColdHistoryDatabase* cold = GetColdDatabase(/*create=*/true);
++  if (!cold || !cold->BeginTransaction()) {
++    return false;
++  }
++  bool ok = true;
++  for (const VisitRow& visit : visits) {
++    ok = ok && cold->AddVisitRowKeepingID(visit);
++    if (!ok || !copied_url_ids->insert(visit.url_id).second) {
++      continue;
++    }
++    // Every url row is copied here; the ones that stay hot (other visits
++    // left, pinned) are removed from the cold copy after the hot pass.
++    URLRow url_row;
++    if (main_db_->GetURLRow(visit.url_id, &url_row)) {
++      ok = cold->AddURLRowKeepingID(url_row);
++    }
++    KeywordSearchTermRow term;
++    if (ok && main_db_->GetKeywordSearchTermRow(visit.url_id, &term)) {
++      ok = cold->AddKeywordSearchTerm(term);
++    }
++  }
++  if (!ok || !cold->CommitTransaction()) {
++    cold->RollbackTransaction();
++    return false;
++  }
++  return true;
+ }
+ 
+ void ExpireHistoryBackend::DeleteURL(const GURL& url, base::Time end_time) {
+@@ -235,6 +295,17 @@ void ExpireHistoryBackend::DeleteURLs(base::span<const GURL> urls,
+   BroadcastNotifications(&effects, DELETION_USER_INITIATED,
+                          DeletionTimeRange::Invalid(), std::nullopt,
+                          DeletionInfo::Reason::kOther);
++
++  // aerographene: user deletion of URLs also reaches History-Cold.
++  if (ColdHistoryDatabase* cold = GetColdDatabase(/*create=*/false)) {
++    std::set<GURL> cold_urls(urls.begin(), urls.end());
++    if (end_time.is_null() || end_time.is_max()) {
++      cold->DeleteURLsAndVisits(cold_urls);
++    } else {
++      cold->DeleteVisitsBetween(cold_urls, std::nullopt, base::Time(),
++                                end_time + base::Microseconds(1));
++    }
++  }
+ }
+ 
+ void ExpireHistoryBackend::ExpireHistoryBetween(
+@@ -266,6 +337,12 @@ void ExpireHistoryBackend::ExpireHistoryBetween(
+       visits, time_range, restrict_urls,
+       user_initiated ? DELETION_USER_INITIATED : DELETION_EXPIRED,
+       DeletionInfo::Reason::kOther);
++
++  // aerographene: deleting a range also deletes it from History-Cold.
++  if (ColdHistoryDatabase* cold = GetColdDatabase(/*create=*/false)) {
++    cold->DeleteVisitsBetween(restrict_urls, restrict_app_id, begin_time,
++                              end_time);
++  }
+ }
+ 
+ void ExpireHistoryBackend::ExpireHistoryForTimes(
+@@ -692,11 +769,32 @@ bool ExpireHistoryBackend::ExpireSomeOldHistory(
+   bool more_to_expire = reader->Read(effective_end_time, main_db_,
+                                      &deleted_visits, max_visits);
+ 
++  // aerographene (ADR 0007): move instead of delete. History-Cold is written
++  // and committed first; if that fails nothing leaves the hot database and the
++  // batch is retried on a later iteration. A crash between the cold commit and
++  // the hot commit only leaves duplicates, which the cold inserts ignore.
++  std::set<URLID> copied_url_ids;
++  if (!deleted_visits.empty() && !CopyToCold(deleted_visits, &copied_url_ids)) {
++    return false;
++  }
++
+   DeleteEffects deleted_effects;
+   DeleteVisitRelatedInfo(deleted_visits, &deleted_effects);
+   ExpireURLsForVisits(deleted_visits, &deleted_effects);
+   DeleteFaviconsIfPossible(&deleted_effects);
+ 
++  // aerographene: url rows that stayed hot (visits left, pinned) are dropped
++  // from the cold copy, so each URL lives in one place.
++  if (!deleted_effects.modified_urls.empty()) {
++    if (ColdHistoryDatabase* cold = GetColdDatabase(/*create=*/false)) {
++      std::set<URLID> kept_hot;
++      for (const URLRow& row : deleted_effects.modified_urls) {
++        kept_hot.insert(row.id());
++      }
++      cold->DeleteURLRowsByID(kept_hot);
++    }
++  }
++
+   BroadcastNotifications(&deleted_effects, DELETION_EXPIRED,
+                          DeletionTimeRange::Invalid(), std::nullopt,
+                          DeletionInfo::Reason::kOther);
+--- a/components/history/core/browser/expire_history_backend.h
++++ b/components/history/core/browser/expire_history_backend.h
+@@ -13,6 +13,7 @@
+ 
+ #include "base/containers/queue.h"
+ #include "base/containers/span.h"
++#include "base/files/file_path.h"
+ #include "base/gtest_prod_util.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/memory/weak_ptr.h"
+@@ -32,6 +33,7 @@ class FaviconDatabase;
+ 
+ namespace history {
+ 
++class ColdHistoryDatabase;
+ class HistoryBackendClient;
+ class HistoryBackendNotifier;
+ class HistoryDatabase;
+@@ -82,6 +84,13 @@ class ExpireHistoryBackend {
+   // will continue until the object is deleted.
+   void StartExpiringOldStuff(base::TimeDelta expiration_threshold);
+ 
++  // aerographene (ADR 0007): where History-Cold lives. Only stores the path;
++  // the database is opened on demand (first move or user deletion).
++  void SetColdDatabasePath(const base::FilePath& path);
++
++  // aerographene: "clear all history" also removes History-Cold.
++  void DeleteColdDatabase();
++
+   // Deletes everything associated with a URL until `end_time`.
+   void DeleteURL(const GURL& url, base::Time end_time);
+ 
+@@ -268,6 +277,15 @@ class ExpireHistoryBackend {
+   // Expire segment data older than `end_time`.
+   void ExpireOldSegmentData(base::Time end_time);
+ 
++  // aerographene: returns History-Cold opened, or null. With `create` false a
++  // missing file is not created.
++  ColdHistoryDatabase* GetColdDatabase(bool create);
++
++  // aerographene: copies `visits`, their url rows and keyword terms to
++  // History-Cold and commits it before anything is deleted from the hot
++  // database. Fills `copied_url_ids`. Returns false if nothing may be deleted.
++  bool CopyToCold(const VisitVector& visits, std::set<URLID>* copied_url_ids);
++
+   // Tries to detect possible bad history or inconsistencies in the database
+   // and deletes items. For example, URLs with no visits.
+   void ParanoidExpireHistory();
+@@ -320,6 +338,10 @@ class ExpireHistoryBackend {
+ 
+   scoped_refptr<base::SequencedTaskRunner> task_runner_;
+ 
++  // aerographene: History-Cold (ADR 0007), lazily opened.
++  base::FilePath cold_db_path_;
++  std::unique_ptr<ColdHistoryDatabase> cold_db_;
++
+   // Used to generate runnable methods to do timers on this class. They will be
+   // automatically canceled when this class is deleted.
+   base::WeakPtrFactory<ExpireHistoryBackend> weak_factory_{this};
+--- a/components/history/core/browser/history_backend.cc
++++ b/components/history/core/browser/history_backend.cc
+@@ -1341,6 +1341,8 @@ void HistoryBackend::InitImpl(
+       favicon_backend_ ? favicon_backend_->db() : nullptr;
+ 
+   expirer_.SetDatabases(db_.get(), favicon_db_ptr);
++  // aerographene (ADR 0007): only the path; History-Cold opens on demand.
++  expirer_.SetColdDatabasePath(history_dir_.Append(kColdHistoryFilename));
+ 
+   // Open the long-running transaction.
+   BeginSingletonTransaction();
+@@ -1349,8 +1351,11 @@ void HistoryBackend::InitImpl(
+   db_->GetStartDate(&first_recorded_time_);
+ 
+   // Start expiring old stuff.
++  // aerographene: the expirer moves rows older than the cold threshold to
++  // History-Cold instead of deleting them (ADR 0007).
+   if (!base::CommandLine::ForCurrentProcess()->HasSwitch("keep-old-history"))
+-    expirer_.StartExpiringOldStuff(base::Days(kExpireDaysThreshold));
++    expirer_.StartExpiringOldStuff(
++        base::Days(history_database_params.cold_after_days));
+ }
+ 
+ void HistoryBackend::CloseAllDatabases() {
+@@ -1586,7 +1591,9 @@ void HistoryBackend::AddPagesWithDetails(const URLRows& urls,
+ bool HistoryBackend::IsExpiredVisitTime(const base::Time& time) const {
+   if (base::CommandLine::ForCurrentProcess()->HasSwitch("keep-old-history"))
+     return false;
+-  return time < expirer_.GetCurrentExpirationTime();
++  // aerographene: imported/synced visits are only dropped past the upstream
++  // 90 days; younger ones land hot and the expirer moves them to History-Cold.
++  return time < base::Time::Now() - base::Days(kExpireDaysThreshold);
+ }
+ 
+ // static
+@@ -3813,6 +3820,9 @@ void HistoryBackend::NotifyVisitsDeleted(
+ // Deleting --------------------------------------------------------------------
+ 
+ void HistoryBackend::DeleteAllHistory() {
++  // aerographene: "clear all history" also removes History-Cold (ADR 0007).
++  expirer_.DeleteColdDatabase();
++
+   // Our approach to deleting all history is:
+   //  1. Copy the pinned URLs and their dependencies to new tables with
+   //     temporary names.
