@@ -1,0 +1,156 @@
+aerographene: pinned sem perda na inicialização — adota/reabre depois que o BookmarkModel carrega.
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: SCOPE item 4. Corrige "pinned (aberto=1 ou fechado) não é reaberto
+nem adotado na inicialização; a URL de início abre aba comum e o placeholder
+do pinned continua na grade".
+Causa: o BookmarkModel carrega de forma assíncrona, e o startup decide as abas
+antes disso. StartupTabProviderImpl::GetPinnedTabs (pinned-model-tabstrip) e
+AdoptStartupTabsIntoPinned (pinned-startup-url) só agem com
+PinnedModel::IsLoaded() verdadeiro e retornam cedo senão: GetPinnedTabs cai no
+pref kPinnedTabs (vazio) e nada é reaberto; as URLs de início ficam como abas
+comuns. Hipótese de causa; confirmada por leitura de código (IsLoaded() =
+root_ != nullptr, só atribuído em BookmarkModelLoaded), não por log em runtime.
+Correção: PinnedTabMirror::OnPinnedModelLoaded agenda (PostTask, fora do
+callback do observer de favoritos) AdoptStartupTabs(), que na janela normal
+mais ativa do perfil, para cada entrada http(s) sem aba mapeada: se há aba
+comum com a mesma URL (exata, senão origem+path), fixa essa aba (SetTabPinned;
+Associate() a mapeia e marca open=1) em vez de duplicar; senão, se a entrada
+está open=1, abre aba pinned mapeada a essa entrada (next_entry_). Entradas
+fechadas (open=0) sem aba correspondente continuam fechadas. Se o modelo já
+estava carregado no startup, o caminho síncrono de pinned-startup-url trata
+tudo e este passo não encontra nada a fazer.
+Limites: só atua se houver janela normal do perfil quando o modelo carrega;
+duas abas comuns iguais fixam só uma; sem teste em runtime nem compilação.
+Depende de aerographene/pinned-model-tabstrip.patch e pinned-closed.patch
+(serie: depois deles).
+
+--- a/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc
++++ b/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc
+@@ -9,6 +9,8 @@
+ 
+ #include "base/auto_reset.h"
+ #include "base/functional/bind.h"
++#include "base/location.h"
++#include "base/task/single_thread_task_runner.h"
+ #include "chrome/browser/lifetime/application_lifetime_desktop.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/ui/browser_tabstrip.h"
+@@ -245,6 +247,88 @@
+ 
+ void PinnedTabMirror::OnPinnedModelLoaded() {
+   AssociateAllPinnedTabs();
++  // The BookmarkModel loads asynchronously, usually after the startup tabs
++  // were decided with the model still unloaded (see StartupBrowserCreatorImpl
++  // and StartupTabProviderImpl::GetPinnedTabs). Finish the job once it is
++  // loaded, outside the bookmark observer call.
++  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
++      FROM_HERE, base::BindOnce(&PinnedTabMirror::AdoptStartupTabs,
++                                weak_factory_.GetWeakPtr()));
++}
++
++void PinnedTabMirror::AdoptStartupTabs() {
++  if (!model_->IsLoaded()) {
++    return;
++  }
++  BrowserWindowInterface* target = nullptr;
++  ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
++      [&](BrowserWindowInterface* browser) {
++        if (browser->GetProfile() == profile_ &&
++            browser->GetType() == BrowserWindowInterface::TYPE_NORMAL) {
++          target = browser;
++          return false;
++        }
++        return true;
++      });
++  if (!target) {
++    return;
++  }
++  TabStripModel* strip = target->GetTabStripModel();
++
++  struct Candidate {
++    base::Uuid uuid;
++    GURL url;
++    bool open;
++  };
++  std::vector<Candidate> candidates;
++  auto add = [&](const PinnedItem& item) {
++    if (!item.is_folder && item.url.is_valid() &&
++        item.url.SchemeIsHTTPOrHTTPS()) {
++      candidates.push_back({item.uuid, item.url, item.open});
++    }
++  };
++  for (const PinnedItem& item : model_->GetPinned()) {
++    add(item);
++    for (const PinnedItem& child : item.children) {
++      add(child);
++    }
++  }
++
++  for (const Candidate& candidate : candidates) {
++    const bool mapped = std::ranges::any_of(
++        tab_nodes_,
++        [&](const auto& entry) { return entry.second == candidate.uuid; });
++    if (mapped) {
++      continue;
++    }
++    // An ordinary tab already showing the entry (startup URL, command line):
++    // pin it instead of opening a duplicate. Exact URL first, then origin +
++    // path. Associate() maps it from OnTabPinnedStateChanged().
++    int found = -1;
++    for (int pass = 0; pass < 2 && found < 0; ++pass) {
++      for (int i = strip->IndexOfFirstNonPinnedTab(); i < strip->count();
++           ++i) {
++        const GURL url = GetTabURL(strip->GetTabAtIndex(i));
++        if (pass == 0 ? url == candidate.url
++                      : (url.is_valid() &&
++                         SameOriginAndPath(candidate.url, url))) {
++          found = i;
++          break;
++        }
++      }
++    }
++    if (found >= 0) {
++      strip->SetTabPinned(found, true);
++    } else if (candidate.open) {
++      // Reopen what was open at the last quit, as a pinned tab mapped to
++      // this very entry.
++      next_entry_ = candidate.uuid;
++      chrome::AddTabAt(target, candidate.url, strip->IndexOfFirstNonPinnedTab(),
++                       /*foreground=*/false, /*group=*/std::nullopt,
++                       /*pinned=*/true);
++      next_entry_.reset();
++    }
++  }
+ }
+ 
+ void PinnedTabMirror::OnPinnedChanged() {
+--- a/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.h
++++ b/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.h
+@@ -9,6 +9,7 @@
+ 
+ #include "base/callback_list.h"
+ #include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
+ #include "base/scoped_observation.h"
+ #include "base/uuid.h"
+ #include "chrome/browser/ui/browser_window/public/browser_collection_observer.h"
+@@ -88,6 +89,10 @@
+  private:
+   void OnClosingAllBrowsersChanged(bool closing);
+   void AssociateAllPinnedTabs();
++  // Runs once after the model loads: pins ordinary tabs that show an entry and
++  // reopens entries left open, which the synchronous startup path could not do
++  // while the BookmarkModel was still loading.
++  void AdoptStartupTabs();
+   // Maps a pinned `tab` to an entry (reusing or adding one) and aligns order.
+   void Associate(tabs::TabInterface* tab);
+   // Moves the entry of `tab` so that it keeps the relative order of the
+@@ -109,6 +114,7 @@
+   base::ScopedObservation<PinnedModel, PinnedModel::Observer>
+       model_observation_{this};
+   base::CallbackListSubscription closing_all_browsers_subscription_;
++  base::WeakPtrFactory<PinnedTabMirror> weak_factory_{this};
+ };
+ 
+ }  // namespace aerographene
