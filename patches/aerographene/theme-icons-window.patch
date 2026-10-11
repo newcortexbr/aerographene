@@ -1,0 +1,348 @@
+aerographene: glifos dos botões de janela e ícone de ajustes do site no pacote do tema.
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/theme-icon-ublock.patch, aerographene/urlbar-mockup.patch.
+Propósito: (1) novo id i-restore (default: dois quadrados de traço 1,5 butt/miter;
+pixelized: bitmap 16x16 branco/50%/22%) para views::kChromeRestoreIcon e
+views::kWindowControlRestoreOldIcon, os ícones do botão restaurar de
+OpaqueBrowserFrameView e FrameViewLinux. Minimizar, maximizar e fechar já
+estavam no mapa (i-min, i-max, i-close: views::kChromeMinimizeIcon,
+kChromeMaximizeIcon, kCloseIcon e as variantes Old); com o restore, os quatro
+botões de janela seguem o tema ativo via gfx::SetVectorIconOverrides.
+(2) vector_icons::kTuneIcon (ajustes do site na barra de URL, urlbar-mockup)
+passa a usar o glifo i-info do tema, que no mockup é o ícone de ajustes do site.
+Fonte dos glifos: theming/design-language/{assets/icons-v2.json,pixelized/icons.html};
+os .icon são gerados por gen_theme_icons.py.
+
+--- a/chrome/browser/ui/aerographene_theme_icons/aerographene_theme_icons.cc
++++ b/chrome/browser/ui/aerographene_theme_icons/aerographene_theme_icons.cc
+@@ -61,9 +61,10 @@
+   // i-link: toolbar/app_menu_model.cc:921-922
+   (*map)[&vector_icons::kLinkIcon] = &aerographene_theme_icons::kDefaultLinkIcon;
+   (*map)[&::kLinkChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultLinkIcon;
+-  // i-info: views/location_bar/location_icon_view.cc:208-211
++  // i-info: views/location_bar/location_icon_view.cc:208-211, aerographene/urlbar-mockup.patch (ajustes do site)
+   (*map)[&omnibox::kPageInfoCustomIcon] = &aerographene_theme_icons::kDefaultInfoIcon;
+   (*map)[&omnibox::kSecurePageInfoChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultInfoIcon;
++  (*map)[&vector_icons::kTuneIcon] = &aerographene_theme_icons::kDefaultInfoIcon;
+   // i-plus: views/toolbar/app_menu.cc:733, omnibox/omnibox_edit_model.cc:586
+   (*map)[&::kAddIcon] = &aerographene_theme_icons::kDefaultPlusIcon;
+   (*map)[&::kAddChromeRefreshOldIcon] = &aerographene_theme_icons::kDefaultPlusIcon;
+@@ -83,6 +84,9 @@
+   // i-max: ui/views/window/frame_view_linux.cc:106-107
+   (*map)[&views::kChromeMaximizeIcon] = &aerographene_theme_icons::kDefaultMaxIcon;
+   (*map)[&views::kWindowControlMaximizeOldIcon] = &aerographene_theme_icons::kDefaultMaxIcon;
++  // i-restore: ui/views/window/frame_view_linux.cc:113-114, views/frame/opaque_browser_frame_view.cc:183-184
++  (*map)[&views::kChromeRestoreIcon] = &aerographene_theme_icons::kDefaultRestoreIcon;
++  (*map)[&views::kWindowControlRestoreOldIcon] = &aerographene_theme_icons::kDefaultRestoreIcon;
+   // i-win: toolbar/app_menu_model.cc:2104
+   (*map)[&views::kNewWindowIcon] = &aerographene_theme_icons::kDefaultWinIcon;
+   (*map)[&::kNewWindowIcon] = &aerographene_theme_icons::kDefaultWinIcon;
+@@ -181,9 +185,10 @@
+   // i-link: toolbar/app_menu_model.cc:921-922
+   (*map)[&vector_icons::kLinkIcon] = &aerographene_theme_icons::kPixelizedLinkIcon;
+   (*map)[&::kLinkChromeRefreshOldIcon] = &aerographene_theme_icons::kPixelizedLinkIcon;
+-  // i-info: views/location_bar/location_icon_view.cc:208-211
++  // i-info: views/location_bar/location_icon_view.cc:208-211, aerographene/urlbar-mockup.patch (ajustes do site)
+   (*map)[&omnibox::kPageInfoCustomIcon] = &aerographene_theme_icons::kPixelizedInfoIcon;
+   (*map)[&omnibox::kSecurePageInfoChromeRefreshOldIcon] = &aerographene_theme_icons::kPixelizedInfoIcon;
++  (*map)[&vector_icons::kTuneIcon] = &aerographene_theme_icons::kPixelizedInfoIcon;
+   // i-plus: views/toolbar/app_menu.cc:733, omnibox/omnibox_edit_model.cc:586
+   (*map)[&::kAddIcon] = &aerographene_theme_icons::kPixelizedPlusIcon;
+   (*map)[&::kAddChromeRefreshOldIcon] = &aerographene_theme_icons::kPixelizedPlusIcon;
+@@ -203,6 +208,9 @@
+   // i-max: ui/views/window/frame_view_linux.cc:106-107
+   (*map)[&views::kChromeMaximizeIcon] = &aerographene_theme_icons::kPixelizedMaxIcon;
+   (*map)[&views::kWindowControlMaximizeOldIcon] = &aerographene_theme_icons::kPixelizedMaxIcon;
++  // i-restore: ui/views/window/frame_view_linux.cc:113-114, views/frame/opaque_browser_frame_view.cc:183-184
++  (*map)[&views::kChromeRestoreIcon] = &aerographene_theme_icons::kPixelizedRestoreIcon;
++  (*map)[&views::kWindowControlRestoreOldIcon] = &aerographene_theme_icons::kPixelizedRestoreIcon;
+   // i-win: toolbar/app_menu_model.cc:2104
+   (*map)[&views::kNewWindowIcon] = &aerographene_theme_icons::kPixelizedWinIcon;
+   (*map)[&::kNewWindowIcon] = &aerographene_theme_icons::kPixelizedWinIcon;
+--- a/chrome/browser/ui/aerographene_theme_icons/BUILD.gn
++++ b/chrome/browser/ui/aerographene_theme_icons/BUILD.gn
+@@ -35,6 +35,7 @@
+     "default_more.icon",
+     "default_plus.icon",
+     "default_rel.icon",
++    "default_restore.icon",
+     "default_search.icon",
+     "default_side.icon",
+     "default_spk.icon",
+@@ -68,6 +69,7 @@
+     "pixelized_more.icon",
+     "pixelized_plus.icon",
+     "pixelized_rel.icon",
++    "pixelized_restore.icon",
+     "pixelized_search.icon",
+     "pixelized_side.icon",
+     "pixelized_spk.icon",
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/default_restore.icon
+@@ -0,0 +1,17 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++STROKE, 1.5f,
++CAP_BUTT,
++MOVE_TO, 3, 6,
++LINE_TO, 10, 6,
++LINE_TO, 10, 13,
++LINE_TO, 3, 13,
++CLOSE,
++MOVE_TO, 6, 6,
++LINE_TO, 6, 3,
++LINE_TO, 13, 3,
++LINE_TO, 13, 10,
++LINE_TO, 10, 10,
+--- /dev/null
++++ b/chrome/browser/ui/aerographene_theme_icons/pixelized_restore.icon
+@@ -0,0 +1,245 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++// Gerado por theming/design-language/gen_theme_icons.py; não editar.
++
++CANVAS_DIMENSIONS, 16,
++PATH_COLOR_ALPHA, 0x38,
++FILL_RULE_NONZERO,
++DISABLE_AA,
++MOVE_TO, 6, 3,
++LINE_TO, 12, 3,
++LINE_TO, 12, 4,
++LINE_TO, 6, 4,
++CLOSE,
++MOVE_TO, 6, 4,
++LINE_TO, 12, 4,
++LINE_TO, 12, 5,
++LINE_TO, 6, 5,
++CLOSE,
++MOVE_TO, 10, 5,
++LINE_TO, 12, 5,
++LINE_TO, 12, 6,
++LINE_TO, 10, 6,
++CLOSE,
++MOVE_TO, 3, 6,
++LINE_TO, 9, 6,
++LINE_TO, 9, 7,
++LINE_TO, 3, 7,
++CLOSE,
++MOVE_TO, 10, 6,
++LINE_TO, 12, 6,
++LINE_TO, 12, 7,
++LINE_TO, 10, 7,
++CLOSE,
++MOVE_TO, 3, 7,
++LINE_TO, 9, 7,
++LINE_TO, 9, 8,
++LINE_TO, 3, 8,
++CLOSE,
++MOVE_TO, 10, 7,
++LINE_TO, 12, 7,
++LINE_TO, 12, 8,
++LINE_TO, 10, 8,
++CLOSE,
++MOVE_TO, 3, 8,
++LINE_TO, 9, 8,
++LINE_TO, 9, 9,
++LINE_TO, 3, 9,
++CLOSE,
++MOVE_TO, 10, 8,
++LINE_TO, 12, 8,
++LINE_TO, 12, 9,
++LINE_TO, 10, 9,
++CLOSE,
++MOVE_TO, 3, 9,
++LINE_TO, 9, 9,
++LINE_TO, 9, 10,
++LINE_TO, 3, 10,
++CLOSE,
++MOVE_TO, 3, 10,
++LINE_TO, 9, 10,
++LINE_TO, 9, 11,
++LINE_TO, 3, 11,
++CLOSE,
++MOVE_TO, 3, 11,
++LINE_TO, 9, 11,
++LINE_TO, 9, 12,
++LINE_TO, 3, 12,
++CLOSE,
++NEW_PATH,
++PATH_COLOR_ALPHA, 0x80,
++FILL_RULE_NONZERO,
++DISABLE_AA,
++MOVE_TO, 13, 3,
++LINE_TO, 14, 3,
++LINE_TO, 14, 4,
++LINE_TO, 13, 4,
++CLOSE,
++MOVE_TO, 13, 4,
++LINE_TO, 14, 4,
++LINE_TO, 14, 5,
++LINE_TO, 13, 5,
++CLOSE,
++MOVE_TO, 13, 5,
++LINE_TO, 14, 5,
++LINE_TO, 14, 6,
++LINE_TO, 13, 6,
++CLOSE,
++MOVE_TO, 13, 6,
++LINE_TO, 14, 6,
++LINE_TO, 14, 7,
++LINE_TO, 13, 7,
++CLOSE,
++MOVE_TO, 13, 7,
++LINE_TO, 14, 7,
++LINE_TO, 14, 8,
++LINE_TO, 13, 8,
++CLOSE,
++MOVE_TO, 13, 8,
++LINE_TO, 14, 8,
++LINE_TO, 14, 9,
++LINE_TO, 13, 9,
++CLOSE,
++MOVE_TO, 13, 9,
++LINE_TO, 14, 9,
++LINE_TO, 14, 10,
++LINE_TO, 13, 10,
++CLOSE,
++MOVE_TO, 10, 10,
++LINE_TO, 14, 10,
++LINE_TO, 14, 11,
++LINE_TO, 10, 11,
++CLOSE,
++MOVE_TO, 10, 11,
++LINE_TO, 11, 11,
++LINE_TO, 11, 12,
++LINE_TO, 10, 12,
++CLOSE,
++MOVE_TO, 10, 12,
++LINE_TO, 11, 12,
++LINE_TO, 11, 13,
++LINE_TO, 10, 13,
++CLOSE,
++MOVE_TO, 3, 13,
++LINE_TO, 11, 13,
++LINE_TO, 11, 14,
++LINE_TO, 3, 14,
++CLOSE,
++NEW_PATH,
++FILL_RULE_NONZERO,
++DISABLE_AA,
++MOVE_TO, 5, 2,
++LINE_TO, 13, 2,
++LINE_TO, 13, 3,
++LINE_TO, 5, 3,
++CLOSE,
++MOVE_TO, 5, 3,
++LINE_TO, 6, 3,
++LINE_TO, 6, 4,
++LINE_TO, 5, 4,
++CLOSE,
++MOVE_TO, 12, 3,
++LINE_TO, 13, 3,
++LINE_TO, 13, 4,
++LINE_TO, 12, 4,
++CLOSE,
++MOVE_TO, 5, 4,
++LINE_TO, 6, 4,
++LINE_TO, 6, 5,
++LINE_TO, 5, 5,
++CLOSE,
++MOVE_TO, 12, 4,
++LINE_TO, 13, 4,
++LINE_TO, 13, 5,
++LINE_TO, 12, 5,
++CLOSE,
++MOVE_TO, 2, 5,
++LINE_TO, 10, 5,
++LINE_TO, 10, 6,
++LINE_TO, 2, 6,
++CLOSE,
++MOVE_TO, 12, 5,
++LINE_TO, 13, 5,
++LINE_TO, 13, 6,
++LINE_TO, 12, 6,
++CLOSE,
++MOVE_TO, 2, 6,
++LINE_TO, 3, 6,
++LINE_TO, 3, 7,
++LINE_TO, 2, 7,
++CLOSE,
++MOVE_TO, 9, 6,
++LINE_TO, 10, 6,
++LINE_TO, 10, 7,
++LINE_TO, 9, 7,
++CLOSE,
++MOVE_TO, 12, 6,
++LINE_TO, 13, 6,
++LINE_TO, 13, 7,
++LINE_TO, 12, 7,
++CLOSE,
++MOVE_TO, 2, 7,
++LINE_TO, 3, 7,
++LINE_TO, 3, 8,
++LINE_TO, 2, 8,
++CLOSE,
++MOVE_TO, 9, 7,
++LINE_TO, 10, 7,
++LINE_TO, 10, 8,
++LINE_TO, 9, 8,
++CLOSE,
++MOVE_TO, 12, 7,
++LINE_TO, 13, 7,
++LINE_TO, 13, 8,
++LINE_TO, 12, 8,
++CLOSE,
++MOVE_TO, 2, 8,
++LINE_TO, 3, 8,
++LINE_TO, 3, 9,
++LINE_TO, 2, 9,
++CLOSE,
++MOVE_TO, 9, 8,
++LINE_TO, 10, 8,
++LINE_TO, 10, 9,
++LINE_TO, 9, 9,
++CLOSE,
++MOVE_TO, 12, 8,
++LINE_TO, 13, 8,
++LINE_TO, 13, 9,
++LINE_TO, 12, 9,
++CLOSE,
++MOVE_TO, 2, 9,
++LINE_TO, 3, 9,
++LINE_TO, 3, 10,
++LINE_TO, 2, 10,
++CLOSE,
++MOVE_TO, 9, 9,
++LINE_TO, 13, 9,
++LINE_TO, 13, 10,
++LINE_TO, 9, 10,
++CLOSE,
++MOVE_TO, 2, 10,
++LINE_TO, 3, 10,
++LINE_TO, 3, 11,
++LINE_TO, 2, 11,
++CLOSE,
++MOVE_TO, 9, 10,
++LINE_TO, 10, 10,
++LINE_TO, 10, 11,
++LINE_TO, 9, 11,
++CLOSE,
++MOVE_TO, 2, 11,
++LINE_TO, 3, 11,
++LINE_TO, 3, 12,
++LINE_TO, 2, 12,
++CLOSE,
++MOVE_TO, 9, 11,
++LINE_TO, 10, 11,
++LINE_TO, 10, 12,
++LINE_TO, 9, 12,
++CLOSE,
++MOVE_TO, 2, 12,
++LINE_TO, 10, 12,
++LINE_TO, 10, 13,
++LINE_TO, 2, 13,
++CLOSE,
