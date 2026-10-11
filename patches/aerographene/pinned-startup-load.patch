@@ -29,13 +29,16 @@ Limites: só atua se houver janela normal do perfil quando o modelo carrega;
 duas abas comuns iguais fixam só uma; sem teste em runtime.
 Depende de aerographene/pinned-model-tabstrip.patch e pinned-closed.patch
 (serie: depois deles).
+DIAGNÓSTICO TEMPORÁRIO (branch diag/pinned-ntp): LOG(ERROR) com prefixo AERODIAG em
+AdoptStartupTabs, OnTabStripModelChanged, OnBrowserCreated e OnPinnedModelLoaded. Não fazer merge.
 
 --- a/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc
 +++ b/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.cc
-@@ -9,6 +9,10 @@
+@@ -9,6 +9,11 @@
  
  #include "base/auto_reset.h"
  #include "base/functional/bind.h"
++#include "base/logging.h"
 +#include "base/location.h"
 +#include "base/task/single_thread_task_runner.h"
 +#include "content/public/browser/navigation_controller.h"
@@ -43,9 +46,39 @@ Depende de aerographene/pinned-model-tabstrip.patch e pinned-closed.patch
  #include "chrome/browser/lifetime/application_lifetime_desktop.h"
  #include "chrome/browser/profiles/profile.h"
  #include "chrome/browser/ui/browser_tabstrip.h"
-@@ -245,6 +248,133 @@
+@@ -154,6 +159,9 @@
+       browser->GetType() != BrowserWindowInterface::TYPE_NORMAL) {
+     return;
+   }
++  LOG(ERROR) << "AERODIAG OnBrowserCreated browser=" << browser
++             << " count=" << browser->GetTabStripModel()->count()
++             << " model_loaded=" << model_->IsLoaded();
+   // Auto-unregistered by the TabStripModelObserver destructor.
+   browser->GetTabStripModel()->AddObserver(this);
+ }
+@@ -165,6 +173,17 @@
+   switch (change.type()) {
+     case TabStripModelChange::kInserted:
+       for (const auto& inserted : change.GetInsert()->contents) {
++        LOG(ERROR) << "AERODIAG Inserted strip=" << tab_strip_model
++                   << " index=" << inserted.index
++                   << " pinned=" << (inserted.tab && inserted.tab->IsPinned())
++                   << " url=" << (inserted.tab ? GetTabURL(inserted.tab).spec()
++                                               : std::string())
++                   << " visible="
++                   << (inserted.tab && inserted.tab->GetContents()
++                           ? inserted.tab->GetContents()->GetVisibleURL().spec()
++                           : std::string())
++                   << " count=" << tab_strip_model->count()
++                   << " model_loaded=" << model_->IsLoaded();
+         if (inserted.tab && inserted.tab->IsPinned()) {
+           Associate(inserted.tab);
+         }
+@@ -244,7 +263,172 @@
+ }
  
  void PinnedTabMirror::OnPinnedModelLoaded() {
++  LOG(ERROR) << "AERODIAG OnPinnedModelLoaded";
    AssociateAllPinnedTabs();
 +  // The BookmarkModel loads asynchronously, usually after the startup tabs
 +  // were decided with the model still unloaded (see StartupBrowserCreatorImpl
@@ -87,7 +120,36 @@ Depende de aerographene/pinned-model-tabstrip.patch e pinned-closed.patch
 +  return IsNewTabPageURL(contents->GetVisibleURL());
 +}
 +
++static void DiagDumpStrip(const char* where, TabStripModel* strip) {
++  LOG(ERROR) << "AERODIAG " << where << " strip=" << strip
++             << " count=" << strip->count()
++             << " first_non_pinned=" << strip->IndexOfFirstNonPinnedTab();
++  for (int i = 0; i < strip->count(); ++i) {
++    tabs::TabInterface* tab = strip->GetTabAtIndex(i);
++    content::WebContents* contents = tab ? tab->GetContents() : nullptr;
++    if (!contents) {
++      LOG(ERROR) << "AERODIAG   tab[" << i << "] no contents";
++      continue;
++    }
++    content::NavigationController& controller = contents->GetController();
++    const content::NavigationEntry* pending = controller.GetPendingEntry();
++    const content::NavigationEntry* committed =
++        controller.GetLastCommittedEntry();
++    LOG(ERROR) << "AERODIAG   tab[" << i << "] pinned=" << tab->IsPinned()
++               << " GetTabURL=" << GetTabURL(tab).spec()
++               << " visible=" << contents->GetVisibleURL().spec()
++               << " entries=" << controller.GetEntryCount()
++               << " pending=" << (pending ? pending->GetURL().spec() : "<none>")
++               << " committed="
++               << (committed ? committed->GetURL().spec() : "<none>")
++               << " committed_initial="
++               << (committed ? committed->IsInitialEntry() : -1)
++               << " is_loading=" << contents->IsLoading();
++  }
++}
++
 +void PinnedTabMirror::AdoptStartupTabs() {
++  LOG(ERROR) << "AERODIAG AdoptStartupTabs enter loaded=" << model_->IsLoaded();
 +  if (!model_->IsLoaded()) {
 +    return;
 +  }
@@ -101,10 +163,12 @@ Depende de aerographene/pinned-model-tabstrip.patch e pinned-closed.patch
 +        }
 +        return true;
 +      });
++  LOG(ERROR) << "AERODIAG AdoptStartupTabs target=" << target;
 +  if (!target) {
 +    return;
 +  }
 +  TabStripModel* strip = target->GetTabStripModel();
++  DiagDumpStrip("before", strip);
 +
 +  struct Candidate {
 +    base::Uuid uuid;
@@ -162,6 +226,9 @@ Depende de aerographene/pinned-model-tabstrip.patch e pinned-closed.patch
 +      reopened = true;
 +    }
 +  }
++  DiagDumpStrip("after-candidates", strip);
++  LOG(ERROR) << "AERODIAG reopened=" << reopened << " non_pinned="
++             << (strip->count() - strip->IndexOfFirstNonPinnedTab());
 +  if (!reopened || strip->count() - strip->IndexOfFirstNonPinnedTab() != 1) {
 +    return;
 +  }
@@ -169,7 +236,10 @@ Depende de aerographene/pinned-model-tabstrip.patch e pinned-closed.patch
 +  // now the lone ordinary tab next to the reopened pinned ones: drop it, but
 +  // only while untouched.
 +  const int ntp_index = strip->IndexOfFirstNonPinnedTab();
-+  if (!IsUntouchedNewTab(strip->GetTabAtIndex(ntp_index))) {
++  const bool untouched = IsUntouchedNewTab(strip->GetTabAtIndex(ntp_index));
++  LOG(ERROR) << "AERODIAG IsUntouchedNewTab=" << untouched
++             << " ntp_index=" << ntp_index;
++  if (!untouched) {
 +    return;
 +  }
 +  strip->ActivateTabAt(ntp_index - 1);
@@ -177,6 +247,7 @@ Depende de aerographene/pinned-model-tabstrip.patch e pinned-closed.patch
  }
  
  void PinnedTabMirror::OnPinnedChanged() {
+Only in b0/chrome/browser/ui/tabs/aerographene: pinned_tab_mirror.cc.orig
 --- a/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.h
 +++ b/chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.h
 @@ -9,6 +9,7 @@
