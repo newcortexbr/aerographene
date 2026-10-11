@@ -194,6 +194,7 @@ def collect_files(root_path):
     return order
 
 
+PTBR_NEW_TAB = re.compile(r"\b([Nn])ova guia")
 _PH = re.compile(r'<ph\s+name="([^"]+)"')
 _PH_XTB = re.compile(r'(<ph\s+name="[A-Za-z0-9_]+"\s*/>)')
 
@@ -345,6 +346,17 @@ def process_root(root, ids, check, stats, src, backup, listing=False, extra=None
             out = inject_extra(files, contents, xp, cur, extra, ids, stats, src)
             if out is not None:
                 new_xtb[xp] = out
+    # aerographene: "Nova guia" -> "Nova aba" no pt-BR (menus, atalhos, botão da sidebar).
+    for xp, lang in xtbs:
+        if lang != EXTRA_LANG or not os.path.isfile(xp):
+            continue
+        cur = new_xtb.get(xp)
+        if cur is None:
+            cur = open(xp, encoding="utf-8", newline="").read()
+        out, n = PTBR_NEW_TAB.subn(r"\1ova aba", cur)
+        if n:
+            print("  termo %-6s 'Nova guia' -> 'Nova aba' em %d traduções  %s" % (lang, n, os.path.relpath(xp, src)))
+            new_xtb[xp] = out
     stats["xtb_files"] += len(new_xtb)
 
     if check:
