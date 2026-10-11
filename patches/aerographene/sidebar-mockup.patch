@@ -728,7 +728,7 @@ mexido: células de 40 px não cabem nele).
    NOTREACHED() << "Unknown tab child view";
 --- /dev/null
 +++ b/chrome/browser/ui/views/tabs/vertical/aerographene_space_row.cc
-@@ -0,0 +1,124 @@
+@@ -0,0 +1,125 @@
 +// Copyright 2026 The Aerographene Authors
 +// You can use, redistribute, and/or modify this source code under
 +// the terms of the GPL-3.0 license that can be found in the LICENSE file.
@@ -756,6 +756,7 @@ mexido: células de 40 px não cabem nele).
 +#include "ui/gfx/canvas.h"
 +#include "ui/gfx/font_list.h"
 +#include "ui/gfx/geometry/rect.h"
++#include "ui/gfx/image/image_skia.h"
 +#include "ui/gfx/paint_vector_icon.h"
 +#include "ui/views/accessibility/view_accessibility.h"
 +#include "ui/views/layout/layout_provider.h"
