@@ -71,6 +71,15 @@ Causa provável da faixa com ícone de grade; não confirmada em runtime.
  
 --- a/chrome/browser/ui/color/aerographene_theme_tokens.cc
 +++ b/chrome/browser/ui/color/aerographene_theme_tokens.cc
+@@ -47,7 +47,7 @@
+ 
+ struct TokenSpec {
+   const char* name;
+-  ui::ColorId ids[5];
++  ui::ColorId ids[6];
+ };
+ 
+ // Curated token -> ColorId mapping. Unused slots are 0 (kUiColorsStart, never
 @@ -92,7 +92,8 @@
      {"tab_hover", {kColorTabBackgroundInactiveHoverFrameActive}},
      {"separator",
