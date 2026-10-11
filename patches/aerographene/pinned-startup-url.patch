@@ -1,0 +1,171 @@
+aerographene: URL de início que casa com um pinned abre como esse pinned.
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: SCOPE item 4. Corrige "a grade de pinned não destaca o pinned aberto
+pela URL de início (abre como aba comum)".
+Causa: o PinnedTabMirror só associa abas JÁ pinned. As URLs de início (linha de
+comando, "abrir páginas específicas", LAST_AND_URLS) entram como
+StartupTab::Type::kNormal e abrem como aba comum; o placeholder do pinned
+fechado (F5) continua na grade, ou o pinned reaberto (open=1) ganha uma
+duplicata comum. O filtro do upstream (prefs_tabs vs pinned_tabs) compara URL
+exata, e só contra prefs, não contra a linha de comando.
+Correção: StartupBrowserCreatorImpl::DetermineStartupTabs chama
+AdoptStartupTabsIntoPinned() antes de devolver. Para cada tab http(s) não
+pinned e não untrusted: casa uma entrada do PinnedModel (não pasta; filhos de
+gaveta incluídos) por URL exata, senão origem+path (mesma regra do mirror).
+Entrada ainda não "tomada" por tab pinned da lista -> a tab vira kPinned (o
+mirror associa por URL e marca open=1, destacando na grade); entrada já tomada
+(pinned de open=1 da lista, ou outra URL de início igual) -> a tab é descartada
+(sem duplicata). Modelo não carregado ou vazio: sem efeito.
+SessionRestore::AppendURLsToBrowser (caminho "continuar de onde parou" + URLs)
+ignorava kPinned; passa a respeitar (ADD_PINNED) e, se a sessão restaurada já
+tem aba pinned com a mesma origem+path, ativa essa em vez de abrir outra.
+Limites: casamento por origem+path pode adotar uma URL com query diferente da
+do pinned; sem teste em runtime nem compilação (sem runner).
+Depende de aerographene/pinned-model.patch e pinned-model-tabstrip.patch
+(serie: depois deles; também de helium/core/lazy-session-restore.patch e
+helium/ui/layout/core.patch pelo contexto de session_restore.cc).
+
+--- a/chrome/browser/sessions/session_restore.cc
++++ b/chrome/browser/sessions/session_restore.cc
+@@ -111,6 +111,7 @@
+ #include "extensions/browser/extension_registry.h"
+ #include "extensions/common/extension_set.h"
+ #include "ui/base/mojom/window_show_state.mojom.h"
++#include "url/origin.h"
+ 
+ #if BUILDFLAG(IS_CHROMEOS)
+ #include "ash/constants/ash_features.h"
+@@ -1368,6 +1369,31 @@
+       if (is_first_tab) {
+         add_types |= AddTabTypes::ADD_ACTIVE;
+       }
++      if (startup_tab.type == StartupTab::Type::kPinned) {
++        // aerographene: a startup URL adopted by the pinned model. If the
++        // restored session already has that pinned tab, use it instead of
++        // opening a duplicate.
++        TabStripModel* strip = browser->GetTabStripModel();
++        const int pinned_count = strip->IndexOfFirstNonPinnedTab();
++        int existing = -1;
++        for (int i = 0; i < pinned_count && existing < 0; ++i) {
++          content::WebContents* contents = strip->GetWebContentsAt(i);
++          if (contents &&
++              url::Origin::Create(contents->GetVisibleURL())
++                  .IsSameOriginWith(url) &&
++              contents->GetVisibleURL().path() == url.path()) {
++            existing = i;
++          }
++        }
++        if (existing >= 0) {
++          if (is_first_tab) {
++            strip->ActivateTabAt(existing);
++            is_first_tab = false;
++          }
++          continue;
++        }
++        add_types |= AddTabTypes::ADD_PINNED;
++      }
+       NavigateParams params(browser, url, ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
+       params.disposition = is_first_tab
+                                ? WindowOpenDisposition::NEW_FOREGROUND_TAB
+--- a/chrome/browser/ui/startup/startup_browser_creator_impl.cc
++++ b/chrome/browser/ui/startup/startup_browser_creator_impl.cc
+@@ -53,6 +53,8 @@
+ #include "chrome/browser/ui/startup/startup_tab.h"
+ #include "chrome/browser/ui/startup/startup_tab_provider.h"
+ #include "chrome/browser/ui/startup/startup_types.h"
++#include "chrome/browser/ui/tabs/aerographene/pinned_model.h"
++#include "chrome/browser/ui/tabs/aerographene/pinned_model_factory.h"
+ #include "chrome/browser/ui/tabs/shared_tab_group_version_upgrade_modal.h"
+ #include "chrome/browser/ui/toasts/api/toast_id.h"
+ #include "chrome/browser/ui/toasts/toast_controller.h"
+@@ -233,6 +235,80 @@
+       chrome::RestoredTabLoadPolicy::kDeferUntilActivation);
+ }
+ 
++// aerographene: a startup URL (command line, "open specific pages") that
++// matches an entry of the pinned model must open as that pinned tab, not as a
++// duplicate ordinary tab next to the pinned grid. Matching is exact URL first,
++// then origin + path (the same rule PinnedTabMirror uses to map tabs to
++// entries). A match not yet claimed by a pinned startup tab becomes kPinned
++// (PinnedTabMirror maps the new pinned tab to the entry by URL); a match whose
++// entry is already claimed is dropped, since the pinned tab opens that page.
++void AdoptStartupTabsIntoPinned(Profile* profile, StartupTabs* tabs) {
++  aerographene::PinnedModel* model =
++      aerographene::PinnedModelFactory::GetForProfile(profile);
++  if (!model || !model->IsLoaded()) {
++    return;
++  }
++  std::vector<GURL> entries;
++  for (const aerographene::PinnedItem& item : model->GetPinned()) {
++    if (!item.is_folder && item.url.is_valid()) {
++      entries.push_back(item.url);
++    }
++    for (const aerographene::PinnedItem& child : item.children) {
++      if (child.url.is_valid()) {
++        entries.push_back(child.url);
++      }
++    }
++  }
++  if (entries.empty()) {
++    return;
++  }
++  std::vector<bool> claimed(entries.size(), false);
++  // Index of the best entry for `url`: unclaimed before claimed, exact before
++  // origin + path. -1 if none.
++  auto find_entry = [&](const GURL& url) {
++    int best = -1;
++    int best_rank = 0;
++    for (size_t i = 0; i < entries.size(); ++i) {
++      const bool exact = entries[i] == url;
++      if (!exact && !(url::Origin::Create(entries[i]).IsSameOriginWith(url) &&
++                      entries[i].path() == url.path())) {
++        continue;
++      }
++      const int rank = (claimed[i] ? 0 : 2) + (exact ? 1 : 0) + 1;
++      if (rank > best_rank) {
++        best_rank = rank;
++        best = static_cast<int>(i);
++      }
++    }
++    return best;
++  };
++  // Pinned tabs from the model open first and claim their entries.
++  for (const StartupTab& tab : *tabs) {
++    if (tab.type == StartupTab::Type::kPinned) {
++      const int index = find_entry(tab.url);
++      if (index >= 0) {
++        claimed[index] = true;
++      }
++    }
++  }
++  std::erase_if(*tabs, [&](StartupTab& tab) {
++    if (tab.type == StartupTab::Type::kPinned || tab.is_untrusted_launch ||
++        !tab.url.SchemeIsHTTPOrHTTPS()) {
++      return false;
++    }
++    const int index = find_entry(tab.url);
++    if (index < 0) {
++      return false;
++    }
++    if (claimed[index]) {
++      return true;
++    }
++    claimed[index] = true;
++    tab.type = StartupTab::Type::kPinned;
++    return false;
++  });
++}
++
+ }  // namespace
+ 
+ StartupBrowserCreatorImpl::StartupBrowserCreatorImpl(
+@@ -754,6 +830,8 @@
+   // Maybe add any tabs which the user has previously pinned.
+   AppendTabs(pinned_tabs, &tabs);
+ 
++  AdoptStartupTabsIntoPinned(profile_, &tabs);
++
+   return {std::move(tabs), launch_result};
+ }
+ 
