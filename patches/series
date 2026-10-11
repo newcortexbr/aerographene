@@ -97,3 +97,5 @@ aerographene/theme-icon-ublock.patch
 aerographene/cold-data-favicons-downloads.patch
 aerographene/sidebar-footer-bottom.patch
 aerographene/urlbar-mockup.patch
+aerographene/theme-icons-window.patch
+aerographene/toolbar-mockup.patch
