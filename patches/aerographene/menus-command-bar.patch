@@ -384,24 +384,19 @@ Compilação parcial e runtime: ver patches/README.md.
  // static
 --- a/ui/views/controls/menu/menu_item_view.cc
 +++ b/ui/views/controls/menu/menu_item_view.cc
-@@ -45,5 +45,6 @@
+@@ -45,6 +45,7 @@
  #include "ui/gfx/geometry/vector2d.h"
  #include "ui/gfx/image/image.h"
  #include "ui/gfx/paint_vector_icon.h"
 +#include "ui/gfx/text_elider.h"
  #include "ui/gfx/text_utils.h"
  #include "ui/native_theme/native_theme.h"
-@@ -1194,14 +1194,20 @@
-   int width =
-       this->width() - submenu->trailing_padding() - accel_width - label_start;
-   gfx::Rect text_bounds(label_start, top_margin, width, text_height);
-   text_bounds.set_x(GetMirroredXForRect(text_bounds));
-   int flags = GetDrawStringFlags();
+ #include "ui/views/accessibility/ax_virtual_view.h"
+@@ -1201,7 +1202,13 @@
    if (mode == PaintMode::kForDrag) {
      flags |= gfx::Canvas::NO_SUBPIXEL_RENDERING;
    }
 -  canvas->DrawStringRectWithFlags(title(), font_list, colors.fg_color,
--                                  text_bounds, flags);
 +  // aerographene: labels wider than the (capped) menu are elided instead of
 +  // clipped at the right edge.
 +  const std::u16string aero_title =
@@ -409,12 +404,10 @@ Compilação parcial e runtime: ver patches/README.md.
 +          ? gfx::ElideText(title(), font_list, width, gfx::ELIDE_TAIL)
 +          : title();
 +  canvas->DrawStringRectWithFlags(aero_title, font_list, colors.fg_color,
-+                                  text_bounds, flags);
+                                   text_bounds, flags);
  
    // The rest should be drawn with the minor foreground color.
-   if (!secondary_title().empty()) {
-     text_bounds.set_y(text_bounds.y() + text_height);
-@@ -1315,10 +1315,28 @@
+@@ -1315,10 +1322,28 @@
  
      ui::NativeTheme::MenuItemExtraParams menu_item_extra_params;
      menu_item_extra_params.corner_radius = config.item_corner_radius;
