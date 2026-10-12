@@ -13,7 +13,7 @@ então mudanças da sidebar ou do sync refletem aqui. O menu simples
 
 --- a/chrome/browser/ui/views/frame/aerographene_topbar_row.cc
 +++ b/chrome/browser/ui/views/frame/aerographene_topbar_row.cc
-@@ -25,7 +25,6 @@
+@@ -24,7 +24,6 @@
  #include "components/tabs/public/tab_interface.h"
  #include "components/vector_icons/vector_icons.h"
  #include "ui/base/metadata/metadata_impl_macros.h"
@@ -21,7 +21,7 @@ então mudanças da sidebar ou do sync refletem aqui. O menu simples
  #include "ui/base/mojom/menu_source_type.mojom.h"
  #include "ui/color/color_id.h"
  #include "ui/color/color_provider.h"
-@@ -39,7 +38,6 @@
+@@ -38,7 +37,6 @@
  #include "ui/views/accessibility/view_accessibility.h"
  #include "ui/views/context_menu_controller.h"
  #include "ui/views/controls/button/button.h"
@@ -29,7 +29,7 @@ então mudanças da sidebar ou do sync refletem aqui. O menu simples
  #include "ui/views/layout/layout_provider.h"
  #include "ui/views/view_utils.h"
  #include "ui/views/widget/widget.h"
-@@ -221,7 +219,8 @@
+@@ -215,7 +213,8 @@
  BEGIN_METADATA(TopbarPinButton)
  END_METADATA
  
@@ -39,7 +39,7 @@ então mudanças da sidebar ou do sync refletem aqui. O menu simples
  class TopbarFolderButton : public views::Button {
    METADATA_HEADER(TopbarFolderButton, views::Button)
  
-@@ -233,6 +232,7 @@
+@@ -227,6 +226,7 @@
    ~TopbarFolderButton() override = default;
  
    void Update(const aerographene::PinnedItem& item) {
@@ -47,7 +47,7 @@ então mudanças da sidebar ou do sync refletem aqui. O menu simples
      const std::u16string name = GetDisplayName(item);
      // Mockup pixelized `.row`: upper case, converted once here, not per paint.
      text_ = IsPixelized() ? base::i18n::ToUpper(name) : name;
-@@ -240,7 +240,11 @@
+@@ -234,7 +234,11 @@
                             gfx::GetStringWidth(text_, gfx::FontList()));
      SetTooltipText(name);
      GetViewAccessibility().SetName(name);
@@ -60,7 +60,7 @@ então mudanças da sidebar ou do sync refletem aqui. O menu simples
      PreferredSizeChanged();
      SchedulePaint();
    }
-@@ -279,8 +283,10 @@
+@@ -273,8 +277,10 @@
          GetMirroredXWithWidthInView(icon_x, kFolderIconSize), icon_y);
      const int chevron_x = bounds.right() - kFolderPadding - kFolderIconSize;
      canvas->DrawImageInt(
@@ -73,7 +73,7 @@ então mudanças da sidebar ou do sync refletem aqui. O menu simples
          GetMirroredXWithWidthInView(chevron_x, kFolderIconSize), icon_y);
      const int text_x = icon_x + kFolderIconSize + kFolderIconGap;
      canvas->DrawStringRect(
-@@ -294,6 +300,7 @@
+@@ -288,6 +294,7 @@
   private:
    std::u16string text_;
    int text_width_ = 0;
@@ -81,7 +81,7 @@ então mudanças da sidebar ou do sync refletem aqui. O menu simples
  };
  
  BEGIN_METADATA(TopbarFolderButton)
-@@ -396,13 +403,6 @@
+@@ -380,13 +387,6 @@
    RefreshActive();
  }
  
@@ -95,7 +95,7 @@ então mudanças da sidebar ou do sync refletem aqui. O menu simples
  void AerographeneTopbarRow::Rebuild(bool notify) {
    for (views::View* view : item_views_) {
      RemoveChildViewT(view);
-@@ -414,10 +414,7 @@
+@@ -398,10 +398,7 @@
      items = model_->GetPinned();
    }
    const base::Uuid active = GetActiveEntry();
@@ -107,7 +107,7 @@ então mudanças da sidebar ou do sync refletem aqui. O menu simples
      auto* const pin = AddChildView(std::make_unique<TopbarPinButton>(
          base::BindRepeating(
              [](AerographeneTopbarRow* row, base::Uuid uuid,
-@@ -427,6 +424,11 @@
+@@ -411,6 +408,11 @@
                              base::Unretained(this), item.uuid)));
      pin->Update(item, model_->GetFavicon(item.uuid), item.uuid == active);
      item_views_.push_back(pin);
@@ -119,7 +119,7 @@ então mudanças da sidebar ou do sync refletem aqui. O menu simples
    }
    pin_count_ = item_views_.size();
    for (const aerographene::PinnedItem& item : items) {
-@@ -434,13 +436,19 @@
+@@ -418,13 +420,19 @@
        continue;
      }
      auto* const folder = AddChildView(std::make_unique<TopbarFolderButton>(
@@ -144,7 +144,7 @@ então mudanças da sidebar ou do sync refletem aqui. O menu simples
    }
  
    const bool has_content = !items.empty();
-@@ -519,34 +527,14 @@
+@@ -503,34 +511,14 @@
    }
  }
  
@@ -188,15 +188,14 @@ então mudanças da sidebar ou do sync refletem aqui. O menu simples
  BEGIN_METADATA(AerographeneTopbarRow)
 --- a/chrome/browser/ui/views/frame/aerographene_topbar_row.h
 +++ b/chrome/browser/ui/views/frame/aerographene_topbar_row.h
-@@ -17,7 +17,6 @@
+@@ -17,27 +17,22 @@
  #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
  #include "ui/base/metadata/metadata_header_macros.h"
  #include "ui/base/mojom/menu_source_type.mojom-forward.h"
 -#include "ui/menus/simple_menu_model.h"
  #include "ui/views/view.h"
  
- class AerographeneSpaceRow;
-@@ -25,20 +24,16 @@
+ class BrowserWindowInterface;
  class TabStrip;
  class TabStripModel;
  
@@ -204,7 +203,7 @@ então mudanças da sidebar ou do sync refletem aqui. O menu simples
 -class MenuRunner;
 -}  // namespace views
 -
- // First row of the topbar mode (horizontal tabs), mockup R-r01b: space row,
+ // First row of the topbar mode (horizontal tabs), mockup R-r01b:
  // pinned entries as 30x30 buttons and drawer folders as "icon name ›" buttons
 -// that open the drawer as a menu. Reads the same PinnedModel and tab mirror
 -// as the sidebar (no model of its own); the pinned tabs themselves are hidden
@@ -221,7 +220,7 @@ então mudanças da sidebar ou do sync refletem aqui. O menu simples
    METADATA_HEADER(AerographeneTopbarRow, views::View)
  
   public:
-@@ -73,9 +68,6 @@
+@@ -72,9 +67,6 @@
        const TabStripModelChange& change,
        const TabStripSelectionChange& selection) override;
  
@@ -231,7 +230,7 @@ então mudanças da sidebar ou do sync refletem aqui. O menu simples
   private:
    void Rebuild(bool notify);
    void RebuildDeferred();
-@@ -86,23 +78,21 @@
+@@ -85,22 +77,20 @@
    void ShowPinContextMenu(const base::Uuid& uuid,
                            const gfx::Point& screen_point,
                            ui::mojom::MenuSourceType source_type);
@@ -242,7 +241,6 @@ então mudanças da sidebar ou do sync refletem aqui. O menu simples
    const raw_ptr<BrowserWindowInterface> browser_;
    const raw_ptr<TabStrip> tab_strip_;
    raw_ptr<aerographene::PinnedModel> model_ = nullptr;
-   raw_ptr<AerographeneSpaceRow> space_row_ = nullptr;
 -  // Pin buttons first, then folder buttons; owned by the view hierarchy.
 +  // Pin buttons first, then each folder button followed by its children when
 +  // open; owned by the view hierarchy.

@@ -1,14 +1,13 @@
 aerographene: modo topbar (abas horizontais) como no mockup R-r01b, decisão de 11/10/2026 (docs/SCOPE.md).
 
 Origem: aerographene (original). Licença: GPL-3.0.
-Depende de: aerographene/sidebar-mockup.patch (AerographeneSpaceRow, lado
-vertical dos pinned), aerographene/pinned-model-tabstrip.patch,
+Depende de: aerographene/sidebar-mockup.patch (lado vertical dos pinned), aerographene/pinned-model-tabstrip.patch,
 aerographene/pinned-closed.patch, aerographene/pinned-folder.patch,
 aerographene/theme-builtin.patch, aerographene/theme-radius.patch,
 helium/ui/layout/*.
 Propósito:
 (1) Linha 1 (AerographeneTopbarRow, 40 px, views/frame/aerographene_topbar_row.*):
-linha do space (AerographeneSpaceRow, reaproveitada), pinned como botões 30x30
+sem linha de space (começa pelos pinned), pinned como botões 30x30
 (favicon 16 px; aberto = marcador accent 6x6 no canto superior direito, aba
 ativa = contorno accent 1 px, fechado = opacidade .62 e contorno tracejado) e
 pastas como "ícone + nome + ›" que abrem a gaveta num menu simples
@@ -133,7 +132,7 @@ Não verificado em runtime: tudo acima (só compilação dos .cc tocados).
  float TabStyle::GetSelectedTabOpacity() const {
 --- /dev/null
 +++ b/chrome/browser/ui/views/frame/aerographene_topbar_row.cc
-@@ -0,0 +1,534 @@
+@@ -0,0 +1,524 @@
 +// Copyright 2026 The Aerographene Authors
 +// You can use, redistribute, and/or modify this source code under
 +// the terms of the GPL-3.0 license that can be found in the LICENSE file.
@@ -156,7 +155,6 @@ Não verificado em runtime: tudo acima (só compilação dos .cc tocados).
 +#include "chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.h"
 +#include "chrome/browser/ui/tabs/tab_strip_model.h"
 +#include "chrome/browser/ui/views/tabs/tab_strip.h"
-+#include "chrome/browser/ui/views/tabs/vertical/aerographene_space_row.h"
 +#include "components/tabs/public/tab_interface.h"
 +#include "components/vector_icons/vector_icons.h"
 +#include "ui/base/metadata/metadata_impl_macros.h"
@@ -182,8 +180,6 @@ Não verificado em runtime: tudo acima (só compilação dos .cc tocados).
 +namespace {
 +
 +constexpr int kLeadingPadding = 8;
-+constexpr int kSpaceRowWidth = 148;
-+constexpr int kSpaceRowHeight = 32;
 +constexpr int kPinSize = 30;
 +constexpr int kPinGap = 2;
 +constexpr int kGroupGap = 8;
@@ -428,7 +424,6 @@ Não verificado em runtime: tudo acima (só compilação dos .cc tocados).
 +    : browser_(browser),
 +      tab_strip_(tab_strip),
 +      on_content_changed_(std::move(on_content_changed)) {
-+  space_row_ = AddChildView(std::make_unique<AerographeneSpaceRow>(browser));
 +  model_ = aerographene::PinnedModelFactory::GetForProfile(
 +      browser->GetProfile());
 +  if (model_) {
@@ -461,12 +456,6 @@ Não verificado em runtime: tudo acima (só compilação dos .cc tocados).
 +void AerographeneTopbarRow::Layout(PassKey) {
 +  const int height = this->height();
 +  int x = kLeadingPadding;
-+  if (space_row_->GetVisible()) {
-+    const int width = std::min(kSpaceRowWidth, std::max(0, this->width() - x));
-+    space_row_->SetBounds(x, (height - kSpaceRowHeight) / 2, width,
-+                          kSpaceRowHeight);
-+    x += width + kGroupGap;
-+  }
 +  for (size_t i = 0; i < item_views_.size(); ++i) {
 +    views::View* const view = item_views_[i];
 +    const gfx::Size size = view->GetPreferredSize();
@@ -670,7 +659,7 @@ Não verificado em runtime: tudo acima (só compilação dos .cc tocados).
 +END_METADATA
 --- /dev/null
 +++ b/chrome/browser/ui/views/frame/aerographene_topbar_row.h
-@@ -0,0 +1,112 @@
+@@ -0,0 +1,110 @@
 +// Copyright 2026 The Aerographene Authors
 +// You can use, redistribute, and/or modify this source code under
 +// the terms of the GPL-3.0 license that can be found in the LICENSE file.
@@ -693,7 +682,6 @@ Não verificado em runtime: tudo acima (só compilação dos .cc tocados).
 +#include "ui/menus/simple_menu_model.h"
 +#include "ui/views/view.h"
 +
-+class AerographeneSpaceRow;
 +class BrowserWindowInterface;
 +class TabStrip;
 +class TabStripModel;
@@ -702,7 +690,7 @@ Não verificado em runtime: tudo acima (só compilação dos .cc tocados).
 +class MenuRunner;
 +}  // namespace views
 +
-+// First row of the topbar mode (horizontal tabs), mockup R-r01b: space row,
++// First row of the topbar mode (horizontal tabs), mockup R-r01b:
 +// pinned entries as 30x30 buttons and drawer folders as "icon name ›" buttons
 +// that open the drawer as a menu. Reads the same PinnedModel and tab mirror
 +// as the sidebar (no model of its own); the pinned tabs themselves are hidden
@@ -764,7 +752,6 @@ Não verificado em runtime: tudo acima (só compilação dos .cc tocados).
 +  const raw_ptr<BrowserWindowInterface> browser_;
 +  const raw_ptr<TabStrip> tab_strip_;
 +  raw_ptr<aerographene::PinnedModel> model_ = nullptr;
-+  raw_ptr<AerographeneSpaceRow> space_row_ = nullptr;
 +  // Pin buttons first, then folder buttons; owned by the view hierarchy.
 +  std::vector<raw_ptr<views::View>> item_views_;
 +  size_t pin_count_ = 0;
@@ -785,7 +772,7 @@ Não verificado em runtime: tudo acima (só compilação dos .cc tocados).
 +#endif  // CHROME_BROWSER_UI_VIEWS_FRAME_AEROGRAPHENE_TOPBAR_ROW_H_
 --- a/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc
 +++ b/chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.cc
-@@ -23,6 +23,7 @@
+@@ -22,6 +22,7 @@
  #include "chrome/browser/ui/layout_constants.h"
  #include "chrome/browser/ui/tabs/features.h"
  #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -793,11 +780,11 @@ Não verificado em runtime: tudo acima (só compilação dos .cc tocados).
  #include "chrome/browser/ui/tabs/tab_strip_prefs.h"
  #include "chrome/browser/ui/ui_features.h"
  #include "chrome/browser/ui/views/frame/browser_view.h"
-@@ -229,6 +230,18 @@
+@@ -227,6 +228,18 @@
                                 views::MaximumFlexSizeRule::kPreferred);
    tab_strip_->SetProperty(views::kFlexBehaviorKey, tab_strip_flex_spec);
  
-+  // aerographene: topbar mode. First row above the tabs (space, pinned
++  // aerographene: topbar mode. First row above the tabs (pinned
 +  // entries, folders); laid out by Layout() inside the top inset reserved by
 +  // OnTopbarContentChanged(), so the FlexLayout only sees the tab row.
 +  if (browser && browser->GetType() == BrowserWindowInterface::TYPE_NORMAL) {

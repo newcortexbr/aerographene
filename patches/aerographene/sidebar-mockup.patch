@@ -28,11 +28,9 @@ contorno tracejado (cc::PathEffect::MakeDash) com o raio do tema.
 do tema (vector_icons::kFolderFlippableIcon, trocado pelo override) em
 accent, rótulo em text2, chevron no fim (› fechada, ⌄ aberta), sem caixa,
 32 px, largura total da grade, hover na cor hover.
-(4) Linha do space (AerographeneSpaceRow, nova): ícone de pasta + nome do
-perfil (ProfileAttributesEntry::GetName; space = perfil, ADR 0005) + chevron
-para baixo, 32 px, no topo da sidebar; clique abre o menu do avatar
-(IDC_SHOW_AVATAR_MENU). Escondida sem nome (visitante/anônimo) e na sidebar
-recolhida. O nome é lido ao entrar no widget, não é observado.
+(4) Sem linha de space: a sidebar começa direto nos pinned (8 px de margem
+no topo, UpdateInteriorMargin). Space = perfil, trocado só pelo avatar/seletor
+de perfil (decisão de 11/10/2026, docs/SCOPE.md; ADR 0005).
 (5) Aba vertical (TabView::OnPaint -> PaintAeroVerticalTab): inativa sem
 fundo, hover na cor tab_hover; ativa default = gradiente rgba(108,182,255,.14)
 ->rgba(10,16,32,.78), contorno 1 px no topo e laterais (sem linha inferior) e
@@ -110,15 +108,7 @@ theme-font e pixelized-type.
  #include "chrome/browser/ui/color/chrome_color_id.h"
  #include "chrome/browser/ui/layout_constants.h"
  #include "chrome/browser/ui/omnibox/omnibox_tab_helper.h"
-@@ -47,6 +49,7 @@
- #include "chrome/browser/ui/views/tabs/common/tab_view.h"
- #include "chrome/browser/ui/views/tabs/common/unpinned_tab_container_view.h"
- #include "chrome/browser/ui/views/tabs/shared/drop_arrow.h"
-+#include "chrome/browser/ui/views/tabs/vertical/aerographene_space_row.h"
- #include "chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_bottom_container.h"
- #include "chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_focus_swipe_controller.h"
- #include "chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_footer.h"
-@@ -62,6 +65,10 @@
+@@ -62,6 +64,10 @@
  #include "ui/display/screen.h"
  #include "ui/events/event.h"
  #include "ui/gfx/geometry/point.h"
@@ -129,7 +119,7 @@ theme-font e pixelized-type.
  #include "ui/views/background.h"
  #include "ui/views/controls/button/label_button.h"
  #include "ui/views/controls/focus_ring.h"
-@@ -92,6 +99,36 @@
+@@ -92,6 +98,36 @@
       .light_ambient = 0.0,
       .dark_key = 0.6,
       .dark_ambient = 0.0});
@@ -166,22 +156,7 @@ theme-font e pixelized-type.
  }  // namespace
  
  DEFINE_CLASS_CUSTOM_ELEMENT_EVENT_TYPE(VerticalTabStripRegionView,
-@@ -123,6 +169,14 @@
-                                    views::MinimumFlexSizeRule::kPreferred,
-                                    views::MaximumFlexSizeRule::kPreferred));
- 
-+  // aerographene: space row (profile name) above the pinned grid.
-+  auto* const space_row = AddChildView(
-+      std::make_unique<AerographeneSpaceRow>(browser_view->browser()));
-+  space_row->SetProperty(
-+      views::kMarginsKey,
-+      gfx::Insets::TLBR(0, region_horizontal_padding, kBottomContainerGap,
-+                        region_horizontal_padding));
-+
-   bottom_button_container_ =
-       AddChildView(std::make_unique<VerticalTabStripBottomContainer>(
-           state_controller_, root_action_item, browser_view->browser(),
-@@ -173,6 +227,11 @@
+@@ -173,6 +209,11 @@
        *this, *browser_view,
        /*primary_color=*/CustomCornersBackground::FrameTheme(),
        /*corner_color=*/CustomCornersBackground::ToolbarTheme()));
@@ -193,23 +168,23 @@ theme-font e pixelized-type.
  
    shadow_frame_ = AddChildView(std::make_unique<ShadowFrameView>(
        kExpandOnHoverShadowElevation, kExpandOnHoverShadowAlpha));
-@@ -744,8 +796,15 @@
+@@ -744,7 +785,15 @@
  void VerticalTabStripRegionView::UpdateInteriorMargin() {
    const int padding = GetLayoutConstant(
        LayoutConstant::kVerticalTabStripUncollapsedVerticalPadding);
 -  flex_layout_->SetInteriorMargin(gfx::Insets::TLBR(0, 0, padding, 0));
-+  // aerographene: 8px above the first row (mockup `.side` padding-top).
++  // aerographene: 8px above the first row, the pinned grid
++  // (mockup `.side` padding-top).
 +  flex_layout_->SetInteriorMargin(gfx::Insets::TLBR(8, 0, padding, 0));
- }
++}
 +
 +void VerticalTabStripRegionView::OnPaintBackground(gfx::Canvas* canvas) {
 +  views::View::OnPaintBackground(canvas);
 +  PaintAerographeneSidebar(canvas, this,
 +                           state_controller_->IsTabStripRightAligned());
-+}
+ }
  
  void VerticalTabStripRegionView::OnCollapseStateChanged(
-     tabs::VerticalTabStripCollapseState state) {
 --- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
 +++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
 @@ -66,7 +66,9 @@
@@ -787,199 +762,9 @@ theme-font e pixelized-type.
    }
  
    NOTREACHED() << "Unknown tab child view";
---- /dev/null
-+++ b/chrome/browser/ui/views/tabs/vertical/aerographene_space_row.cc
-@@ -0,0 +1,125 @@
-+// Copyright 2026 The Aerographene Authors
-+// You can use, redistribute, and/or modify this source code under
-+// the terms of the GPL-3.0 license that can be found in the LICENSE file.
-+
-+#include "chrome/browser/ui/views/tabs/vertical/aerographene_space_row.h"
-+
-+#include <algorithm>
-+#include <utility>
-+
-+#include "base/functional/bind.h"
-+#include "chrome/app/chrome_command_ids.h"
-+#include "chrome/browser/browser_process.h"
-+#include "chrome/browser/profiles/profile.h"
-+#include "chrome/browser/profiles/profile_attributes_entry.h"
-+#include "chrome/browser/profiles/profile_attributes_storage.h"
-+#include "chrome/browser/profiles/profile_manager.h"
-+#include "chrome/browser/ui/browser_commands.h"
-+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
-+#include "chrome/browser/ui/color/chrome_color_id.h"
-+#include "chrome/browser/ui/layout_constants.h"
-+#include "components/vector_icons/vector_icons.h"
-+#include "ui/base/metadata/metadata_impl_macros.h"
-+#include "ui/color/color_id.h"
-+#include "ui/color/color_provider.h"
-+#include "ui/gfx/canvas.h"
-+#include "ui/gfx/font_list.h"
-+#include "ui/gfx/geometry/rect.h"
-+#include "ui/gfx/image/image_skia.h"
-+#include "ui/gfx/paint_vector_icon.h"
-+#include "ui/views/accessibility/view_accessibility.h"
-+#include "ui/views/layout/layout_provider.h"
-+
-+namespace {
-+
-+constexpr int kPadding = 8;
-+constexpr int kIconSize = 16;
-+constexpr int kIconGap = 8;
-+constexpr int kMinPaintWidth = 120;
-+
-+}  // namespace
-+
-+AerographeneSpaceRow::AerographeneSpaceRow(BrowserWindowInterface* browser)
-+    : views::Button(base::BindRepeating(
-+          [](BrowserWindowInterface* browser, const ui::Event&) {
-+            chrome::ExecuteCommand(browser, IDC_SHOW_AVATAR_MENU);
-+          },
-+          browser)),
-+      browser_(browser) {
-+  SetVisible(false);
-+}
-+
-+AerographeneSpaceRow::~AerographeneSpaceRow() = default;
-+
-+gfx::Size AerographeneSpaceRow::CalculatePreferredSize(
-+    const views::SizeBounds& available_size) const {
-+  // Width comes from the parent (cross-axis stretch).
-+  return gfx::Size(0, GetLayoutConstant(LayoutConstant::kVerticalTabHeight));
-+}
-+
-+void AerographeneSpaceRow::AddedToWidget() {
-+  RefreshName();
-+}
-+
-+void AerographeneSpaceRow::RefreshName() {
-+  std::u16string name;
-+  Profile* const profile = browser_ ? browser_->GetProfile() : nullptr;
-+  if (profile && profile->IsRegularProfile() &&
-+      g_browser_process->profile_manager()) {
-+    if (ProfileAttributesEntry* entry =
-+            g_browser_process->profile_manager()
-+                ->GetProfileAttributesStorage()
-+                .GetProfileAttributesWithPath(profile->GetPath())) {
-+      name = entry->GetName();
-+    }
-+  }
-+  if (name == name_ && GetVisible() == !name.empty()) {
-+    return;
-+  }
-+  name_ = std::move(name);
-+  SetTooltipText(name_);
-+  GetViewAccessibility().SetName(name_);
-+  SetVisible(!name_.empty());
-+  SchedulePaint();
-+}
-+
-+void AerographeneSpaceRow::PaintButtonContents(gfx::Canvas* canvas) {
-+  const ui::ColorProvider* const colors = GetColorProvider();
-+  // Not drawn in the collapsed (narrow) strip.
-+  if (!colors || name_.empty() || width() < kMinPaintWidth) {
-+    return;
-+  }
-+  const gfx::Rect bounds = GetLocalBounds();
-+  const bool hovered =
-+      GetState() == STATE_HOVERED || GetState() == STATE_PRESSED;
-+  if (hovered) {
-+    const int radius = views::LayoutProvider::GetAerographeneControlRadius();
-+    cc::PaintFlags fill;
-+    fill.setAntiAlias(true);
-+    fill.setColor(colors->GetColor(kColorToolbarInkDropHover));
-+    canvas->DrawRoundRect(bounds, radius >= 0 ? radius : 4, fill);
-+  }
-+  const SkColor text_color = colors->GetColor(
-+      hovered ? kColorTabForegroundActiveFrameActive
-+              : kColorTabForegroundInactiveFrameActive);
-+  const int icon_y = bounds.y() + (bounds.height() - kIconSize) / 2;
-+  const int icon_x = bounds.x() + kPadding;
-+  canvas->DrawImageInt(
-+      gfx::CreateVectorIcon(vector_icons::kFolderFlippableIcon, kIconSize,
-+                            colors->GetColor(ui::kColorSysPrimary)),
-+      GetMirroredXWithWidthInView(icon_x, kIconSize), icon_y);
-+  const int chevron_x = bounds.right() - kPadding - kIconSize;
-+  canvas->DrawImageInt(
-+      gfx::CreateVectorIcon(vector_icons::kKeyboardArrowDownIcon, kIconSize,
-+                            text_color),
-+      GetMirroredXWithWidthInView(chevron_x, kIconSize), icon_y);
-+  const int text_x = icon_x + kIconSize + kIconGap;
-+  canvas->DrawStringRect(
-+      name_, gfx::FontList(), text_color,
-+      GetMirroredRect(gfx::Rect(text_x, bounds.y(),
-+                                std::max(0, chevron_x - kIconGap - text_x),
-+                                bounds.height())));
-+}
-+
-+BEGIN_METADATA(AerographeneSpaceRow)
-+END_METADATA
---- /dev/null
-+++ b/chrome/browser/ui/views/tabs/vertical/aerographene_space_row.h
-@@ -0,0 +1,43 @@
-+// Copyright 2026 The Aerographene Authors
-+// You can use, redistribute, and/or modify this source code under
-+// the terms of the GPL-3.0 license that can be found in the LICENSE file.
-+
-+#ifndef CHROME_BROWSER_UI_VIEWS_TABS_VERTICAL_AEROGRAPHENE_SPACE_ROW_H_
-+#define CHROME_BROWSER_UI_VIEWS_TABS_VERTICAL_AEROGRAPHENE_SPACE_ROW_H_
-+
-+#include <string>
-+
-+#include "base/memory/raw_ptr.h"
-+#include "ui/base/metadata/metadata_header_macros.h"
-+#include "ui/views/controls/button/button.h"
-+
-+class BrowserWindowInterface;
-+
-+// aerographene: space row at the top of the sidebar (mockup R-r01a, ADR 0005:
-+// a space is a profile). Folder glyph of the theme, profile name, chevron
-+// down; no box, 32 px. Hidden when the profile has no name (guest,
-+// incognito). Click opens the avatar (profile) menu. The name is read when
-+// the view is added to a widget, not observed.
-+class AerographeneSpaceRow : public views::Button {
-+  METADATA_HEADER(AerographeneSpaceRow, views::Button)
-+
-+ public:
-+  explicit AerographeneSpaceRow(BrowserWindowInterface* browser);
-+  AerographeneSpaceRow(const AerographeneSpaceRow&) = delete;
-+  AerographeneSpaceRow& operator=(const AerographeneSpaceRow&) = delete;
-+  ~AerographeneSpaceRow() override;
-+
-+  // views::Button:
-+  gfx::Size CalculatePreferredSize(
-+      const views::SizeBounds& available_size) const override;
-+  void AddedToWidget() override;
-+  void PaintButtonContents(gfx::Canvas* canvas) override;
-+
-+ private:
-+  void RefreshName();
-+
-+  const raw_ptr<BrowserWindowInterface> browser_;
-+  std::u16string name_;
-+};
-+
-+#endif  // CHROME_BROWSER_UI_VIEWS_TABS_VERTICAL_AEROGRAPHENE_SPACE_ROW_H_
 --- a/chrome/browser/ui/views/tabs/vertical/BUILD.gn
 +++ b/chrome/browser/ui/views/tabs/vertical/BUILD.gn
-@@ -7,6 +7,7 @@
- 
- source_set("vertical") {
-   sources = [
-+    "aerographene_space_row.h",
-     "top_container_button.h",
-     "vertical_new_tab_button.h",
-     "vertical_tab_strip_bottom_container.h",
-@@ -38,6 +39,7 @@
- 
- source_set("impl") {
-   sources = [
-+    "aerographene_space_row.cc",
-     "top_container_button.cc",
-     "vertical_new_tab_button.cc",
-     "vertical_tab_strip_bottom_container.cc",
-@@ -51,10 +53,12 @@
+@@ -51,10 +51,12 @@
    deps = [
      "//chrome/app:command_ids",
      "//chrome/app/vector_icons",
