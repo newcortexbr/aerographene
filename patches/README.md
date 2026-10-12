@@ -328,6 +328,10 @@ Modo topbar (abas horizontais): linha 1 de 40 px acima das abas com a linha do s
 
 Rótulos de linha em CAIXA ALTA no pixelized (`.row{text-transform:uppercase}`): nome do space (`AerographeneSpaceRow`, também na topbar), linha de pasta de pinned, "Nova aba" do botão da sidebar e pastas da topbar; títulos de aba não. A conversão (`base::i18n::ToUpper`) é feita uma vez ao definir o texto, nunca por pintura; tooltip e nome de acessibilidade ficam com o texto original. A fonte JetBrains Mono em todo o chrome vem do `theme-font`. Depende de `theme-font`, `sidebar-mockup`, `topbar-mockup`.
 
+### `aerographene/topbar-row-fix.patch` (GPL-3.0, correção de runtime do pacote a4677e6)
+
+Linha do topbar: a largura do `AerographeneSpaceRow` na linha acompanha o nome (até 160 px; `GetNameWidth`), com elipse só acima disso (também na sidebar); pinned abertos ganham contorno de 1 px na cor line e globo (`kGlobeIcon`) sem favicon, além do marcador accent 6x6 que já existia. Depende de `topbar-mockup` e `pixelized-type`. Menus (mesmo defeito de runtime): `menus-command-bar` agora aplica 247–320 px ao menu inteiro (descontando padding e contorno do contêiner, que antes somavam ~11 px) e elide o rótulo do item com reticências em vez de cortar. Validação: ver PR.
+
 ### `aerographene/newtab-fidelity.patch` (GPL-3.0; fonte 7-Segment SIL OFL 1.1, fidelidade de 11/10/2026)
 
 Nova aba como R-r01a nos dois temas, em cima de `newtab-home.patch` (que o patch reescreve; depende dele e de `theme-builtin`). Toca `aero_newtab.html`, `new_tab_page_third_party_ui.cc`, `aerographene_theme.h` e `theme_service.cc`; nenhum `.gn`, `.grd` ou arquivo novo no Chromium (o recurso `IDR_AERO_NEWTAB_HTML` já existe).
