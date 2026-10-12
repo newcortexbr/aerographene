@@ -1,0 +1,800 @@
+aerographene: repositório global de temas (theme.json por pasta) + pref por nome.
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/theme-builtin.patch (ThemeData, SetActiveTheme),
+aerographene/newtab-fidelity.patch (pref lida na nova aba).
+Propósito: v0.2, fatia theme-repo. aerographene_theme_repo.{h,cc} (novos, no
+source_set "themes") leem ${XDG_CONFIG_HOME:-~/.config}/aerographene/themes/
+<nome>/theme.json para a ThemeData. Pref aerographene.theme guarda o nome
+(built-in ou pasta). ThemeService::Init resolve o nome (ResolveTheme): built-in
+sem acesso a disco; outro nome = uma leitura POSIX de theme.json (cap 64 KiB),
+fallback default se faltar/inválido. Migração: built-in em outra caixa vira o
+canônico; nome impossível (vazio, "../x"...) vira "default" na pref; nome válido
+sem pasta mantém a pref (a escolha sobrevive a disco ausente) e usa default na
+execução. API: ListThemes (varredura em thread pool, MayBlock) e InstallTheme
+(valida, grava atômico, conflito sem diferenciar caixa -> kConflict até
+replace=true), para as fatias 3/4. A nova aba usa UsesPixelizedStyle() em vez
+de comparar a pref.
+
+--- /dev/null
++++ b/chrome/browser/themes/aerographene_theme_repo.h
+@@ -0,0 +1,98 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#ifndef CHROME_BROWSER_THEMES_AEROGRAPHENE_THEME_REPO_H_
++#define CHROME_BROWSER_THEMES_AEROGRAPHENE_THEME_REPO_H_
++
++#include <stddef.h>
++
++#include <string>
++#include <string_view>
++#include <vector>
++
++#include "base/files/file_path.h"
++#include "base/functional/callback.h"
++#include "chrome/browser/themes/aerographene_theme.h"
++
++namespace aerographene {
++
++// Global theme repository: ${XDG_CONFIG_HOME:-~/.config}/aerographene/themes/
++// <name>/theme.json, seen by every profile/space. The folder name is the
++// theme name (pref value); the "name" field of theme.json must equal it.
++inline constexpr char kThemeFileName[] = "theme.json";
++inline constexpr size_t kMaxThemeNameBytes = 64;
++inline constexpr size_t kMaxThemeFileBytes = 64 * 1024;
++
++// Name as folder key: non-empty, valid UTF-8, <= 64 bytes, not starting with
++// '.', no '/', '\\' or control characters. Spaces and accents are allowed.
++bool IsValidThemeName(std::string_view name);
++
++// "default" and "pixelized" (case-insensitive) belong to the built-in themes.
++bool IsReservedThemeName(std::string_view name);
++
++enum class ThemeParseResult {
++  kOk,
++  kInvalidJson,   // not JSON, not an object, or larger than the cap
++  kInvalidName,   // "name" missing or not IsValidThemeName
++  kReservedName,  // "name" is default/pixelized
++  kInvalidField,  // a field has the wrong type, range or value
++};
++
++// Validates a theme.json and fills `out` (unchanged unless kOk). Fields:
++//   name (required), mode "dark"|"light" (default "dark"),
++//   radius / radius_small (int 0..32, default 4 / 3),
++//   font {family, size_px 8..32} (optional; family needs size_px),
++//   icons {base "default"|"pixelized"} (default "default"),
++//   style "default"|"pixelized" (compiled drawing variant, default "default"),
++//   tokens {name: "#RRGGBB"|"#RRGGBBAA"} (same names as the dev theme.json).
++// Unknown keys and unknown token names are ignored; a bad color is an error.
++ThemeParseResult ParseThemeJson(std::string_view json, ThemeData* out);
++
++// Repository directory (XDG config, same base as the dev theme.json).
++base::FilePath GetThemeRepoDir();
++// Tests: replaces the repository directory; an empty path restores it.
++void SetThemeRepoDirForTesting(const base::FilePath& dir);
++
++struct ResolvedTheme {
++  ThemeData theme;
++  // Value the pref should hold after resolving: canonical case for built-ins,
++  // "default" for names that can never be valid, else the input unchanged
++  // (a valid name whose folder is missing or broken keeps the user's choice
++  // and falls back to "default" only for this run).
++  std::string pref_value;
++};
++
++// Startup path (UI thread, synchronous): built-ins are memory-only; any other
++// name costs one read of a file capped at kMaxThemeFileBytes.
++ResolvedTheme ResolveTheme(std::string_view pref_value);
++
++struct ThemeInfo {
++  ThemeData theme;
++  bool builtin = false;
++};
++
++// Lists "default", "pixelized", then valid repository themes sorted by name.
++// Scans on a thread-pool task (MayBlock); `callback` runs on the calling
++// sequence. Broken folders are skipped.
++using ListThemesCallback = base::OnceCallback<void(std::vector<ThemeInfo>)>;
++void ListThemes(ListThemesCallback callback);
++
++enum class InstallResult {
++  kInstalled,
++  kInvalid,   // ParseThemeJson failed
++  kReserved,  // name is default/pixelized
++  kConflict,  // same name (case-insensitive) exists and replace == false
++  kIoError,
++};
++
++// Validates `json` and writes it to themes/<name>/theme.json (atomic) on a
++// thread-pool task. An existing theme with the same name, compared without
++// case, is replaced only if `replace`; otherwise kConflict (the import dialog
++// asks, then calls again with replace). `callback` gets the result and the
++// theme name ("" when `json` has no valid name), on the calling sequence.
++using InstallCallback = base::OnceCallback<void(InstallResult, std::string)>;
++void InstallTheme(std::string json, bool replace, InstallCallback callback);
++
++}  // namespace aerographene
++
++#endif  // CHROME_BROWSER_THEMES_AEROGRAPHENE_THEME_REPO_H_
+--- /dev/null
++++ b/chrome/browser/themes/aerographene_theme_repo.cc
+@@ -0,0 +1,412 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "chrome/browser/themes/aerographene_theme_repo.h"
++
++#include <fcntl.h>
++#include <unistd.h>
++
++#include <algorithm>
++#include <memory>
++#include <optional>
++#include <set>
++#include <utility>
++
++#include "base/environment.h"
++#include "base/files/file_enumerator.h"
++#include "base/files/file_util.h"
++#include "base/files/important_file_writer.h"
++#include "base/i18n/case_conversion.h"
++#include "base/json/json_reader.h"
++#include "base/location.h"
++#include "base/nix/xdg_util.h"
++#include "base/no_destructor.h"
++#include "base/strings/string_util.h"
++#include "base/strings/utf_string_conversions.h"
++#include "base/task/sequenced_task_runner.h"
++#include "base/task/task_traits.h"
++#include "base/task/thread_pool.h"
++#include "base/values.h"
++
++namespace aerographene {
++
++namespace {
++
++constexpr int kMaxRadius = 32;
++constexpr int kMinFontSize = 8;
++constexpr int kMaxFontSize = 32;
++
++base::FilePath& RepoDirOverride() {
++  static base::NoDestructor<base::FilePath> dir;
++  return *dir;
++}
++
++std::u16string FoldName(std::string_view name) {
++  return base::i18n::FoldCase(base::UTF8ToUTF16(name));
++}
++
++bool HasControlOrSeparator(std::string_view s, bool allow_slash) {
++  for (char16_t c : base::UTF8ToUTF16(s)) {
++    if (c < 0x20 || (c >= 0x7F && c <= 0x9F)) {
++      return true;
++    }
++    if (!allow_slash && (c == u'/' || c == u'\\')) {
++      return true;
++    }
++  }
++  return false;
++}
++
++int HexDigit(char c) {
++  if (c >= '0' && c <= '9') {
++    return c - '0';
++  }
++  if (c >= 'a' && c <= 'f') {
++    return c - 'a' + 10;
++  }
++  if (c >= 'A' && c <= 'F') {
++    return c - 'A' + 10;
++  }
++  return -1;
++}
++
++// #RRGGBB or #RRGGBBAA (same grammar as the dev theme.json).
++std::optional<SkColor> ParseHexColor(std::string_view s) {
++  if ((s.size() != 7 && s.size() != 9) || s[0] != '#') {
++    return std::nullopt;
++  }
++  uint32_t v = 0;
++  for (size_t i = 1; i < s.size(); ++i) {
++    const int d = HexDigit(s[i]);
++    if (d < 0) {
++      return std::nullopt;
++    }
++    v = (v << 4) | static_cast<uint32_t>(d);
++  }
++  if (s.size() == 7) {
++    return SkColorSetA(v, 0xFF);
++  }
++  return SkColorSetARGB(v & 0xFF, (v >> 24) & 0xFF, (v >> 16) & 0xFF,
++                        (v >> 8) & 0xFF);
++}
++
++// Absent key keeps *out; present key must be an int within range.
++bool ReadInt(const base::DictValue& dict,
++             const char* key,
++             int min,
++             int max,
++             int* out) {
++  const base::Value* value = dict.Find(key);
++  if (!value) {
++    return true;
++  }
++  if (!value->is_int() || value->GetInt() < min || value->GetInt() > max) {
++    return false;
++  }
++  *out = value->GetInt();
++  return true;
++}
++
++// Absent key keeps *out; present key must be one of the compiled choices.
++bool ReadChoice(const base::DictValue& dict,
++                const char* key,
++                std::string* out) {
++  const base::Value* value = dict.Find(key);
++  if (!value) {
++    return true;
++  }
++  if (!value->is_string() ||
++      (value->GetString() != kIconPackDefault &&
++       value->GetString() != kIconPackPixelized)) {
++    return false;
++  }
++  *out = value->GetString();
++  return true;
++}
++
++// Plain POSIX read of a small file. Like theme_tokens, avoids base::File so
++// the UI thread blocking assertions do not fire; capped at kMaxThemeFileBytes.
++std::optional<std::string> ReadSmallFile(const base::FilePath& path) {
++  const int fd = open(path.value().c_str(), O_RDONLY | O_CLOEXEC);
++  if (fd < 0) {
++    return std::nullopt;
++  }
++  std::string data;
++  char buf[4096];
++  bool ok = true;
++  while (true) {
++    const ssize_t n = read(fd, buf, sizeof(buf));
++    if (n < 0) {
++      ok = false;
++      break;
++    }
++    if (n == 0) {
++      break;
++    }
++    data.append(buf, static_cast<size_t>(n));
++    if (data.size() > kMaxThemeFileBytes) {
++      ok = false;
++      break;
++    }
++  }
++  close(fd);
++  if (!ok) {
++    return std::nullopt;
++  }
++  return data;
++}
++
++// Reads themes/<folder>/theme.json; the file's "name" must equal the folder.
++std::optional<ThemeData> LoadRepoTheme(const base::FilePath& dir,
++                                       const std::string& folder) {
++  if (!IsValidThemeName(folder) || IsReservedThemeName(folder)) {
++    return std::nullopt;
++  }
++  std::optional<std::string> json =
++      ReadSmallFile(dir.Append(folder).Append(kThemeFileName));
++  ThemeData theme;
++  if (!json || ParseThemeJson(*json, &theme) != ThemeParseResult::kOk ||
++      theme.name != folder) {
++    return std::nullopt;
++  }
++  return theme;
++}
++
++std::vector<ThemeInfo> ScanRepo(base::FilePath dir) {
++  std::vector<ThemeInfo> found;
++  base::FileEnumerator enumerator(dir, /*recursive=*/false,
++                                  base::FileEnumerator::DIRECTORIES);
++  for (base::FilePath path = enumerator.Next(); !path.empty();
++       path = enumerator.Next()) {
++    if (std::optional<ThemeData> theme =
++            LoadRepoTheme(dir, path.BaseName().AsUTF8Unsafe())) {
++      found.push_back({std::move(*theme), /*builtin=*/false});
++    }
++  }
++  std::sort(found.begin(), found.end(),
++            [](const ThemeInfo& a, const ThemeInfo& b) {
++              const std::u16string fa = FoldName(a.theme.name);
++              const std::u16string fb = FoldName(b.theme.name);
++              return fa != fb ? fa < fb : a.theme.name < b.theme.name;
++            });
++
++  std::vector<ThemeInfo> result;
++  result.push_back({GetBuiltinTheme(kThemeDefault), /*builtin=*/true});
++  result.push_back({GetBuiltinTheme(kThemePixelized), /*builtin=*/true});
++  std::set<std::u16string> seen;
++  for (ThemeInfo& info : found) {
++    if (seen.insert(FoldName(info.theme.name)).second) {
++      result.push_back(std::move(info));
++    }
++  }
++  return result;
++}
++
++InstallResult WriteTheme(base::FilePath dir,
++                         std::string name,
++                         std::string json,
++                         bool replace) {
++  const std::u16string key = FoldName(name);
++  base::FilePath existing;
++  {
++    base::FileEnumerator enumerator(dir, /*recursive=*/false,
++                                    base::FileEnumerator::DIRECTORIES);
++    for (base::FilePath path = enumerator.Next(); !path.empty();
++         path = enumerator.Next()) {
++      if (FoldName(path.BaseName().AsUTF8Unsafe()) == key) {
++        existing = path;
++        break;
++      }
++    }
++  }
++  if (!existing.empty()) {
++    if (!replace) {
++      return InstallResult::kConflict;
++    }
++    if (!base::DeletePathRecursively(existing)) {
++      return InstallResult::kIoError;
++    }
++  }
++  // `name` passed IsValidThemeName: a single path component.
++  const base::FilePath target = dir.Append(name);
++  if (!base::CreateDirectory(target) ||
++      !base::ImportantFileWriter::WriteFileAtomically(
++          target.Append(kThemeFileName), json)) {
++    return InstallResult::kIoError;
++  }
++  return InstallResult::kInstalled;
++}
++
++}  // namespace
++
++bool IsValidThemeName(std::string_view name) {
++  return !name.empty() && name.size() <= kMaxThemeNameBytes &&
++         base::IsStringUTF8(name) && name[0] != '.' &&
++         !HasControlOrSeparator(name, /*allow_slash=*/false);
++}
++
++bool IsReservedThemeName(std::string_view name) {
++  return base::EqualsCaseInsensitiveASCII(name, kThemeDefault) ||
++         base::EqualsCaseInsensitiveASCII(name, kThemePixelized);
++}
++
++ThemeParseResult ParseThemeJson(std::string_view json, ThemeData* out) {
++  if (json.size() > kMaxThemeFileBytes) {
++    return ThemeParseResult::kInvalidJson;
++  }
++  std::optional<base::DictValue> root =
++      base::JSONReader::ReadDict(json, base::JSON_ALLOW_TRAILING_COMMAS);
++  if (!root) {
++    return ThemeParseResult::kInvalidJson;
++  }
++
++  const std::string* name = root->FindString("name");
++  if (!name || !IsValidThemeName(*name)) {
++    return ThemeParseResult::kInvalidName;
++  }
++  if (IsReservedThemeName(*name)) {
++    return ThemeParseResult::kReservedName;
++  }
++
++  ThemeData theme;
++  theme.name = *name;
++
++  if (const base::Value* mode = root->Find("mode")) {
++    if (!mode->is_string() ||
++        (mode->GetString() != "dark" && mode->GetString() != "light")) {
++      return ThemeParseResult::kInvalidField;
++    }
++    theme.scheme = mode->GetString() == "light" ? ThemeScheme::kLight
++                                                : ThemeScheme::kDark;
++  }
++  if (!ReadInt(*root, "radius", 0, kMaxRadius, &theme.radius) ||
++      !ReadInt(*root, "radius_small", 0, kMaxRadius, &theme.radius_small)) {
++    return ThemeParseResult::kInvalidField;
++  }
++
++  if (const base::Value* font = root->Find("font")) {
++    if (!font->is_dict()) {
++      return ThemeParseResult::kInvalidField;
++    }
++    const base::DictValue& font_dict = font->GetDict();
++    if (const base::Value* family = font_dict.Find("family")) {
++      if (!family->is_string() || family->GetString().empty() ||
++          family->GetString().size() > kMaxThemeNameBytes ||
++          !base::IsStringUTF8(family->GetString()) ||
++          HasControlOrSeparator(family->GetString(), /*allow_slash=*/true)) {
++        return ThemeParseResult::kInvalidField;
++      }
++      theme.font_family = family->GetString();
++      // A family needs an explicit size.
++      if (!font_dict.Find("size_px")) {
++        return ThemeParseResult::kInvalidField;
++      }
++    }
++    if (!ReadInt(font_dict, "size_px", kMinFontSize, kMaxFontSize,
++                 &theme.font_size_px)) {
++      return ThemeParseResult::kInvalidField;
++    }
++  }
++
++  if (const base::Value* icons = root->Find("icons")) {
++    // "overrides" is reserved for later; ignored today.
++    if (!icons->is_dict() ||
++        !ReadChoice(icons->GetDict(), "base", &theme.icons_base)) {
++      return ThemeParseResult::kInvalidField;
++    }
++  }
++  if (!ReadChoice(*root, "style", &theme.style)) {
++    return ThemeParseResult::kInvalidField;
++  }
++
++  if (const base::Value* tokens = root->Find("tokens")) {
++    if (!tokens->is_dict()) {
++      return ThemeParseResult::kInvalidField;
++    }
++    for (const auto [token_name, value] : tokens->GetDict()) {
++      std::optional<SkColor> color;
++      if (value.is_string()) {
++        color = ParseHexColor(value.GetString());
++      }
++      if (!color) {
++        return ThemeParseResult::kInvalidField;
++      }
++      theme.tokens.push_back({token_name, *color});
++    }
++  }
++
++  *out = std::move(theme);
++  return ThemeParseResult::kOk;
++}
++
++base::FilePath GetThemeRepoDir() {
++  if (!RepoDirOverride().empty()) {
++    return RepoDirOverride();
++  }
++  std::unique_ptr<base::Environment> env = base::Environment::Create();
++  return base::nix::GetXDGDirectory(env.get(), base::nix::kXdgConfigHomeEnvVar,
++                                    base::nix::kDotConfigDir)
++      .Append("aerographene")
++      .Append("themes");
++}
++
++void SetThemeRepoDirForTesting(const base::FilePath& dir) {
++  RepoDirOverride() = dir;
++}
++
++ResolvedTheme ResolveTheme(std::string_view pref_value) {
++  ResolvedTheme resolved;
++  for (const char* builtin : {kThemeDefault, kThemePixelized}) {
++    if (base::EqualsCaseInsensitiveASCII(pref_value, builtin)) {
++      resolved.theme = GetBuiltinTheme(builtin);
++      resolved.pref_value = builtin;
++      return resolved;
++    }
++  }
++  resolved.theme = GetBuiltinTheme(kThemeDefault);
++  if (!IsValidThemeName(pref_value)) {
++    resolved.pref_value = kThemeDefault;
++    return resolved;
++  }
++  resolved.pref_value = std::string(pref_value);
++  if (std::optional<ThemeData> theme =
++          LoadRepoTheme(GetThemeRepoDir(), resolved.pref_value)) {
++    resolved.theme = std::move(*theme);
++  }
++  return resolved;
++}
++
++void ListThemes(ListThemesCallback callback) {
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE,
++      {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
++       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
++      base::BindOnce(&ScanRepo, GetThemeRepoDir()), std::move(callback));
++}
++
++void InstallTheme(std::string json, bool replace, InstallCallback callback) {
++  ThemeData theme;
++  const ThemeParseResult parsed = ParseThemeJson(json, &theme);
++  if (parsed != ThemeParseResult::kOk) {
++    const InstallResult result = parsed == ThemeParseResult::kReservedName
++                                     ? InstallResult::kReserved
++                                     : InstallResult::kInvalid;
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE, base::BindOnce(std::move(callback), result, std::string()));
++    return;
++  }
++  const std::string name = theme.name;
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE,
++      {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
++       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
++      base::BindOnce(&WriteTheme, GetThemeRepoDir(), name, std::move(json),
++                     replace),
++      base::BindOnce(
++          [](InstallCallback callback, std::string name, InstallResult result) {
++            std::move(callback).Run(result, std::move(name));
++          },
++          std::move(callback), name));
++}
++
++}  // namespace aerographene
+--- /dev/null
++++ b/chrome/browser/themes/aerographene_theme_repo_unittest.cc
+@@ -0,0 +1,179 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "chrome/browser/themes/aerographene_theme_repo.h"
++
++#include <string>
++#include <vector>
++
++#include "base/files/file_util.h"
++#include "base/files/scoped_temp_dir.h"
++#include "base/test/task_environment.h"
++#include "base/test/test_future.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace aerographene {
++namespace {
++
++constexpr char kMinimal[] = R"({"name": "Meu Tema"})";
++
++class AerographeneThemeRepoTest : public testing::Test {
++ protected:
++  void SetUp() override {
++    ASSERT_TRUE(dir_.CreateUniqueTempDir());
++    SetThemeRepoDirForTesting(dir_.GetPath());
++  }
++  void TearDown() override { SetThemeRepoDirForTesting(base::FilePath()); }
++
++  void WriteTheme(const std::string& folder, const std::string& json) {
++    const base::FilePath path = dir_.GetPath().Append(folder);
++    ASSERT_TRUE(base::CreateDirectory(path));
++    ASSERT_TRUE(base::WriteFile(path.Append(kThemeFileName), json));
++  }
++
++  base::test::TaskEnvironment task_environment_;
++  base::ScopedTempDir dir_;
++};
++
++TEST_F(AerographeneThemeRepoTest, NameRules) {
++  EXPECT_TRUE(IsValidThemeName("Meu Tema"));
++  EXPECT_TRUE(IsValidThemeName("açaí"));
++  EXPECT_TRUE(IsValidThemeName(std::string(64, 'a')));
++  EXPECT_FALSE(IsValidThemeName(""));
++  EXPECT_FALSE(IsValidThemeName(std::string(65, 'a')));
++  EXPECT_FALSE(IsValidThemeName("a/b"));
++  EXPECT_FALSE(IsValidThemeName("a\\b"));
++  EXPECT_FALSE(IsValidThemeName("."));
++  EXPECT_FALSE(IsValidThemeName(".."));
++  EXPECT_FALSE(IsValidThemeName(".oculto"));
++  EXPECT_FALSE(IsValidThemeName("a\nb"));
++  EXPECT_FALSE(IsValidThemeName(std::string("a\0b", 3)));
++  EXPECT_FALSE(IsValidThemeName("\xff\xfe"));
++  EXPECT_TRUE(IsReservedThemeName("default"));
++  EXPECT_TRUE(IsReservedThemeName("PIXELIZED"));
++  EXPECT_FALSE(IsReservedThemeName("defaults"));
++}
++
++TEST_F(AerographeneThemeRepoTest, ParseDefaults) {
++  ThemeData theme;
++  ASSERT_EQ(ParseThemeJson(kMinimal, &theme), ThemeParseResult::kOk);
++  EXPECT_EQ(theme.name, "Meu Tema");
++  EXPECT_EQ(theme.scheme, ThemeScheme::kDark);
++  EXPECT_EQ(theme.radius, 4);
++  EXPECT_EQ(theme.icons_base, kIconPackDefault);
++  EXPECT_EQ(theme.style, kStyleDefault);
++  EXPECT_TRUE(theme.tokens.empty());
++}
++
++TEST_F(AerographeneThemeRepoTest, ParseFull) {
++  ThemeData theme;
++  ASSERT_EQ(
++      ParseThemeJson(R"({"name":"x","mode":"light","radius":0,
++        "radius_small":2,"font":{"family":"JetBrains Mono","size_px":12},
++        "icons":{"base":"pixelized"},"style":"pixelized",
++        "tokens":{"frame":"#0A0A0A","hover":"#FFFFFF1F"}})",
++                     &theme),
++      ThemeParseResult::kOk);
++  EXPECT_EQ(theme.scheme, ThemeScheme::kLight);
++  EXPECT_EQ(theme.radius, 0);
++  EXPECT_EQ(theme.radius_small, 2);
++  EXPECT_EQ(theme.font_family, "JetBrains Mono");
++  EXPECT_EQ(theme.font_size_px, 12);
++  EXPECT_EQ(theme.icons_base, kIconPackPixelized);
++  EXPECT_EQ(theme.style, kStylePixelized);
++  ASSERT_EQ(theme.tokens.size(), 2u);
++}
++
++TEST_F(AerographeneThemeRepoTest, ParseRejects) {
++  ThemeData theme;
++  EXPECT_EQ(ParseThemeJson("nope", &theme), ThemeParseResult::kInvalidJson);
++  EXPECT_EQ(ParseThemeJson("[]", &theme), ThemeParseResult::kInvalidJson);
++  EXPECT_EQ(ParseThemeJson("{}", &theme), ThemeParseResult::kInvalidName);
++  EXPECT_EQ(ParseThemeJson(R"({"name":"../x"})", &theme),
++            ThemeParseResult::kInvalidName);
++  EXPECT_EQ(ParseThemeJson(R"({"name":"Default"})", &theme),
++            ThemeParseResult::kReservedName);
++  EXPECT_EQ(ParseThemeJson(R"({"name":"x","icons":{"base":"zzz"}})", &theme),
++            ThemeParseResult::kInvalidField);
++  EXPECT_EQ(ParseThemeJson(R"({"name":"x","style":"zzz"})", &theme),
++            ThemeParseResult::kInvalidField);
++  EXPECT_EQ(ParseThemeJson(R"({"name":"x","mode":"sepia"})", &theme),
++            ThemeParseResult::kInvalidField);
++  EXPECT_EQ(ParseThemeJson(R"({"name":"x","radius":99})", &theme),
++            ThemeParseResult::kInvalidField);
++  EXPECT_EQ(ParseThemeJson(R"({"name":"x","font":{"family":"A"}})", &theme),
++            ThemeParseResult::kInvalidField);
++  EXPECT_EQ(ParseThemeJson(R"({"name":"x","tokens":{"frame":"red"}})", &theme),
++            ThemeParseResult::kInvalidField);
++}
++
++TEST_F(AerographeneThemeRepoTest, ResolveBuiltinsAndFallback) {
++  EXPECT_EQ(ResolveTheme("pixelized").theme.style, kStylePixelized);
++  EXPECT_EQ(ResolveTheme("Pixelized").pref_value, "pixelized");
++  EXPECT_EQ(ResolveTheme("").pref_value, "default");
++  EXPECT_EQ(ResolveTheme("../etc").pref_value, "default");
++  // Valid name without folder: default now, choice kept in the pref.
++  ResolvedTheme missing = ResolveTheme("sumiu");
++  EXPECT_EQ(missing.theme.name, "default");
++  EXPECT_EQ(missing.pref_value, "sumiu");
++}
++
++TEST_F(AerographeneThemeRepoTest, ResolveFromRepo) {
++  WriteTheme("Meu Tema", kMinimal);
++  EXPECT_EQ(ResolveTheme("Meu Tema").theme.name, "Meu Tema");
++  // Folder name and "name" must agree.
++  WriteTheme("outro", kMinimal);
++  EXPECT_EQ(ResolveTheme("outro").theme.name, "default");
++}
++
++TEST_F(AerographeneThemeRepoTest, ListSkipsBroken) {
++  WriteTheme("zeta", R"({"name":"zeta"})");
++  WriteTheme("Alfa", R"({"name":"Alfa"})");
++  WriteTheme("quebrado", "{");
++  WriteTheme("default", R"({"name":"default"})");
++  base::test::TestFuture<std::vector<ThemeInfo>> future;
++  ListThemes(future.GetCallback());
++  const std::vector<ThemeInfo>& themes = future.Get();
++  ASSERT_EQ(themes.size(), 4u);
++  EXPECT_EQ(themes[0].theme.name, "default");
++  EXPECT_TRUE(themes[0].builtin);
++  EXPECT_EQ(themes[1].theme.name, "pixelized");
++  EXPECT_EQ(themes[2].theme.name, "Alfa");
++  EXPECT_EQ(themes[3].theme.name, "zeta");
++  EXPECT_FALSE(themes[3].builtin);
++}
++
++TEST_F(AerographeneThemeRepoTest, InstallConflictAndReplace) {
++  {
++    base::test::TestFuture<InstallResult, std::string> future;
++    InstallTheme(kMinimal, false, future.GetCallback());
++    EXPECT_EQ(future.Get<0>(), InstallResult::kInstalled);
++    EXPECT_EQ(future.Get<1>(), "Meu Tema");
++  }
++  EXPECT_EQ(ResolveTheme("Meu Tema").theme.name, "Meu Tema");
++  {
++    base::test::TestFuture<InstallResult, std::string> future;
++    InstallTheme(R"({"name": "meu tema"})", false, future.GetCallback());
++    EXPECT_EQ(future.Get<0>(), InstallResult::kConflict);
++  }
++  {
++    base::test::TestFuture<InstallResult, std::string> future;
++    InstallTheme(R"({"name": "meu tema", "radius": 0})", true,
++                 future.GetCallback());
++    EXPECT_EQ(future.Get<0>(), InstallResult::kInstalled);
++  }
++  EXPECT_EQ(ResolveTheme("meu tema").theme.radius, 0);
++  {
++    base::test::TestFuture<InstallResult, std::string> future;
++    InstallTheme(R"({"name": "default"})", true, future.GetCallback());
++    EXPECT_EQ(future.Get<0>(), InstallResult::kReserved);
++  }
++  {
++    base::test::TestFuture<InstallResult, std::string> future;
++    InstallTheme("lixo", true, future.GetCallback());
++    EXPECT_EQ(future.Get<0>(), InstallResult::kInvalid);
++  }
++}
++
++}  // namespace
++}  // namespace aerographene
+--- a/chrome/browser/themes/BUILD.gn
++++ b/chrome/browser/themes/BUILD.gn
+@@ -9,6 +9,7 @@
+ source_set("themes") {
+   public = [
+     "aerographene_theme.h",
++    "aerographene_theme_repo.h",
+     "browser_theme_pack.h",
+     "browser_theme_provider_delegate.h",
+     "custom_theme_supplier.h",
+@@ -23,6 +24,7 @@
+   ]
+   sources = [
+     "aerographene_theme.cc",
++    "aerographene_theme_repo.cc",
+     "browser_theme_pack.cc",
+     "custom_theme_supplier.cc",
+     "theme_helper.cc",
+@@ -34,6 +36,7 @@
+     "theme_syncable_service.cc",
+   ]
+   deps = [
++    "//base:i18n",
+     "//chrome/app/theme:theme_resources",
+     "//chrome/browser:browser_process",
+     "//chrome/browser/infobars",
+@@ -144,6 +147,7 @@
+     testonly = true
+ 
+     sources = [
++      "aerographene_theme_repo_unittest.cc",
+       "browser_theme_pack_unittest.cc",
+       "theme_local_data_batch_uploader_unittest.cc",
+       "theme_properties_unittest.cc",
+--- a/chrome/browser/themes/theme_service.cc
++++ b/chrome/browser/themes/theme_service.cc
+@@ -45,6 +45,7 @@
+ #include "chrome/browser/search/background/ntp_custom_background_service.h"
+ #include "chrome/browser/search/background/ntp_custom_background_service_factory.h"
+ #include "chrome/browser/themes/aerographene_theme.h"
++#include "chrome/browser/themes/aerographene_theme_repo.h"
+ #include "chrome/browser/themes/browser_theme_pack.h"
+ #include "chrome/browser/themes/custom_theme_supplier.h"
+ #include "chrome/browser/themes/theme_properties.h"
+@@ -386,12 +387,20 @@
+ void ThemeService::Init() {
+   theme_helper_->DCheckCalledOnValidSequence();
+ 
+-  // aerographene: built-in theme from the profile pref (restart to apply).
++  // aerographene: theme from the profile pref, a name: built-in or a folder
++  // of the global repository (restart to apply). Built-ins cost no disk
++  // access; a repository theme costs one capped read of its theme.json.
+   // Providers built before this point are dropped if the theme changed.
+-  if (profile_->IsRegularProfile() &&
+-      aerographene::SetActiveTheme(aerographene::GetBuiltinTheme(
+-          profile_->GetPrefs()->GetString(aerographene::kThemePref)))) {
+-    ui::ColorProviderManager::Get().ResetColorProviderCache();
++  if (profile_->IsRegularProfile()) {
++    PrefService* prefs = profile_->GetPrefs();
++    const aerographene::ResolvedTheme resolved =
++        aerographene::ResolveTheme(prefs->GetString(aerographene::kThemePref));
++    if (resolved.pref_value != prefs->GetString(aerographene::kThemePref)) {
++      prefs->SetString(aerographene::kThemePref, resolved.pref_value);
++    }
++    if (aerographene::SetActiveTheme(resolved.theme)) {
++      ui::ColorProviderManager::Get().ResetColorProviderCache();
++    }
+   }
+ #if BUILDFLAG(IS_LINUX)
+   if (profile_->IsRegularProfile()) {
+--- a/chrome/browser/ui/webui/new_tab_page_third_party/new_tab_page_third_party_ui.cc
++++ b/chrome/browser/ui/webui/new_tab_page_third_party/new_tab_page_third_party_ui.cc
+@@ -92,9 +92,8 @@
+     // HTML itself (class on <html>, data attribute): no strings.js request,
+     // no loadTimeData, no chrome://theme/colors.css.
+     PrefService* prefs = profile->GetPrefs();
+-    const bool pixelized = prefs->GetString(aerographene::kThemePref) ==
+-                           aerographene::kThemePixelized;
+-    source->AddString("aeroTheme", pixelized ? "pz" : "");
++    source->AddString("aeroTheme",
++                      aerographene::UsesPixelizedStyle() ? "pz" : "");
+     source->AddString("aeroWeather",
+                       prefs->GetBoolean(aerographene::kNtpWeatherPref) ? "1"
+                                                                        : "");

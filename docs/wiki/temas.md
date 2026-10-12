@@ -25,7 +25,7 @@ o incógnito ignora as camadas 1 e 2 e fica no escuro padrão do Chromium.
 
 ## trocar o tema embutido
 
-ainda não há seletor na interface. A escolha é a pref de perfil `aerographene.theme`, com valor `"default"` (padrão) ou `"pixelized"`.
+ainda não há seletor na interface. A escolha é a pref de perfil `aerographene.theme`, que guarda o nome do tema: `"default"` (padrão), `"pixelized"` ou o nome de uma pasta do repositório de temas (seção abaixo). Nome inexistente ou inválido cai em `default`.
 
 1. feche o navegador.
 2. abra `~/.config/aerographene/Default/Preferences` (JSON numa linha só).
@@ -119,11 +119,39 @@ tokens não carregam imagens. Para pôr uma imagem no frame e na nova aba, use u
 
 com tema de extensão ativo, raio, fonte e ícones voltam ao padrão do Chromium, porque são da camada 1. Para remover o tema: `chrome://settings/appearance` → redefinir.
 
+## repositório de temas (`themes/<nome>/theme.json`)
+
+desde a v0.2 (patch `theme-repo`) o navegador lê temas de `${XDG_CONFIG_HOME:-~/.config}/aerographene/themes/<nome>/theme.json`, comum a todos os perfis/spaces. O nome da pasta é o nome do tema e o valor da pref `aerographene.theme`; o campo `name` do arquivo deve ser igual ao da pasta.
+
+```json
+{
+  "name": "Meu Tema",
+  "mode": "dark",
+  "radius": 4,
+  "radius_small": 3,
+  "font": {"family": "JetBrains Mono", "size_px": 12},
+  "icons": {"base": "default"},
+  "style": "default",
+  "tokens": {"frame": "#0A0A0A", "accent": "#6CB6FF"}
+}
+```
+
+- só `name` é obrigatório. Padrões: `mode` `"dark"`, `radius` 4, `radius_small` 3, sem `font` (fonte do sistema), `icons.base` `"default"`, `style` `"default"`, sem tokens (valem as cores padrão escuras do Chromium; defina os tokens que quiser, com os nomes da seção "tokens" acima).
+- `icons.base` aceita só `"default"` ou `"pixelized"` (pacotes compilados). `"overrides"` por ícone virá depois e é ignorado hoje.
+- `style` escolhe uma das variantes de desenho compiladas (`"default"` ou `"pixelized"`: caixa alta dos rótulos, fundo da sidebar, fonte da URL, nova aba), independente de `icons.base`.
+- `radius`/`radius_small` 0 a 32; `font.size_px` 8 a 32 (obrigatório se houver `family`); cor em `#RRGGBB` ou `#RRGGBBAA`. Valor fora disso torna o tema inválido (ele some da lista e, se estava ativo, volta a `default`).
+- nome: 1 a 64 bytes, sem `/`, `\`, controle, nem começar com `.`; espaço e acento valem. `default` e `pixelized` são reservados; conflito entre nomes ignora a caixa.
+- arquivo acima de 64 KiB é rejeitado. Aplicar tema continua exigindo reiniciar.
+
+desempenho: tema embutido não lê disco no início; um tema do repositório custa uma leitura pequena de `theme.json` em `ThemeService::Init` (já era assim com o `theme.json` de tokens). A varredura da pasta inteira só roda quando alguém lista os temas (seletor), numa tarefa de background.
+
+API para o seletor e a importação (`chrome/browser/themes/aerographene_theme_repo.h`): `ListThemes(callback)` devolve `default`, `pixelized` e os temas válidos do repositório com seus metadados; `InstallTheme(json, replace, callback)` valida e grava `themes/<nome>/theme.json` de forma atômica (`kConflict` se já existe, sem diferenciar caixa, até `replace`).
+
 ## criar um tema embutido novo
 
 desde a v0.2 o tema é dado: a struct `ThemeData` (`chrome/browser/themes/aerographene_theme.h`, em `patches/aerographene/theme-builtin.patch`) reúne nome, esquema (claro/escuro), raios (`radius`, `radius_small`), fonte (`font_family`, `font_size_px`), pacote de ícones compilado (`icons_base`: `default` ou `pixelized`), variante compilada do desenho (`style`) e os tokens de cor. `default` e `pixelized` são instâncias dela em `aerographene_theme.cc`; raio, fonte, esquema, ícones, mockups e páginas internas leem esses campos.
 
-um tema embutido novo é mais uma instância em `aerographene_theme.cc` (e o nome em `GetBuiltinTheme`); exige recompilar. Ícones e `style` só aceitam os pacotes/variantes compilados. Ler temas do disco (`~/.config/aerographene/themes/<nome>/theme.json`) para a mesma struct ainda não existe.
+um tema embutido novo é mais uma instância em `aerographene_theme.cc` (e o nome em `GetBuiltinTheme`); exige recompilar. Ícones e `style` só aceitam os pacotes/variantes compilados.
 
 leia `docs/BUILD.md` antes; a build completa leva horas.
 
@@ -160,6 +188,16 @@ theme.json FORMAT:
 {"mode": "dark", "tokens": {"<token>": "#RRGGBB" | "#RRGGBBAA", ...}}
 - "mode" optional, default "dark". MUST be "dark" (builtin themes are dark; "light" tokens are not applied).
 - Unknown keys ignored. Missing/invalid file = no change. Only listed tokens change.
+
+REPOSITORY THEMES (v0.2): ${XDG_CONFIG_HOME:-~/.config}/aerographene/themes/<name>/theme.json,
+shared by all profiles. Pref "aerographene.theme" = theme name (folder). Unknown/invalid name = "default".
+Folder name == "name" field. Name: 1-64 bytes, no / \ or control chars, not starting with ".",
+spaces/accents OK; "default" and "pixelized" reserved; clashes ignore case. File <= 64 KiB.
+{"name": "<req>", "mode": "dark"|"light" (default dark), "radius": 0-32 (4), "radius_small": 0-32 (3),
+ "font": {"family": "<str>", "size_px": 8-32} (size required with family),
+ "icons": {"base": "default"|"pixelized"}, "style": "default"|"pixelized" (compiled drawing variant),
+ "tokens": {"<token>": "#RRGGBB"|"#RRGGBBAA"}}
+Any invalid field invalidates the whole theme. Tokens below use the same names.
 
 TOKENS (all optional):
 frame, frame_inactive            window background, focused/unfocused
