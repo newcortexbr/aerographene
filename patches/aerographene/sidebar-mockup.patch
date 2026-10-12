@@ -233,7 +233,7 @@ theme-font e pixelized-type.
    gfx::Size CalculatePreferredSize(
 --- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
 +++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
-@@ -14,6 +14,8 @@
+@@ -14,12 +14,15 @@
  #include "base/i18n/rtl.h"
  #include "base/strings/utf_string_conversions.h"
  #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
@@ -242,7 +242,14 @@ theme-font e pixelized-type.
  #include "chrome/browser/ui/layout_constants.h"
  #include "chrome/browser/ui/tabs/aerographene/pinned_model_factory.h"
  #include "chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.h"
-@@ -29,6 +31,7 @@
+ #include "chrome/browser/ui/tabs/features.h"
+ #include "chrome/browser/ui/tabs/tab_style.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
++#include "chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h"
+ #include "chrome/browser/ui/views/tabs/common/aerographene_rename_pinned_dialog.h"
+ #include "chrome/browser/ui/views/tabs/common/dragged_tabs_container.h"
+ #include "chrome/browser/ui/views/tabs/common/split_tab_view.h"
+@@ -29,6 +32,7 @@
  #include "chrome/browser/ui/views/tabs/common/tab_strip_collection_controller.h"
  #include "chrome/browser/ui/views/tabs/common/tab_view.h"
  #include "chrome/grit/generated_resources.h"
@@ -250,7 +257,7 @@ theme-font e pixelized-type.
  #include "ui/base/cursor/cursor.h"
  #include "ui/base/cursor/mojom/cursor_type.mojom.h"
  #include "ui/base/l10n/l10n_util.h"
-@@ -40,6 +43,7 @@
+@@ -40,6 +44,7 @@
  #include "ui/gfx/geometry/point_f.h"
  #include "ui/gfx/geometry/rect.h"
  #include "ui/gfx/geometry/rect_f.h"
@@ -258,7 +265,7 @@ theme-font e pixelized-type.
  #include "ui/gfx/image/image.h"
  #include "ui/gfx/image/image_skia.h"
  #include "ui/menus/simple_menu_model.h"
-@@ -50,6 +54,7 @@
+@@ -50,6 +55,7 @@
  #include "ui/views/controls/scroll_view.h"
  #include "ui/views/layout/delegating_layout_manager.h"
  #include "ui/views/layout/layout_types.h"
@@ -266,7 +273,7 @@ theme-font e pixelized-type.
  #include "ui/views/layout/proposed_layout.h"
  #include "ui/views/view.h"
  #include "ui/views/view_targeter.h"
-@@ -82,10 +87,12 @@
+@@ -82,10 +88,12 @@
    return model ? model->tab_mirror() : nullptr;
  }
  
@@ -283,7 +290,7 @@ theme-font e pixelized-type.
  constexpr int kClosedPinnedDotRadius = 3;
  // Label of a placeholder spanning 2+ cells: favicon at the start, then text.
  constexpr int kClosedPinnedTextPadding = 8;
-@@ -94,14 +101,16 @@
+@@ -94,14 +102,16 @@
  constexpr int kClosedPinnedRenameCommand = 1;
  constexpr int kClosedPinnedFolderCommand = 2;
  
@@ -307,7 +314,7 @@ theme-font e pixelized-type.
  
  // Pinned entry label, or empty, for the live pinned `child`.
  std::u16string GetPinnedLabel(const views::View* child) {
-@@ -188,7 +197,7 @@
+@@ -188,7 +198,7 @@
    gfx::Size CalculatePreferredSize(
        const views::SizeBounds& available_size) const override {
      return gfx::Size(GetLayoutConstant(LayoutConstant::kVerticalTabMinWidth),
@@ -316,7 +323,7 @@ theme-font e pixelized-type.
    }
  
    void PaintButtonContents(gfx::Canvas* canvas) override {
-@@ -199,14 +208,24 @@
+@@ -199,14 +209,24 @@
      const SkColor color = color_provider->GetColor(ui::kColorIcon);
      const gfx::Rect bounds = GetLocalBounds();
  
@@ -345,7 +352,7 @@ theme-font e pixelized-type.
  
      // From 2 cells up the favicon moves to the start and the text follows.
      const bool shows_text = span_ >= 2 && !text_.empty();
-@@ -348,61 +367,53 @@
+@@ -348,61 +368,53 @@
      if (!color_provider) {
        return;
      }
@@ -450,7 +457,7 @@ theme-font e pixelized-type.
    }
  
   private:
-@@ -514,8 +525,9 @@
+@@ -514,8 +526,9 @@
                                                                          : 1.0f),
        static_cast<float>(num_children));
    const int min_height =
@@ -462,15 +469,18 @@ theme-font e pixelized-type.
        (num_children > 1 ? kTabPadding : 0);
    return gfx::Size(GetLayoutConstant(LayoutConstant::kVerticalTabMinWidth),
                     min_height);
-@@ -809,26 +821,27 @@
+@@ -809,26 +822,30 @@
  
      // When we are in collapsed state, only one cell should be shown per row.
      // During collapse animation and other cases, fit as many as possible.
 +    // aerographene: collapsed sidebar (kCollapsedWidth 56): one column of
 +    // cells as wide as the collapsed content (32), not the 40px grid cell.
 +    if (collapse_state == tabs::VerticalTabStripCollapseState::kCollapsed) {
-+      metrics.cell_width =
-+          std::min(metrics.cell_width, TabView::CollapsedWidth());
++      metrics.cell_width = std::min(
++          metrics.cell_width,
++          VerticalTabStripRegionView::kCollapsedWidth -
++              2 * GetLayoutConstant(
++                      LayoutConstant::kVerticalTabStripHorizontalPadding));
 +    }
      metrics.max_cells =
 -        tabs::IsVerticalTabsExpandOnHoverFeatureEnabled() &&
@@ -498,7 +508,7 @@ theme-font e pixelized-type.
    }
    return metrics;
  }
-@@ -858,11 +871,19 @@
+@@ -858,11 +875,19 @@
    for (size_t i = 0; i < children.size(); ++i) {
      views::View* child = children[i];
      // Folder rows span the whole row; drawers start and end on a new row.

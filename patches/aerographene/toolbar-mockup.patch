@@ -200,13 +200,14 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
    void AnimationEnded(const gfx::Animation* animation) override;
 --- a/chrome/browser/ui/views/profiles/avatar_toolbar_button_state_manager.cc
 +++ b/chrome/browser/ui/views/profiles/avatar_toolbar_button_state_manager.cc
-@@ -86,7 +86,13 @@
+@@ -86,7 +86,14 @@
  #include "ui/base/l10n/l10n_util.h"
  #include "ui/base/resource/resource_bundle.h"
  #include "ui/base/ui_base_features.h"
 +#include "ui/color/color_id.h"
 +#include "cc/paint/paint_flags.h"
 +#include "third_party/skia/include/core/SkPath.h"
++#include "third_party/skia/include/core/SkPathBuilder.h"
 +#include "ui/gfx/canvas.h"
 +#include "ui/gfx/image/canvas_image_source.h"
  #include "ui/gfx/image/image_skia.h"
@@ -214,7 +215,7 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
  
  namespace {
  
-@@ -112,6 +118,90 @@
+@@ -112,6 +119,91 @@
  constexpr base::TimeDelta kOnSigninDuration = base::Seconds(20);
  std::optional<base::TimeDelta> g_on_signin_duration_for_testing;
  
@@ -254,11 +255,12 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
 +      fill.setAntiAlias(true);
 +      fill.setColor(foreground_);
 +      canvas->DrawCircle(gfx::PointF(14 * s, 11 * s), 5 * s, fill);
-+      SkPath shoulders;
-+      shoulders.moveTo(4 * s, 28 * s);
-+      shoulders.cubicTo(5 * s, 21 * s, 9 * s, 18 * s, 14 * s, 18 * s);
-+      shoulders.cubicTo(19 * s, 18 * s, 23 * s, 21 * s, 24 * s, 28 * s);
-+      shoulders.close();
++      SkPathBuilder builder;
++      builder.moveTo(4 * s, 28 * s);
++      builder.cubicTo(5 * s, 21 * s, 9 * s, 18 * s, 14 * s, 18 * s);
++      builder.cubicTo(19 * s, 18 * s, 23 * s, 21 * s, 24 * s, 28 * s);
++      builder.close();
++      const SkPath shoulders = builder.detach();
 +      canvas->DrawPath(shoulders, fill);
 +    }
 +    canvas->Restore();
@@ -305,7 +307,7 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
  }  // namespace
  
  // static
-@@ -406,8 +496,8 @@
+@@ -406,8 +498,8 @@
      auto [image, icon_type] = GetProfileAvatarImage(
          *profile().GetOriginalProfile(), color_provider, icon_size);
      ui::ImageModel avatar_model =
@@ -316,7 +318,7 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
      return {avatar_model, icon_type};
    }
  
-@@ -2137,8 +2227,8 @@
+@@ -2137,8 +2229,8 @@
    auto [image, icon_type] =
        GetProfileAvatarImage(profile(), color_provider, icon_size);
    ui::ImageModel avatar_model =
