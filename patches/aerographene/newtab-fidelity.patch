@@ -17,7 +17,7 @@ image-rendering:pixelated. O campo de busca vira botão: o clique envia
 chrome.send("focusOmnibox"), tratado por AeroNewTabHandler com
 search::FocusOmnibox (handoff do fakebox); a lógica de busca da página
 (searchUrl, GetSearchUrl) é removida. Ctrl+K é o atalho nativo IDC_FOCUS_SEARCH.
-Compilação e runtime não verificados.
+Compilado (alvos tocados); runtime não verificado.
 
 --- a/chrome/browser/ui/webui/new_tab_page_third_party/new_tab_page_third_party_ui.cc
 +++ b/chrome/browser/ui/webui/new_tab_page_third_party/new_tab_page_third_party_ui.cc
@@ -82,7 +82,7 @@ Compilação e runtime não verificados.
 +  }
 +
 + private:
-+  void HandleFocusOmnibox(const base::Value::List&) {
++  void HandleFocusOmnibox(const base::ListValue&) {
 +    search::FocusOmnibox(/*focus=*/true, web_ui()->GetWebContents());
 +  }
 +};

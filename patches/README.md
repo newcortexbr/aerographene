@@ -346,4 +346,4 @@ Personalizar: link `chrome://settings/appearance` (canto inferior direito, 32 px
 
 Peso (NTP aberta no startup): HTML de 15,5 KB (6,4 KB de base64 da fonte e do PNG), ~9 KB comprimido; nenhuma outra requisição. Não medido no harness.
 
-Compilação e runtime não verificados. Verificado só o HTML em Chromium 1234 do cache do Playwright (renderização dos dois temas em 1440x900, pt-BR).
+Compilado no cezanne (dry-run `--fuzz=0` limpo sobre a árvore da série; `new_tab_page_third_party_ui.o` e `theme_service.o` com rc=0; grit do `chrome/browser:resources` regenerado sem erro). Runtime não verificado (foco da omnibox por clique, `$i18n{}` no HTML do `AeroNewTabUI`, pref de tema/clima, startup). Verificado também o HTML em Chromium 1234 do cache do Playwright (renderização dos dois temas em 1440x900, pt-BR).
