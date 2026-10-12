@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/newcortexbr/aerographene/commits/main"><img alt="commits" src="https://img.shields.io/github/commit-activity/t/newcortexbr/aerographene?label=commits&color=8a8f98&style=flat-square"></a>
-  <a href="https://github.com/newcortexbr/aerographene/releases/latest"><img alt="release" src="https://img.shields.io/github/v/release/newcortexbr/aerographene?color=c9cdd3&style=flat-square"></a>
+  <a href="https://github.com/newcortexbr/aerographene/commits/main"><img alt="commits" src="https://img.shields.io/github/commit-activity/t/newcortexbr/aerographene?label=commits&cacheSeconds=3600&color=8a8f98&style=flat-square"></a>
+  <a href="https://github.com/newcortexbr/aerographene/releases/latest"><img alt="release" src="https://img.shields.io/github/v/release/newcortexbr/aerographene?cacheSeconds=3600&color=c9cdd3&style=flat-square"></a>
   <img alt="Linux x86-64-v3" src="https://img.shields.io/badge/Linux-x86--64--v3-2ea043?logo=linux&logoColor=white&style=flat-square">
   <img alt="Windows 11 coming soon" src="https://img.shields.io/badge/Windows%2011-coming%20soon-d29922?logo=windows11&logoColor=white&style=flat-square">
   <img alt="AVX1-only coming soon" src="https://img.shields.io/badge/AVX1--only-coming%20soon-d29922?style=flat-square">
