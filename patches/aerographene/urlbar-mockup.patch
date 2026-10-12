@@ -18,7 +18,14 @@ troca; copia GetVirtualURL da aba). Tooltips reutilizam IDS_TOOLTIP_LOCATION_ICO
 e IDS_TAB_CXMENU_COPY_URL (sem IDs novos). Sem mudança no clique do mouse:
 OmniboxViewViews::OnMousePressed/OnMouseReleased já selecionam toda a URL e
 abrem o popup de sugestões (a command bar com ícones por tipo) com a barra
-sem foco; Ctrl+L segue por SetFocus. Pendente: fonte 12/13 px da barra e
+sem foco; Ctrl+L segue por SetFocus. (6) anel de foco (pílula) desligado nos
+temas aerographene: a barra é um retângulo com o raio do tema e o estado de
+foco é a cor da borda (menus-command-bar); o anel pílula aparecia como um
+retângulo mais um contorno arredondado, em branco no pixelized.
+(7) texto da omnibox vazia: "Pesquisar ou digitar endereço" (mockup) sempre que
+há mecanismo padrão, em vez de "Pesquise no <nome> ou digite o URL" ("Pesquise no
+No Search" com o mecanismo do ungoogled); texto fixo pt-BR em
+omnibox_placeholder_util.cc, como os rótulos de tipo da command bar. Pendente: fonte 12/13 px da barra e
 ícone de ajustes no estilo do tema (kTuneIcon usa o traço upstream).
 Depende de: aerographene/omnibox-centered.patch, theme-radius, theme-icons-*.
 
@@ -52,7 +59,21 @@ Depende de: aerographene/omnibox-centered.patch, theme-radius, theme-icons-*.
  // Capsule dimensions and padding for the elevated page action toolbar.
  constexpr int kPageActionCapsuleEdgePadding = 2;
  constexpr int kPageActionCapsuleVerticalPadding = 2;
-@@ -487,6 +494,24 @@
+@@ -231,6 +238,13 @@
+             return false;
+           }
+ 
++          // aerographene: the bar is a rounded rect with a 1px theme line and
++          // the ring is a pill; the focused state is the border color instead
++          // (RefreshBackground).
++          if (views::LayoutProvider::GetAerographeneControlRadius() >= 0) {
++            return false;
++          }
++
+           // Show focus ring when the Omnibox is visibly focused and the popup
+           // is closed.
+           return v->GetOmniboxController()->edit_model()->is_caret_visible() &&
+@@ -487,6 +501,24 @@
    clear_all_button_ = AddChildView(std::move(clear_all_button));
    RefreshClearAllButtonIcon();
  
@@ -77,7 +98,7 @@ Depende de: aerographene/omnibox-centered.patch, theme-radius, theme-icons-*.
    auto ai_mode_hint_label = std::make_unique<views::Label>(
        std::u16string(), CONTEXT_OMNIBOX_PRIMARY, views::style::STYLE_PRIMARY);
    ai_mode_hint_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-@@ -678,7 +703,9 @@
+@@ -678,7 +710,9 @@
  }
  
  gfx::Size LocationBarView::GetMinimumSize() const {
@@ -88,7 +109,7 @@ Depende de: aerographene/omnibox-centered.patch, theme-radius, theme-icons-*.
    if (!IsInitialized()) {
      return gfx::Size(0, height);
    }
-@@ -705,7 +732,9 @@
+@@ -705,7 +739,9 @@
  
  gfx::Size LocationBarView::CalculatePreferredSize(
      const views::SizeBounds& available_size) const {
@@ -99,7 +120,7 @@ Depende de: aerographene/omnibox-centered.patch, theme-radius, theme-icons-*.
    if (!IsInitialized()) {
      return gfx::Size(0, height);
    }
-@@ -834,16 +863,19 @@
+@@ -834,16 +870,19 @@
      selected_keyword_view_->SetKeyword(keyword);
    } else if (location_icon_view_->GetShowText() &&
               !ShouldChipOverrideLocationIcon()) {
@@ -120,7 +141,7 @@ Depende de: aerographene/omnibox-centered.patch, theme-radius, theme-icons-*.
      location_icon_view_->SetVisible(false);
    }
  
-@@ -856,6 +888,19 @@
+@@ -856,6 +895,19 @@
      }
    };
  
@@ -140,7 +161,7 @@ Depende de: aerographene/omnibox-centered.patch, theme-radius, theme-icons-*.
    if (features::IsPageActionsElevatedToolbarEnabled()) {
      if (page_action_container_ && page_action_container_->GetVisible()) {
        const bool is_capsule_active = page_action_container_->IsCapsuleActive();
-@@ -931,6 +976,18 @@
+@@ -931,6 +983,18 @@
    // the rounded ends.
    location_bounds.Intersect(GetLocalBoundsWithoutEndcaps());
  
@@ -159,7 +180,7 @@ Depende de: aerographene/omnibox-centered.patch, theme-radius, theme-icons-*.
    if (!ime_inline_autocomplete_view_->GetVisible() &&
        !omnibox_additional_text_view_->GetVisible()) {
      // Short circuit the below logic when the additional views aren't visible.
-@@ -1011,6 +1068,7 @@
+@@ -1011,6 +1075,7 @@
  
    RefreshBackground();
    RefreshClearAllButtonIcon();
@@ -167,7 +188,7 @@ Depende de: aerographene/omnibox-centered.patch, theme-radius, theme-icons-*.
  }
  
  void LocationBarView::ChildPreferredSizeChanged(views::View* child) {
-@@ -1338,7 +1396,7 @@
+@@ -1338,7 +1403,7 @@
  }
  
  gfx::Rect LocationBarView::GetLocalBoundsWithoutEndcaps() const {
@@ -176,7 +197,7 @@ Depende de: aerographene/omnibox-centered.patch, theme-radius, theme-icons-*.
    gfx::Rect bounds_without_endcaps(GetLocalBounds());
    bounds_without_endcaps.Inset(gfx::Insets::VH(0, border_radius));
    return bounds_without_endcaps;
-@@ -1373,7 +1431,10 @@
+@@ -1373,7 +1438,10 @@
      background_color_ = gfx::Tween::ColorValueBetween(opacity, normal, hovered);
    }
  
@@ -188,7 +209,7 @@ Depende de: aerographene/omnibox-centered.patch, theme-radius, theme-icons-*.
    if (high_contrast) {
      // High contrast schemes get a border stroke even on a rounded omnibox.
      border_color =
-@@ -1525,6 +1586,37 @@
+@@ -1525,6 +1593,37 @@
        GetLayoutInsets(LOCATION_BAR_ICON_INTERIOR_PADDING)));
  }
  
@@ -278,3 +299,34 @@ Depende de: aerographene/omnibox-centered.patch, theme-radius, theme-icons-*.
    const bool declared_changed = (declared_visible_ != visible);
    declared_visible_ = visible;
    SetEnabled(visible);
+--- a/chrome/browser/ui/views/omnibox/omnibox_placeholder_util.cc
++++ b/chrome/browser/ui/views/omnibox/omnibox_placeholder_util.cc
+@@ -75,21 +75,13 @@
+   } else if (ShouldInstallContextualTasksPlaceholderText(location_bar)) {
+     // For Contextual Tasks page, use the page title as placeholder text.
+     out_placeholder_text = location_bar->GetWebContents()->GetTitle();
+-  } else if (const auto* default_provider = controller->client()
+-                                                ->GetTemplateURLService()
+-                                                ->GetDefaultSearchProvider()) {
+-    const bool aim_popup_enabled =
+-        omnibox::IsAimPopupEnabled(location_bar->GetProfile());
+-    if (aim_popup_enabled &&
+-        search::DefaultSearchProviderIsGoogle(
+-            controller->client()->GetTemplateURLService())) {
+-      out_placeholder_text = l10n_util::GetStringFUTF16(
+-          IDS_WEBUI_OMNIBOX_PLACEHOLDER_TEXT, default_provider->short_name());
+-    } else {
+-      // Otherwise, if a DSE is set, use the DSE placeholder text.
+-      out_placeholder_text = l10n_util::GetStringFUTF16(
+-          IDS_OMNIBOX_PLACEHOLDER_TEXT, default_provider->short_name());
+-    }
++  } else if (controller->client()
++                 ->GetTemplateURLService()
++                 ->GetDefaultSearchProvider()) {
++    // aerographene: the mockup text, whatever the search engine ("No Search"
++    // of ungoogled included, which read "Pesquise no No Search ou digite o
++    // URL"). Fixed pt-BR text, like the result type labels.
++    out_placeholder_text = u"Pesquisar ou digitar endere\u00e7o";
+   }
+ }
+ 

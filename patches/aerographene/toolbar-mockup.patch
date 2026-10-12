@@ -16,17 +16,26 @@ extensões fica no rodapé da sidebar (sidebar-footer) e no menu. O escudo do
 uBlock não foi movido ao rodapé: o rodapé usa chrome::ExecuteCommand e as ações
 de extensão exigem ExtensionsToolbarDesktop como âncora do popup.
 (3) Avatar: AvatarToolbarButton usa ícone de 28 px com insets de 1 px (botão
-30x30) e o recorte do avatar vira quadrado com o raio do tema
+30x30); a imagem é um quadrado com o raio do tema
 (LayoutProvider::GetAerographeneControlRadius; 4 default, 0 pixelized; 4 se o
-tema ainda não definiu) em vez de círculo, nos dois StateProvider que cortavam
-SHAPE_CIRCLE. Sem contorno 1 px --line (não feito).
+tema ainda não definiu) e contorno de 1 px na cor line (kColorToolbarSeparator),
+em vez de círculo, nos dois StateProvider que cortavam SHAPE_CIRCLE. O avatar
+sem foto (placeholder) é o ícone vetorial upstream "account circle", um círculo
+em si: o recorte não o muda; ele é desenhado como no mockup (cabeça e ombros em
+kColorSysOnSurface sobre kColorSysSurface) por AerographeneAvatarSource.
 (4) Página: kHeliumRoundedFrame passa a false por padrão; MultiContentsView sem
 moldura/margem usa os separadores de 1 px (já existentes) e
 kColorToolbarContentAreaSeparator entra no token "separator" (aerographene_theme_tokens).
 (5) Barra de favoritos: IsAppsShortcutEnabled sempre false (sem página de apps)
 e a barra solta da NTP (aparecia com a pasta de pinned, que é um favorito) só
-aparece com kShowBookmarkBar explícito (BookmarkBarController).
-Causa provável da faixa com ícone de grade; não confirmada em runtime.
+aparece com kShowBookmarkBar (BookmarkBarController). A faixa de ~34 px com um
+ícone de grade sob a toolbar, vista em runtime mesmo com isso, é a barra de
+favoritos anexa: nesta árvore kShowBookmarkBar e kShowTabGroupsInBookmarkBar
+nascem true (components/bookmarks/browser/bookmark_utils.cc) e o
+BookmarkBarController mostra a barra por esse pref, sem exigir favoritos; o
+ícone é provavelmente o botão de grupos de abas salvos (não confirmado em
+runtime). Agora os dois prefs nascem false (a barra continua no menu "Mostrar
+barra de favoritos"; perfis que já a ligaram a mantêm).
 (6) Fonte do texto da URL: CONTEXT_OMNIBOX_PRIMARY pede 13 px (default) / 12 px
 (pixelized) em vez de 14.
 
@@ -191,55 +200,132 @@ Causa provável da faixa com ícone de grade; não confirmada em runtime.
    void AnimationEnded(const gfx::Animation* animation) override;
 --- a/chrome/browser/ui/views/profiles/avatar_toolbar_button_state_manager.cc
 +++ b/chrome/browser/ui/views/profiles/avatar_toolbar_button_state_manager.cc
-@@ -87,6 +87,8 @@
+@@ -86,7 +86,14 @@
+ #include "ui/base/l10n/l10n_util.h"
  #include "ui/base/resource/resource_bundle.h"
  #include "ui/base/ui_base_features.h"
++#include "ui/color/color_id.h"
++#include "cc/paint/paint_flags.h"
++#include "third_party/skia/include/core/SkPath.h"
++#include "third_party/skia/include/core/SkPathBuilder.h"
++#include "ui/gfx/canvas.h"
++#include "ui/gfx/image/canvas_image_source.h"
  #include "ui/gfx/image/image_skia.h"
-+#include "ui/gfx/image/image_skia_operations.h"
 +#include "ui/views/layout/layout_provider.h"
  
  namespace {
  
-@@ -112,6 +114,22 @@
+@@ -112,6 +119,91 @@
  constexpr base::TimeDelta kOnSigninDuration = base::Seconds(20);
  std::optional<base::TimeDelta> g_on_signin_duration_for_testing;
  
 +// aerographene: the avatar is a square with the theme corner radius (4px
-+// default, 0 pixelized), never a circle (mockups: .av 28x28, radius var(--r)).
-+gfx::Image CropAerographeneAvatar(const gfx::Image& image, int size) {
-+  gfx::Image square = profiles::GetSizedAvatarIcon(image, size, size,
-+                                                    profiles::SHAPE_SQUARE);
++// default, 0 pixelized) and a 1px line, never a circle (mockups: .av 28x28,
++// radius var(--r), inset 1px var(--line)). The placeholder of a profile with no
++// picture is the upstream "account circle" vector icon, a circle by itself, so
++// cropping it does not help: it is drawn here as in the mockup (person
++// silhouette: head circle and shoulders on the theme surface). Pictures are
++// scaled to the square and clipped to the rounded rect.
++class AerographeneAvatarSource : public gfx::CanvasImageSource {
++ public:
++  AerographeneAvatarSource(int size,
++                           gfx::ImageSkia picture,
++                           int radius,
++                           SkColor background,
++                           SkColor foreground,
++                           SkColor line)
++      : gfx::CanvasImageSource(gfx::Size(size, size)),
++        size_(size),
++        picture_(std::move(picture)),
++        radius_(radius),
++        background_(background),
++        foreground_(foreground),
++        line_(line) {}
++
++  void Draw(gfx::Canvas* canvas) override {
++    const float s = size_ / 28.0f;  // The mockup draws on a 28x28 grid.
++    canvas->Save();
++    canvas->ClipPath(
++        SkPath::RRect(SkRect::MakeWH(size_, size_), radius_, radius_), true);
++    if (!picture_.isNull()) {
++      canvas->DrawImageInt(picture_, 0, 0);
++    } else {
++      canvas->FillRect(gfx::Rect(size_, size_), background_);
++      cc::PaintFlags fill;
++      fill.setAntiAlias(true);
++      fill.setColor(foreground_);
++      canvas->DrawCircle(gfx::PointF(14 * s, 11 * s), 5 * s, fill);
++      SkPathBuilder builder;
++      builder.moveTo(4 * s, 28 * s);
++      builder.cubicTo(5 * s, 21 * s, 9 * s, 18 * s, 14 * s, 18 * s);
++      builder.cubicTo(19 * s, 18 * s, 23 * s, 21 * s, 24 * s, 28 * s);
++      builder.close();
++      const SkPath shoulders = builder.detach();
++      canvas->DrawPath(shoulders, fill);
++    }
++    canvas->Restore();
++    cc::PaintFlags stroke;
++    stroke.setAntiAlias(true);
++    stroke.setStyle(cc::PaintFlags::kStroke_Style);
++    stroke.setStrokeWidth(1);
++    stroke.setColor(line_);
++    canvas->DrawRoundRect(gfx::RectF(0.5f, 0.5f, size_ - 1, size_ - 1),
++                          radius_ > 0 ? radius_ - 0.5f : 0, stroke);
++  }
++
++ private:
++  const int size_;
++  const gfx::ImageSkia picture_;
++  const int radius_;
++  const SkColor background_;
++  const SkColor foreground_;
++  const SkColor line_;
++};
++
++gfx::Image CropAerographeneAvatar(const gfx::Image& image,
++                                  AvatarIconType icon_type,
++                                  int size,
++                                  const ui::ColorProvider& color_provider) {
 +  int radius = views::LayoutProvider::GetAerographeneControlRadius();
 +  if (radius < 0) {
 +    radius = 4;
 +  }
-+  if (radius == 0) {
-+    return square;
++  gfx::ImageSkia picture;
++  if (icon_type != AvatarIconType::kPlaceholder) {
++    picture = profiles::GetSizedAvatarIcon(image, size, size,
++                                           profiles::SHAPE_SQUARE)
++                  .AsImageSkia();
 +  }
-+  return gfx::Image(gfx::ImageSkiaOperations::CreateImageWithRoundRectClip(
-+      radius, square.AsImageSkia()));
++  return gfx::Image(gfx::CanvasImageSource::MakeImageSkia<
++                    AerographeneAvatarSource>(
++      size, std::move(picture), radius,
++      color_provider.GetColor(ui::kColorSysSurface),
++      color_provider.GetColor(ui::kColorSysOnSurface),
++      color_provider.GetColor(kColorToolbarSeparator)));
 +}
 +
  }  // namespace
  
  // static
-@@ -406,8 +424,7 @@
+@@ -406,8 +498,8 @@
      auto [image, icon_type] = GetProfileAvatarImage(
          *profile().GetOriginalProfile(), color_provider, icon_size);
      ui::ImageModel avatar_model =
 -        ui::ImageModel::FromImage(profiles::GetSizedAvatarIcon(
 -            image, icon_size, icon_size, profiles::SHAPE_CIRCLE));
-+        ui::ImageModel::FromImage(CropAerographeneAvatar(image, icon_size));
++        ui::ImageModel::FromImage(
++            CropAerographeneAvatar(image, icon_type, icon_size, color_provider));
      return {avatar_model, icon_type};
    }
  
-@@ -2137,8 +2154,7 @@
+@@ -2137,8 +2229,8 @@
    auto [image, icon_type] =
        GetProfileAvatarImage(profile(), color_provider, icon_size);
    ui::ImageModel avatar_model =
 -      ui::ImageModel::FromImage(profiles::GetSizedAvatarIcon(
 -          image, icon_size, icon_size, profiles::SHAPE_CIRCLE));
-+      ui::ImageModel::FromImage(CropAerographeneAvatar(image, icon_size));
++      ui::ImageModel::FromImage(
++          CropAerographeneAvatar(image, icon_type, icon_size, color_provider));
  
    if (ShouldShowGradientAvatarRing()) {
      gfx::ImageSkia avatar_with_ai_ring =
@@ -283,3 +369,30 @@ Causa provável da faixa com ícone de grade; não confirmada em runtime.
    bool AcceleratorPressed(const ui::Accelerator& acc) override;
    void ChildPreferredSizeChanged(views::View* child) override;
    void ChildVisibilityChanged(View* child) override;
+--- a/components/bookmarks/browser/bookmark_utils.cc
++++ b/components/bookmarks/browser/bookmark_utils.cc
+@@ -450,8 +450,12 @@
+ }
+ 
+ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
++  // aerographene: no bookmark bar by default (it was a 34px strip under the
++  // toolbar holding only its tab groups / apps button). Pinned and favorites
++  // are one element in the sidebar; the bar stays available through the
++  // "Show bookmark bar" menu item.
+   registry->RegisterBooleanPref(
+-      prefs::kShowBookmarkBar, true,
++      prefs::kShowBookmarkBar, false,
+       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+   // `BookmarkBarVisibilityState::kOnlyShowOnNtp` is equivalent to
+   // `kShowBookmarkBar` set to false.
+@@ -463,8 +467,9 @@
+   registry->RegisterBooleanPref(
+       prefs::kShowAppsShortcutInBookmarkBar, false,
+       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
++  // aerographene: saved tab groups need sync, which is not available.
+   registry->RegisterBooleanPref(
+-      prefs::kShowTabGroupsInBookmarkBar, true,
++      prefs::kShowTabGroupsInBookmarkBar, false,
+       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+   registry->RegisterBooleanPref(
+       prefs::kShowManagedBookmarksInBookmarkBar, true,

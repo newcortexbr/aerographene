@@ -3,9 +3,13 @@ aerographene: fonte do tema pixelized (JetBrains Mono 12px).
 Origem: aerographene (original). Licença: GPL-3.0.
 Depende de: aerographene/theme-radius.patch.
 Propósito: só no pixelized, uma vez por processo, em ThemeService::Init:
-gfx::FontList::SetDefaultFontDescription("JetBrains Mono, 12px") +
-ResourceBundle::ReloadFonts(); se a família não existir no fontconfig, usa
-"Monospace, 12px". O default não carrega fonte e mantém a fonte do sistema.
+ResourceBundle::ReloadFonts() e depois
+gfx::FontList::SetDefaultFontDescription("JetBrains Mono, 12px"). A ordem
+importa: ReloadFonts chama InitDefaultFontList, que zera a descrição (fonte do
+sistema) e limpa o cache; antes a descrição era definida antes e nunca valia
+(causa do pixelized "só parcial" em runtime). Se a família não existir no
+fontconfig, usa "Monospace, 12px". O default não carrega fonte e mantém a
+fonte do sistema.
 
 
 --- a/chrome/browser/themes/theme_service.cc
@@ -34,7 +38,7 @@ ResourceBundle::ReloadFonts(); se a família não existir no fontconfig, usa
  #include "ui/native_theme/native_theme.h"
  
  #if BUILDFLAG(ENABLE_EXTENSIONS)
-@@ -357,6 +361,26 @@
+@@ -357,6 +361,29 @@
  
  ThemeService::~ThemeService() = default;
  
@@ -50,9 +54,12 @@ ResourceBundle::ReloadFonts(); se a família não existir no fontconfig, usa
 +  constexpr int kSizePx = 12;
 +  const bool installed = base::EqualsCaseInsensitiveASCII(
 +      gfx::Font(kFamily, kSizePx).GetActualFontName(), kFamily);
++  // ReloadFonts() calls InitDefaultFontList(), which resets the default font
++  // description to empty (system font) and clears the font cache, so the
++  // description has to be set after it; the cache refills from it.
++  ui::ResourceBundle::GetSharedInstance().ReloadFonts();
 +  gfx::FontList::SetDefaultFontDescription(base::StringPrintf(
 +      "%s, %dpx", installed ? kFamily : "Monospace", kSizePx));
-+  ui::ResourceBundle::GetSharedInstance().ReloadFonts();
 +}
 +
 +}  // namespace
@@ -61,7 +68,7 @@ ResourceBundle::ReloadFonts(); se a família não existir no fontconfig, usa
  void ThemeService::Init() {
    theme_helper_->DCheckCalledOnValidSequence();
  
-@@ -375,6 +399,12 @@
+@@ -375,6 +402,12 @@
                             aerographene::BuiltinTheme::kPixelized;
      views::LayoutProvider::SetAerographeneCornerRadii(pixelized ? 0 : 4,
                                                        pixelized ? 2 : 3);
@@ -74,4 +81,3 @@ ResourceBundle::ReloadFonts(); se a família não existir no fontconfig, usa
    }
  #endif
  
-

@@ -53,6 +53,18 @@ class Unit(unittest.TestCase):
         s = self.t("Chromium is a Chrome")
         self.assertEqual(self.t(s), s)
 
+    def test_ptbr_tab(self):
+        f = lambda s: bs.ptbr_tab_terms(s)[0]  # noqa: E731
+        self.assertEqual(f("<translation id=\"1\">Nova guia, Fechar outras guias, a guia</translation>"),
+                         "<translation id=\"1\">Nova aba, Fechar outras abas, a aba</translation>")
+        self.assertEqual(f("&amp;Fechar guia / GUIAS / Guias recentes"), "&amp;Fechar aba / ABAS / Abas recentes")
+        # placeholders e atributos não são tocados
+        self.assertEqual(f('<ph name="GUIA" /> guias'), '<ph name="GUIA" /> abas')
+        # "guia" no sentido de manual (masculino) fica
+        for s in ["Guia de privacidade", "o guia de configuração", "Um guia das suas escolhas",
+                  "do Guia de privacidade"]:
+            self.assertEqual(f(s), s, s)
+
     def test_helium(self):
         self.assertEqual(self.t("Meet Helium"), "Meet aerographene")
         self.assertEqual(self.t("a Helium window"), "an aerographene window")
