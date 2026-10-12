@@ -332,6 +332,10 @@ Rótulos de linha em CAIXA ALTA no pixelized (`.row{text-transform:uppercase}`):
 
 Linha do topbar: a largura do `AerographeneSpaceRow` na linha acompanha o nome (até 160 px; `GetNameWidth`), com elipse só acima disso (também na sidebar); pinned abertos ganham contorno de 1 px na cor line e globo (`kGlobeIcon`) sem favicon, além do marcador accent 6x6 que já existia. Depende de `topbar-mockup` e `pixelized-type`. Menus (mesmo defeito de runtime): `menus-command-bar` agora aplica 247–320 px ao menu inteiro (descontando padding e contorno do contêiner, que antes somavam ~11 px) e elide o rótulo do item com reticências em vez de cortar. Validação: ver PR.
 
+### `aerographene/topbar-frame-height.patch` (GPL-3.0, correção de runtime do pacote d044f83)
+
+Faixa das abas branca/com ghosting no modo topbar. Causa: `BrowserView::GetFrameElementInfo` (`browser_view.cc`) informava só a altura preferida da `TabStrip`; `OpaqueBrowserFrameView::GetTopAreaHeight` (e o caminho dinâmico do Helium) usam isso como altura da área que `FrameBackground::PaintMaximized` preenche com a cor do frame, e a linha de 40 px do `topbar-mockup` fica numa borda da `HorizontalTabStripRegionViewOld`, fora dessa conta. A área pintada acabava 40 px antes do fim da faixa. Correção: soma `GetInsets().top()` da região à altura informada. A aba ativa e a toolbar não mudam (são views próprias); o arrasto da área vazia segue por `IsPositionInWindowCaption`. Depende de `topbar-mockup`.
+
 ### `aerographene/newtab-fidelity.patch` (GPL-3.0; fonte 7-Segment SIL OFL 1.1, fidelidade de 11/10/2026)
 
 Nova aba como R-r01a nos dois temas, em cima de `newtab-home.patch` (que o patch reescreve; depende dele e de `theme-builtin`). Toca `aero_newtab.html`, `new_tab_page_third_party_ui.cc`, `aerographene_theme.h` e `theme_service.cc`; nenhum `.gn`, `.grd` ou arquivo novo no Chromium (o recurso `IDR_AERO_NEWTAB_HTML` já existe).

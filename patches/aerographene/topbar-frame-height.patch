@@ -1,0 +1,28 @@
+aerographene: o frame pinta o fundo sob a linha do topbar (correção de runtime do pacote d044f83).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/topbar-mockup.patch.
+Propósito: BrowserView::GetFrameElementInfo devolvia a altura preferida só da
+TabStrip como tabstrip_preferred_height; OpaqueBrowserFrameView::GetTopAreaHeight
+(e o caminho dinâmico do Helium) usam esse valor para a altura da área superior
+que FrameBackground preenche com a cor do frame. Com a linha do topbar numa
+borda de 40 px na HorizontalTabStripRegionViewOld, a faixa das abas descia 40 px
+além da área pintada e ficava branca/com ghosting. Soma o inset superior da
+região (a borda vazia que reserva a linha) à altura informada ao frame.
+
+--- a/chrome/browser/ui/views/frame/browser_view.cc
++++ b/chrome/browser/ui/views/frame/browser_view.cc
+@@ -1302,8 +1302,11 @@
+               horizontal_tab_strip_region_view_ &&
+               horizontal_tab_strip_region_view_->GetTabStripView()
+           ? horizontal_tab_strip_region_view_->GetTabStripView()
+-                ->GetPreferredSize()
+-                .height()
++                    ->GetPreferredSize()
++                    .height() +
++                // aerographene: the topbar row sits in a top border of the
++                // region, above the tabs; the frame must paint under it too.
++                horizontal_tab_strip_region_view_->GetInsets().top()
+           : 0;
+   if (toolbar_ && ShouldDrawVerticalTabStrip()) {
+     info.toolbar_minimum_height = toolbar_->GetMinimumSize().height();
