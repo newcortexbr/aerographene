@@ -1,0 +1,1021 @@
+aerographene: importar tema .aerotheme em chrome://settings/appearance (v0.2, fatia 4).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/theme-repo.patch (InstallTheme, ParseThemeJson,
+kMaxThemeFileBytes), aerographene/settings-theme-picker.patch (seletor,
+modal de reinício, mensagens getAerographeneThemes/setAerographeneTheme).
+Propósito: instalar um tema empacotado. aerographene_theme_archive.{h,cc}
+(novos, source_set "themes", dep //third_party/zlib/google:zip):
+ReadThemeArchive(path, &json) lê o .aerotheme (arquivo regular, O_NONBLOCK,
+<= 68 KiB) com zip::ZipReader::OpenFromString e exige exatamente uma
+entrada "theme.json" na raiz: rejeita entradas extras, pastas, caminhos,
+nomes inseguros, symlinks e criptografia; extrai no máximo 64 KiB (zip bomb
+para no limite; o tamanho declarado não é confiado). ImportThemeArchive(
+path, replace, cb) lê no thread pool (MayBlock) e chama InstallTheme;
+resultado kInstalled|kBadArchive|kInvalid|kReserved|kConflict|kIoError, com
+nome e JSON extraído; InstallThemeJson(json, replace, cb) reinstala esse JSON
+no "substituir" sem reler o arquivo (sem TOCTOU). Reutilizadas pela fatia 5
+(--import-theme=<arquivo>).
+AppearanceHandler: importAerographeneTheme(callback_id) abre
+SelectFileDialog (filtro .aerotheme) e resolve {result, name}; após
+"conflict", replaceAerographeneTheme(callback_id) instala com replace o JSON
+guardado no handler (a página nunca envia caminho).
+Página: botão "Import theme..." sob o seletor; erro em linha; conflito
+(sem diferenciar caixa) abre cr-dialog substituir/cancelar; sucesso
+atualiza a lista e abre cr-dialog "usar tema", que grava a pref e reusa o
+modal de reinício da fatia 3. Strings IDS_SETTINGS_AEROGRAPHENE_THEME_
+IMPORT* em settings_strings.grdp, só em inglês. Inclui
+aerographene_theme_archive_unittest.cc (unit_tests de themes/BUILD.gn).
+
+diff --git a/chrome/app/settings_strings.grdp b/chrome/app/settings_strings.grdp
+--- a/chrome/app/settings_strings.grdp
++++ b/chrome/app/settings_strings.grdp
+@@ -307,6 +307,42 @@
+     <message name="IDS_SETTINGS_AEROGRAPHENE_RESET_EXTENSION_THEME" desc="Button next to the extension theme warning that removes the extension theme and goes back to the default Chromium theme.">
+       Reset to default
+     </message>
++    <message name="IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT" desc="Button, under the browser theme dropdown in the Appearance settings, that opens a file picker to import a theme packaged as an .aerotheme file.">
++      Import theme...
++    </message>
++    <message name="IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_CONFLICT_TITLE" desc="Title of the dialog shown when an imported theme has the same name as a theme that is already installed.">
++      Replace theme?
++    </message>
++    <message name="IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_CONFLICT_BODY" desc="Body of the dialog shown when an imported theme has the same name as an installed theme (names are compared without case). The user chooses to replace the installed theme or cancel.">
++      A theme named "<ph name="THEME_NAME">$1<ex>Nebula</ex></ph>" is already installed. Replace it with the imported theme?
++    </message>
++    <message name="IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_REPLACE" desc="Button of the name conflict dialog that replaces the installed theme with the imported one.">
++      Replace
++    </message>
++    <message name="IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_DONE_TITLE" desc="Title of the dialog shown after a theme file was imported successfully.">
++      Theme imported
++    </message>
++    <message name="IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_DONE_BODY" desc="Body of the dialog shown after a theme was imported: asks whether to use it as the browser theme now.">
++      "<ph name="THEME_NAME">$1<ex>Nebula</ex></ph>" is installed. Use it as the browser theme?
++    </message>
++    <message name="IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_APPLY" desc="Button of the theme imported dialog that selects the imported theme as the browser theme.">
++      Use theme
++    </message>
++    <message name="IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_NOT_NOW" desc="Button of the theme imported dialog that keeps the current browser theme.">
++      Not now
++    </message>
++    <message name="IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_ERROR_ARCHIVE" desc="Error shown in the Appearance settings when the chosen file is not a valid theme package: it must be a zip with only a theme.json file inside.">
++      This file is not a valid .aerotheme package (a zip with only theme.json).
++    </message>
++    <message name="IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_ERROR_INVALID" desc="Error shown in the Appearance settings when the theme.json inside the imported file has invalid content.">
++      The theme in this file is not valid.
++    </message>
++    <message name="IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_ERROR_RESERVED" desc="Error shown in the Appearance settings when the imported theme uses the name of a built-in theme.">
++      The names "default" and "pixelized" belong to the built-in themes.
++    </message>
++    <message name="IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_ERROR_IO" desc="Error shown in the Appearance settings when the imported theme could not be written to disk.">
++      The theme could not be saved.
++    </message>
+     <message name="IDS_SETTINGS_TAB_STRIP_RIGHT_ALIGN" desc="Label for the toggle that displays vertical tabs on the right side of the browser window.">
+       Show vertical tabs on right side
+     </message>
+diff --git a/chrome/browser/resources/settings/appearance_page/appearance_browser_proxy.ts b/chrome/browser/resources/settings/appearance_page/appearance_browser_proxy.ts
+--- a/chrome/browser/resources/settings/appearance_page/appearance_browser_proxy.ts
++++ b/chrome/browser/resources/settings/appearance_page/appearance_browser_proxy.ts
+@@ -19,9 +19,19 @@ export interface AerographeneThemes {
+   active: string;
+ }
+ 
++export type AerographeneImportResultType = 'installed'|'conflict'|'invalid'|
++    'reserved'|'badArchive'|'ioError'|'canceled';
++
++export interface AerographeneImportResult {
++  result: AerographeneImportResultType;
++  name: string;
++}
++
+ export interface AppearanceBrowserProxy {
+   getAerographeneThemes(): Promise<AerographeneThemes>;
+   setAerographeneTheme(name: string): Promise<boolean>;
++  importAerographeneTheme(): Promise<AerographeneImportResult>;
++  replaceAerographeneTheme(): Promise<AerographeneImportResult>;
+   getDefaultZoom(): Promise<number>;
+   getThemeInfo(themeId: string): Promise<chrome.management.ExtensionInfo>;
+ 
+@@ -55,6 +65,15 @@ export class AppearanceBrowserProxyImpl implements AppearanceBrowserProxy {
+     return sendWithPromise<boolean>('setAerographeneTheme', name);
+   }
+ 
++  importAerographeneTheme() {
++    return sendWithPromise<AerographeneImportResult>('importAerographeneTheme');
++  }
++
++  replaceAerographeneTheme() {
++    return sendWithPromise<AerographeneImportResult>(
++        'replaceAerographeneTheme');
++  }
++
+   getDefaultZoom(): Promise<number> {
+     return chrome.settingsPrivate.getDefaultZoom();
+   }
+diff --git a/chrome/browser/resources/settings/appearance_page/appearance_page.html.ts b/chrome/browser/resources/settings/appearance_page/appearance_page.html.ts
+--- a/chrome/browser/resources/settings/appearance_page/appearance_page.html.ts
++++ b/chrome/browser/resources/settings/appearance_page/appearance_page.html.ts
+@@ -65,6 +65,17 @@ export function getHtml(this: SettingsAppearancePageElement) {
+         `)}
+       </select>
+     </div>
++    <div class="cr-row continuation" id="aerographeneThemeImportRow">
++      <div class="flex cr-padded-text secondary"
++          id="aerographeneThemeImportError">
++        ${this.aerographeneImportError_}
++      </div>
++      <cr-button id="aerographeneThemeImport"
++          ?disabled="${this.aerographeneImportBusy_}"
++          @click="${this.onAerographeneImportClick_}">
++        $i18n{aerographeneThemeImport}
++      </cr-button>
++    </div>
+     ${this.showAerographeneExtensionWarning_() ? html`
+       <div class="cr-row continuation" id="aerographeneExtensionThemeWarning">
+         <div class="flex cr-padded-text secondary">
+@@ -328,6 +339,48 @@ ${this.showAerographeneRestartDialog_ ? html`
+     </div>
+   </cr-dialog>
+ ` : ''}
++${this.aerographeneConflictName_ ? html`
++  <cr-dialog id="aerographeneImportConflictDialog" show-on-attach
++      close-text="$i18n{close}"
++      @close="${this.onAerographeneConflictDialogClose_}">
++    <div slot="title">$i18n{aerographeneThemeImportConflictTitle}</div>
++    <div slot="body">
++      ${this.i18n('aerographeneThemeImportConflictBody',
++                  this.aerographeneConflictName_)}
++    </div>
++    <div slot="button-container">
++      <cr-button id="aerographeneImportConflictCancel" class="cancel-button"
++          @click="${this.onAerographeneConflictCancelClick_}">
++        $i18n{cancel}
++      </cr-button>
++      <cr-button id="aerographeneImportConflictReplace" class="action-button"
++          @click="${this.onAerographeneConflictReplaceClick_}">
++        $i18n{aerographeneThemeImportReplace}
++      </cr-button>
++    </div>
++  </cr-dialog>
++` : ''}
++${this.aerographeneImportedName_ ? html`
++  <cr-dialog id="aerographeneImportDoneDialog" show-on-attach
++      close-text="$i18n{close}"
++      @close="${this.onAerographeneImportDoneDialogClose_}">
++    <div slot="title">$i18n{aerographeneThemeImportDoneTitle}</div>
++    <div slot="body">
++      ${this.i18n('aerographeneThemeImportDoneBody',
++                  this.aerographeneImportedName_)}
++    </div>
++    <div slot="button-container">
++      <cr-button id="aerographeneImportNotNow" class="cancel-button"
++          @click="${this.onAerographeneImportNotNowClick_}">
++        $i18n{aerographeneThemeImportNotNow}
++      </cr-button>
++      <cr-button id="aerographeneImportApply" class="action-button"
++          @click="${this.onAerographeneImportApplyClick_}">
++        $i18n{aerographeneThemeImportApply}
++      </cr-button>
++    </div>
++  </cr-dialog>
++` : ''}
+ ${this.shouldShowRelaunchDialog ? html`
+   <relaunch-confirmation-dialog .restartType="${RestartType.RESTART}"
+       @close="${this.onRelaunchDialogClose}">
+diff --git a/chrome/browser/resources/settings/appearance_page/appearance_page.ts b/chrome/browser/resources/settings/appearance_page/appearance_page.ts
+--- a/chrome/browser/resources/settings/appearance_page/appearance_page.ts
++++ b/chrome/browser/resources/settings/appearance_page/appearance_page.ts
+@@ -36,7 +36,7 @@ import {routes} from '../route.js';
+ import {Router} from '../router.js';
+ import {SettingsViewMixinLit} from '../settings_page/settings_view_mixin_lit.js';
+ 
+-import type {AerographeneThemeEntry, AppearanceBrowserProxy} from './appearance_browser_proxy.js';
++import type {AerographeneImportResult, AerographeneThemeEntry, AppearanceBrowserProxy} from './appearance_browser_proxy.js';
+ import {AppearanceBrowserProxyImpl} from './appearance_browser_proxy.js';
+ import {getCss} from './appearance_page.css.js';
+ import {getHtml} from './appearance_page.html.js';
+@@ -178,6 +178,10 @@ export class SettingsAppearancePageElement extends
+       aerographeneThemes_: {type: Array},
+       aerographeneActiveTheme_: {type: String},
+       showAerographeneRestartDialog_: {type: Boolean},
++      aerographeneImportBusy_: {type: Boolean},
++      aerographeneImportError_: {type: String},
++      aerographeneConflictName_: {type: String},
++      aerographeneImportedName_: {type: String},
+       glassEffectOptions_: {type: Array},
+       browserLayoutOptions_: {type: Array},
+       showGlassEffectEnabled_: {type: Boolean},
+@@ -236,6 +240,11 @@ export class SettingsAppearancePageElement extends
+   protected accessor aerographeneThemes_: AerographeneThemeEntry[] = [];
+   protected accessor aerographeneActiveTheme_: string = '';
+   protected accessor showAerographeneRestartDialog_: boolean = false;
++  // aerographene: theme import (.aerotheme).
++  protected accessor aerographeneImportBusy_: boolean = false;
++  protected accessor aerographeneImportError_: string = '';
++  protected accessor aerographeneConflictName_: string = '';
++  protected accessor aerographeneImportedName_: string = '';
+ 
+   protected accessor colorSchemeModeOptions_:
+       Array<{value: ColorSchemeMode, name: string}> = [
+@@ -540,6 +549,86 @@ export class SettingsAppearancePageElement extends
+     this.showAerographeneRestartDialog_ = false;
+   }
+ 
++  protected async onAerographeneImportClick_() {
++    this.aerographeneImportError_ = '';
++    this.aerographeneImportBusy_ = true;
++    const result = await this.appearanceBrowserProxy_.importAerographeneTheme();
++    this.aerographeneImportBusy_ = false;
++    await this.onAerographeneImportResult_(result);
++  }
++
++  private async onAerographeneImportResult_(result: AerographeneImportResult) {
++    switch (result.result) {
++      case 'installed':
++        await this.refreshAerographeneThemes_();
++        this.aerographeneImportedName_ = result.name;
++        return;
++      case 'conflict':
++        this.aerographeneConflictName_ = result.name;
++        return;
++      case 'badArchive':
++        this.aerographeneImportError_ =
++            this.i18n('aerographeneThemeImportErrorArchive');
++        return;
++      case 'invalid':
++        this.aerographeneImportError_ =
++            this.i18n('aerographeneThemeImportErrorInvalid');
++        return;
++      case 'reserved':
++        this.aerographeneImportError_ =
++            this.i18n('aerographeneThemeImportErrorReserved');
++        return;
++      case 'ioError':
++        this.aerographeneImportError_ =
++            this.i18n('aerographeneThemeImportErrorIo');
++        return;
++      case 'canceled':
++        return;
++    }
++  }
++
++  protected async onAerographeneConflictReplaceClick_() {
++    this.aerographeneConflictName_ = '';
++    this.aerographeneImportBusy_ = true;
++    const result =
++        await this.appearanceBrowserProxy_.replaceAerographeneTheme();
++    this.aerographeneImportBusy_ = false;
++    await this.onAerographeneImportResult_(result);
++  }
++
++  protected onAerographeneConflictCancelClick_() {
++    this.aerographeneConflictName_ = '';
++  }
++
++  protected onAerographeneConflictDialogClose_() {
++    this.aerographeneConflictName_ = '';
++  }
++
++  protected async onAerographeneImportApplyClick_() {
++    const name = this.aerographeneImportedName_;
++    this.aerographeneImportedName_ = '';
++    if (name === this.aerographeneActiveTheme_) {
++      // Replaced the active theme: it still needs a restart to load.
++      this.showAerographeneRestartDialog_ = true;
++      return;
++    }
++    const saved = await this.appearanceBrowserProxy_.setAerographeneTheme(name);
++    if (!saved) {
++      await this.refreshAerographeneThemes_();
++      return;
++    }
++    this.aerographeneActiveTheme_ = name;
++    this.showAerographeneRestartDialog_ = true;
++  }
++
++  protected onAerographeneImportNotNowClick_() {
++    this.aerographeneImportedName_ = '';
++  }
++
++  protected onAerographeneImportDoneDialogClose_() {
++    this.aerographeneImportedName_ = '';
++  }
++
+   protected onUseDefaultClick_() {
+     if (this.isForcedTheme_) {
+       this.showManagedThemeDialog_ = true;
+diff --git a/chrome/browser/themes/BUILD.gn b/chrome/browser/themes/BUILD.gn
+--- a/chrome/browser/themes/BUILD.gn
++++ b/chrome/browser/themes/BUILD.gn
+@@ -9,6 +9,7 @@
+ source_set("themes") {
+   public = [
+     "aerographene_theme.h",
++    "aerographene_theme_archive.h",
+     "aerographene_theme_repo.h",
+     "browser_theme_pack.h",
+     "browser_theme_provider_delegate.h",
+@@ -24,6 +25,7 @@
+   ]
+   sources = [
+     "aerographene_theme.cc",
++    "aerographene_theme_archive.cc",
+     "aerographene_theme_repo.cc",
+     "browser_theme_pack.cc",
+     "custom_theme_supplier.cc",
+@@ -64,6 +66,7 @@
+     "//components/version_info",
+     "//content/public/browser",
+     "//third_party/abseil-cpp:absl",
++    "//third_party/zlib/google:zip",
+     "//ui/color",
+     "//ui/color/dynamic_color",
+     "//ui/gfx",
+@@ -148,6 +151,7 @@
+     testonly = true
+ 
+     sources = [
++      "aerographene_theme_archive_unittest.cc",
+       "aerographene_theme_repo_unittest.cc",
+       "browser_theme_pack_unittest.cc",
+       "theme_local_data_batch_uploader_unittest.cc",
+@@ -178,6 +182,7 @@
+       "//content/test:test_support",
+       "//testing/gmock",
+       "//testing/gtest",
++      "//third_party/zlib/google:zip",
+       "//ui/color:test_support",
+       "//ui/color/dynamic_color",
+       "//ui/gfx",
+diff --git a/chrome/browser/themes/aerographene_theme_archive.cc b/chrome/browser/themes/aerographene_theme_archive.cc
+--- /dev/null
++++ b/chrome/browser/themes/aerographene_theme_archive.cc
+@@ -0,0 +1,153 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "chrome/browser/themes/aerographene_theme_archive.h"
++
++#include <fcntl.h>
++#include <sys/stat.h>
++#include <unistd.h>
++
++#include <optional>
++#include <utility>
++
++#include "base/files/scoped_file.h"
++#include "base/functional/bind.h"
++#include "base/location.h"
++#include "base/posix/eintr_wrapper.h"
++#include "base/task/task_traits.h"
++#include "base/task/thread_pool.h"
++#include "third_party/zlib/google/zip_reader.h"
++
++namespace aerographene {
++
++namespace {
++
++// Reads a small regular file. O_NONBLOCK + fstat keep a FIFO or device from
++// blocking the task; the size is checked before and while reading.
++std::optional<std::string> ReadArchiveBytes(const base::FilePath& path) {
++  base::ScopedFD fd(
++      open(path.value().c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK));
++  if (!fd.is_valid()) {
++    return std::nullopt;
++  }
++  struct stat st;
++  if (fstat(fd.get(), &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0 ||
++      static_cast<size_t>(st.st_size) > kMaxThemeArchiveBytes) {
++    return std::nullopt;
++  }
++  std::string data;
++  char buf[4096];
++  while (true) {
++    const ssize_t n = HANDLE_EINTR(read(fd.get(), buf, sizeof(buf)));
++    if (n < 0) {
++      return std::nullopt;
++    }
++    if (n == 0) {
++      break;
++    }
++    data.append(buf, static_cast<size_t>(n));
++    if (data.size() > kMaxThemeArchiveBytes) {
++      return std::nullopt;
++    }
++  }
++  return data;
++}
++
++struct ArchiveRead {
++  ThemeArchiveResult result = ThemeArchiveResult::kUnreadable;
++  std::string json;
++};
++
++ArchiveRead ReadOnPool(base::FilePath path) {
++  ArchiveRead read;
++  read.result = ReadThemeArchive(path, &read.json);
++  return read;
++}
++
++ImportResult ToImportResult(InstallResult result) {
++  switch (result) {
++    case InstallResult::kInstalled:
++      return ImportResult::kInstalled;
++    case InstallResult::kInvalid:
++      return ImportResult::kInvalid;
++    case InstallResult::kReserved:
++      return ImportResult::kReserved;
++    case InstallResult::kConflict:
++      return ImportResult::kConflict;
++    case InstallResult::kIoError:
++      return ImportResult::kIoError;
++  }
++  return ImportResult::kIoError;
++}
++
++void OnArchiveRead(bool replace, ImportCallback callback, ArchiveRead read) {
++  if (read.result != ThemeArchiveResult::kOk) {
++    std::move(callback).Run(ImportResult::kBadArchive, std::string(),
++                            std::string());
++    return;
++  }
++  InstallThemeJson(std::move(read.json), replace, std::move(callback));
++}
++
++}  // namespace
++
++ThemeArchiveResult ReadThemeArchive(const base::FilePath& path,
++                                    std::string* json) {
++  const std::optional<std::string> data = ReadArchiveBytes(path);
++  if (!data) {
++    return ThemeArchiveResult::kUnreadable;
++  }
++  zip::ZipReader reader;
++  // `data` outlives `reader` (weak reference).
++  if (!reader.OpenFromString(*data)) {
++    return ThemeArchiveResult::kNotZip;
++  }
++  if (reader.num_entries() != 1) {
++    return ThemeArchiveResult::kBadLayout;
++  }
++  const zip::ZipReader::Entry* entry = reader.Next();
++  if (!entry) {
++    return ThemeArchiveResult::kNotZip;
++  }
++  if (entry->is_directory || entry->is_unsafe || entry->is_encrypted ||
++      entry->is_symbolic_link || entry->path.value() != kThemeFileName) {
++    return ThemeArchiveResult::kBadLayout;
++  }
++  // The declared size cannot be trusted; extraction stops at the cap, so a
++  // zip bomb costs at most kMaxThemeFileBytes + 1 of memory.
++  std::string out;
++  if (!reader.ExtractCurrentEntryToString(kMaxThemeFileBytes, &out)) {
++    return out.size() >= kMaxThemeFileBytes ? ThemeArchiveResult::kTooLarge
++                                            : ThemeArchiveResult::kNotZip;
++  }
++  if (reader.Next() || !reader.ok()) {
++    return ThemeArchiveResult::kBadLayout;
++  }
++  *json = std::move(out);
++  return ThemeArchiveResult::kOk;
++}
++
++void InstallThemeJson(std::string json, bool replace, ImportCallback callback) {
++  std::string copy = json;
++  InstallTheme(std::move(copy), replace,
++               base::BindOnce(
++                   [](ImportCallback callback, std::string json,
++                      InstallResult result, std::string name) {
++                     std::move(callback).Run(ToImportResult(result),
++                                             std::move(name), std::move(json));
++                   },
++                   std::move(callback), std::move(json)));
++}
++
++void ImportThemeArchive(const base::FilePath& path,
++                        bool replace,
++                        ImportCallback callback) {
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE,
++      {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
++       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
++      base::BindOnce(&ReadOnPool, path),
++      base::BindOnce(&OnArchiveRead, replace, std::move(callback)));
++}
++
++}  // namespace aerographene
+diff --git a/chrome/browser/themes/aerographene_theme_archive.h b/chrome/browser/themes/aerographene_theme_archive.h
+--- /dev/null
++++ b/chrome/browser/themes/aerographene_theme_archive.h
+@@ -0,0 +1,66 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#ifndef CHROME_BROWSER_THEMES_AEROGRAPHENE_THEME_ARCHIVE_H_
++#define CHROME_BROWSER_THEMES_AEROGRAPHENE_THEME_ARCHIVE_H_
++
++#include <stddef.h>
++
++#include <string>
++
++#include "base/files/file_path.h"
++#include "base/functional/callback.h"
++#include "chrome/browser/themes/aerographene_theme_repo.h"
++
++namespace aerographene {
++
++// A .aerotheme file is a zip with exactly one entry, "theme.json" at the root.
++inline constexpr char kThemeArchiveExtension[] = "aerotheme";
++// Cap on the .aerotheme file itself: a stored (uncompressed) theme.json of
++// kMaxThemeFileBytes plus zip headers fits; anything bigger is rejected
++// before it is parsed.
++inline constexpr size_t kMaxThemeArchiveBytes = kMaxThemeFileBytes + 4 * 1024;
++
++enum class ThemeArchiveResult {
++  kOk,
++  kUnreadable,  // missing, not a regular file, or larger than the cap
++  kNotZip,      // not a zip that minizip can open
++  kBadLayout,   // not exactly one plain "theme.json" entry at the root
++                // (extra entries, directories, paths, symlinks, encryption)
++  kTooLarge,    // theme.json inflates past kMaxThemeFileBytes (zip bomb)
++};
++
++// Blocking: reads `path` and extracts theme.json into `json` (unchanged
++// unless kOk). Does not validate the JSON. Never call on the UI thread.
++ThemeArchiveResult ReadThemeArchive(const base::FilePath& path,
++                                    std::string* json);
++
++enum class ImportResult {
++  kInstalled,
++  kBadArchive,  // ReadThemeArchive failed
++  kInvalid,     // theme.json fails ParseThemeJson
++  kReserved,    // name is default/pixelized
++  kConflict,    // same name (case-insensitive) exists and replace == false
++  kIoError,
++};
++
++// Imports a .aerotheme into the global repository: reads the archive on a
++// thread-pool task (MayBlock), then InstallTheme(json, replace). `callback`
++// gets the result, the theme name ("" when unknown) and the extracted
++// theme.json ("" on kBadArchive), on the calling sequence. On kConflict the
++// caller asks the user and calls InstallThemeJson(json, true, ...) with the
++// json it got, so the file is not read again. Shared by the settings page
++// and --import-theme.
++using ImportCallback =
++    base::OnceCallback<void(ImportResult, std::string name, std::string json)>;
++void ImportThemeArchive(const base::FilePath& path,
++                        bool replace,
++                        ImportCallback callback);
++
++// InstallTheme(json, replace) with ImportResult values; `callback` gets the
++// json back as well.
++void InstallThemeJson(std::string json, bool replace, ImportCallback callback);
++
++}  // namespace aerographene
++
++#endif  // CHROME_BROWSER_THEMES_AEROGRAPHENE_THEME_ARCHIVE_H_
+diff --git a/chrome/browser/themes/aerographene_theme_archive_unittest.cc b/chrome/browser/themes/aerographene_theme_archive_unittest.cc
+--- /dev/null
++++ b/chrome/browser/themes/aerographene_theme_archive_unittest.cc
+@@ -0,0 +1,166 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "chrome/browser/themes/aerographene_theme_archive.h"
++
++#include <string>
++
++#include "base/files/file_path.h"
++#include "base/files/file_util.h"
++#include "base/files/scoped_temp_dir.h"
++#include "base/test/task_environment.h"
++#include "base/test/test_future.h"
++#include "chrome/browser/themes/aerographene_theme_repo.h"
++#include "testing/gtest/include/gtest/gtest.h"
++#include "third_party/zlib/google/zip.h"
++
++namespace aerographene {
++namespace {
++
++constexpr char kTheme[] = R"({"name": "Meu Tema", "radius": 0})";
++
++class AerographeneThemeArchiveTest : public testing::Test {
++ protected:
++  void SetUp() override {
++    ASSERT_TRUE(temp_.CreateUniqueTempDir());
++    repo_ = temp_.GetPath().AppendASCII("repo");
++    SetThemeRepoDirForTesting(repo_);
++  }
++  void TearDown() override { SetThemeRepoDirForTesting(base::FilePath()); }
++
++  // Zips the contents of a fresh folder filled by `fill` into `name`.
++  base::FilePath MakeZip(const std::string& name,
++                         void (*fill)(const base::FilePath& dir)) {
++    const base::FilePath src = temp_.GetPath().AppendASCII(name + ".src");
++    EXPECT_TRUE(base::CreateDirectory(src));
++    fill(src);
++    const base::FilePath zip = temp_.GetPath().AppendASCII(name);
++    EXPECT_TRUE(zip::Zip(src, zip, /*include_hidden_files=*/true));
++    return zip;
++  }
++
++  static void WriteTheme(const base::FilePath& dir) {
++    ASSERT_TRUE(base::WriteFile(dir.AppendASCII("theme.json"), kTheme));
++  }
++
++  base::test::TaskEnvironment task_environment_;
++  base::ScopedTempDir temp_;
++  base::FilePath repo_;
++};
++
++TEST_F(AerographeneThemeArchiveTest, ReadsSingleThemeJson) {
++  std::string json;
++  EXPECT_EQ(ReadThemeArchive(MakeZip("ok.aerotheme", &WriteTheme), &json),
++            ThemeArchiveResult::kOk);
++  EXPECT_EQ(json, kTheme);
++}
++
++TEST_F(AerographeneThemeArchiveTest, RejectsExtraEntries) {
++  std::string json = "unchanged";
++  const base::FilePath zip =
++      MakeZip("extra.aerotheme", [](const base::FilePath& dir) {
++        WriteTheme(dir);
++        ASSERT_TRUE(base::WriteFile(dir.AppendASCII("icon.png"), "x"));
++      });
++  EXPECT_EQ(ReadThemeArchive(zip, &json), ThemeArchiveResult::kBadLayout);
++  EXPECT_EQ(json, "unchanged");
++}
++
++TEST_F(AerographeneThemeArchiveTest, RejectsNestedOrRenamedEntry) {
++  std::string json;
++  EXPECT_EQ(ReadThemeArchive(
++                MakeZip("nested.aerotheme",
++                        [](const base::FilePath& dir) {
++                          const base::FilePath sub = dir.AppendASCII("t");
++                          ASSERT_TRUE(base::CreateDirectory(sub));
++                          WriteTheme(sub);
++                        }),
++                &json),
++            ThemeArchiveResult::kBadLayout);
++  EXPECT_EQ(ReadThemeArchive(
++                MakeZip("renamed.aerotheme",
++                        [](const base::FilePath& dir) {
++                          ASSERT_TRUE(base::WriteFile(
++                              dir.AppendASCII("Theme.json"), kTheme));
++                        }),
++                &json),
++            ThemeArchiveResult::kBadLayout);
++}
++
++TEST_F(AerographeneThemeArchiveTest, RejectsInflatedTooLarge) {
++  // Highly compressible: tiny archive, theme.json above the cap once inflated.
++  std::string json;
++  EXPECT_EQ(ReadThemeArchive(
++                MakeZip("bomb.aerotheme",
++                        [](const base::FilePath& dir) {
++                          ASSERT_TRUE(base::WriteFile(
++                              dir.AppendASCII("theme.json"),
++                              std::string(kMaxThemeFileBytes + 1, ' ')));
++                        }),
++                &json),
++            ThemeArchiveResult::kTooLarge);
++}
++
++TEST_F(AerographeneThemeArchiveTest, RejectsNotZipMissingAndOversized) {
++  std::string json;
++  const base::FilePath junk = temp_.GetPath().AppendASCII("junk.aerotheme");
++  ASSERT_TRUE(base::WriteFile(junk, "not a zip"));
++  EXPECT_EQ(ReadThemeArchive(junk, &json), ThemeArchiveResult::kNotZip);
++
++  EXPECT_EQ(ReadThemeArchive(temp_.GetPath().AppendASCII("none"), &json),
++            ThemeArchiveResult::kUnreadable);
++  EXPECT_EQ(ReadThemeArchive(temp_.GetPath(), &json),
++            ThemeArchiveResult::kUnreadable);
++
++  const base::FilePath big = temp_.GetPath().AppendASCII("big.aerotheme");
++  ASSERT_TRUE(base::WriteFile(big, std::string(kMaxThemeArchiveBytes + 1, 0)));
++  EXPECT_EQ(ReadThemeArchive(big, &json), ThemeArchiveResult::kUnreadable);
++}
++
++TEST_F(AerographeneThemeArchiveTest, ImportInstallsThenConflicts) {
++  const base::FilePath zip = MakeZip("ok.aerotheme", &WriteTheme);
++  {
++    base::test::TestFuture<ImportResult, std::string, std::string> future;
++    ImportThemeArchive(zip, false, future.GetCallback());
++    EXPECT_EQ(future.Get<0>(), ImportResult::kInstalled);
++    EXPECT_EQ(future.Get<1>(), "Meu Tema");
++  }
++  EXPECT_TRUE(
++      base::PathExists(repo_.AppendASCII("Meu Tema").AppendASCII("theme.json")));
++  std::string json;
++  {
++    base::test::TestFuture<ImportResult, std::string, std::string> future;
++    ImportThemeArchive(zip, false, future.GetCallback());
++    EXPECT_EQ(future.Get<0>(), ImportResult::kConflict);
++    json = future.Get<2>();
++  }
++  EXPECT_EQ(json, kTheme);
++  // Replace uses the json already read: the archive may be gone by then.
++  ASSERT_TRUE(base::DeleteFile(zip));
++  {
++    base::test::TestFuture<ImportResult, std::string, std::string> future;
++    InstallThemeJson(json, true, future.GetCallback());
++    EXPECT_EQ(future.Get<0>(), ImportResult::kInstalled);
++    EXPECT_EQ(future.Get<1>(), "Meu Tema");
++  }
++  {
++    base::test::TestFuture<ImportResult, std::string, std::string> future;
++    ImportThemeArchive(temp_.GetPath().AppendASCII("none"), false,
++                       future.GetCallback());
++    EXPECT_EQ(future.Get<0>(), ImportResult::kBadArchive);
++  }
++}
++
++TEST_F(AerographeneThemeArchiveTest, ImportRejectsReservedName) {
++  const base::FilePath zip =
++      MakeZip("reserved.aerotheme", [](const base::FilePath& dir) {
++        ASSERT_TRUE(base::WriteFile(dir.AppendASCII("theme.json"),
++                                    R"({"name": "Default"})"));
++      });
++  base::test::TestFuture<ImportResult, std::string, std::string> future;
++  ImportThemeArchive(zip, true, future.GetCallback());
++  EXPECT_EQ(future.Get<0>(), ImportResult::kReserved);
++}
++
++}  // namespace
++}  // namespace aerographene
+diff --git a/chrome/browser/ui/webui/settings/appearance_handler.cc b/chrome/browser/ui/webui/settings/appearance_handler.cc
+--- a/chrome/browser/ui/webui/settings/appearance_handler.cc
++++ b/chrome/browser/ui/webui/settings/appearance_handler.cc
+@@ -4,7 +4,9 @@
+ 
+ #include "chrome/browser/ui/webui/settings/appearance_handler.h"
+ 
++#include <memory>
+ #include <string>
++#include <string_view>
+ #include <utility>
+ #include <vector>
+ 
+@@ -15,26 +17,34 @@
+ #include "chrome/app/chrome_command_ids.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/themes/aerographene_theme.h"
++#include "chrome/browser/themes/aerographene_theme_archive.h"
+ #include "chrome/browser/themes/aerographene_theme_repo.h"
+ #include "chrome/browser/themes/theme_service_factory.h"
+ #include "chrome/browser/ui/browser_commands.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
++#include "chrome/browser/ui/select_file_policy/chrome_select_file_policy.h"
+ #include "chrome/browser/ui/side_panel/side_panel_action_callback.h"
+ #include "chrome/browser/ui/side_panel/side_panel_enums.h"
+ #include "chrome/browser/ui/tabs/vertical_tab_strip_metrics.h"
+ #include "chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.h"
+ #include "chrome/common/pref_names.h"
+ #include "components/prefs/pref_service.h"
++#include "content/public/browser/web_contents.h"
+ #include "content/public/browser/web_ui.h"
+ #include "ui/actions/actions.h"
++#include "ui/shell_dialogs/selected_file_info.h"
+ 
+ namespace settings {
+ 
+ AppearanceHandler::AppearanceHandler(content::WebUI* webui)
+     : profile_(Profile::FromWebUI(webui)) {}
+ 
+-AppearanceHandler::~AppearanceHandler() = default;
++AppearanceHandler::~AppearanceHandler() {
++  if (select_file_dialog_) {
++    select_file_dialog_->ListenerDestroyed();
++  }
++}
+ 
+ void AppearanceHandler::OnJavascriptAllowed() {}
+ void AppearanceHandler::OnJavascriptDisallowed() {}
+@@ -80,6 +90,14 @@
+       base::BindRepeating(&AppearanceHandler::HandleSetAerographeneTheme,
+                           base::Unretained(this)));
+   web_ui()->RegisterMessageCallback(
++      "importAerographeneTheme",
++      base::BindRepeating(&AppearanceHandler::HandleImportAerographeneTheme,
++                          base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "replaceAerographeneTheme",
++      base::BindRepeating(&AppearanceHandler::HandleReplaceAerographeneTheme,
++                          base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
+       "recordVerticalTabStripModeChanged",
+       base::BindRepeating(
+           &AppearanceHandler::HandleRecordVerticalTabStripModeChanged,
+@@ -202,4 +220,108 @@
+   ResolveJavascriptCallback(callback_id, base::Value(found));
+ }
+ 
++void AppearanceHandler::HandleImportAerographeneTheme(
++    const base::ListValue& args) {
++  CHECK_EQ(1U, args.size());
++  AllowJavascript();
++  if (select_file_dialog_) {
++    // A picker is already open; this call does nothing.
++    ResolveAerographeneImport(args[0], "canceled", std::string());
++    return;
++  }
++  conflict_json_.clear();
++  import_callback_id_ = args[0].Clone();
++  content::WebContents* web_contents = web_ui()->GetWebContents();
++  select_file_dialog_ = ui::SelectFileDialog::Create(
++      this, std::make_unique<ChromeSelectFilePolicy>(web_contents));
++  ui::SelectFileDialog::FileTypeInfo file_type_info;
++  file_type_info.extensions.resize(1);
++  file_type_info.extensions[0].push_back(
++      base::FilePath::StringType(aerographene::kThemeArchiveExtension));
++  select_file_dialog_->SelectFile(
++      ui::SelectFileDialog::SELECT_OPEN_FILE, std::u16string(),
++      base::FilePath(), &file_type_info, 1, base::FilePath::StringType(),
++      web_contents->GetTopLevelNativeWindow(), nullptr);
++}
++
++void AppearanceHandler::FileSelected(const ui::SelectedFileInfo& file,
++                                     int /*index*/) {
++  select_file_dialog_ = nullptr;
++  // Reading and validation run off the UI thread (thread pool, MayBlock).
++  aerographene::ImportThemeArchive(
++      file.path(), /*replace=*/false,
++      base::BindOnce(&AppearanceHandler::OnAerographeneThemeImported,
++                     weak_ptr_factory_.GetWeakPtr(),
++                     std::move(import_callback_id_)));
++  import_callback_id_ = base::Value();
++}
++
++void AppearanceHandler::FileSelectionCanceled() {
++  select_file_dialog_ = nullptr;
++  if (IsJavascriptAllowed() && !import_callback_id_.is_none()) {
++    ResolveAerographeneImport(import_callback_id_, "canceled", std::string());
++  }
++  import_callback_id_ = base::Value();
++}
++
++void AppearanceHandler::HandleReplaceAerographeneTheme(
++    const base::ListValue& args) {
++  CHECK_EQ(1U, args.size());
++  AllowJavascript();
++  if (conflict_json_.empty()) {
++    ResolveAerographeneImport(args[0], "canceled", std::string());
++    return;
++  }
++  std::string json = std::move(conflict_json_);
++  conflict_json_.clear();
++  // The json validated before the conflict, not a second read of the file.
++  aerographene::InstallThemeJson(
++      std::move(json), /*replace=*/true,
++      base::BindOnce(&AppearanceHandler::OnAerographeneThemeImported,
++                     weak_ptr_factory_.GetWeakPtr(), args[0].Clone()));
++}
++
++void AppearanceHandler::OnAerographeneThemeImported(
++    base::Value callback_id,
++    aerographene::ImportResult result,
++    std::string name,
++    std::string json) {
++  if (!IsJavascriptAllowed()) {
++    return;
++  }
++  std::string_view status = "ioError";
++  switch (result) {
++    case aerographene::ImportResult::kInstalled:
++      status = "installed";
++      break;
++    case aerographene::ImportResult::kConflict:
++      status = "conflict";
++      conflict_json_ = std::move(json);
++      break;
++    case aerographene::ImportResult::kBadArchive:
++      status = "badArchive";
++      break;
++    case aerographene::ImportResult::kInvalid:
++      status = "invalid";
++      break;
++    case aerographene::ImportResult::kReserved:
++      status = "reserved";
++      break;
++    case aerographene::ImportResult::kIoError:
++      status = "ioError";
++      break;
++  }
++  ResolveAerographeneImport(callback_id, status, name);
++}
++
++void AppearanceHandler::ResolveAerographeneImport(
++    const base::Value& callback_id,
++    std::string_view result,
++    const std::string& name) {
++  base::DictValue response;
++  response.Set("result", result);
++  response.Set("name", name);
++  ResolveJavascriptCallback(callback_id, response);
++}
++
+ }  // namespace settings
+diff --git a/chrome/browser/ui/webui/settings/appearance_handler.h b/chrome/browser/ui/webui/settings/appearance_handler.h
+--- a/chrome/browser/ui/webui/settings/appearance_handler.h
++++ b/chrome/browser/ui/webui/settings/appearance_handler.h
+@@ -6,15 +6,19 @@
+ #define CHROME_BROWSER_UI_WEBUI_SETTINGS_APPEARANCE_HANDLER_H_
+ 
+ #include <string>
++#include <string_view>
+ #include <vector>
+ 
+ #include "base/memory/raw_ptr.h"
++#include "base/memory/scoped_refptr.h"
+ #include "base/memory/weak_ptr.h"
+ #include "build/build_config.h"
+ #include "base/values.h"
++#include "chrome/browser/themes/aerographene_theme_archive.h"
+ #include "chrome/browser/themes/aerographene_theme_repo.h"
+ #include "chrome/browser/themes/theme_service.h"
+ #include "chrome/browser/ui/webui/settings/settings_page_ui_handler.h"
++#include "ui/shell_dialogs/select_file_dialog.h"
+ 
+ namespace content {
+ class WebUI;
+@@ -25,7 +29,8 @@
+ namespace settings {
+ 
+ // Chrome "Appearance" settings page UI handler.
+-class AppearanceHandler : public SettingsPageUIHandler {
++class AppearanceHandler : public SettingsPageUIHandler,
++                          public ui::SelectFileDialog::Listener {
+  public:
+   explicit AppearanceHandler(content::WebUI* webui);
+ 
+@@ -68,8 +73,34 @@
+       std::string name,
+       std::vector<aerographene::ThemeInfo> themes);
+ 
++  // aerographene: theme import. importAerographeneTheme(callback_id) opens a
++  // file picker (.aerotheme) and resolves {result, name}, result being
++  // installed|conflict|invalid|reserved|badArchive|ioError|canceled. After
++  // "conflict", replaceAerographeneTheme(callback_id) installs the theme.json
++  // already extracted from that file, replacing the existing theme (the file
++  // is not read again); the page never sends a path.
++  void HandleImportAerographeneTheme(const base::ListValue& args);
++  void HandleReplaceAerographeneTheme(const base::ListValue& args);
++  void OnAerographeneThemeImported(base::Value callback_id,
++                                   aerographene::ImportResult result,
++                                   std::string name,
++                                   std::string json);
++  void ResolveAerographeneImport(const base::Value& callback_id,
++                                 std::string_view result,
++                                 const std::string& name);
++
++  // ui::SelectFileDialog::Listener:
++  void FileSelected(const ui::SelectedFileInfo& file, int index) override;
++  void FileSelectionCanceled() override;
++
+   raw_ptr<Profile> profile_;  // Weak pointer.
+ 
++  scoped_refptr<ui::SelectFileDialog> select_file_dialog_;
++  // callback_id of the importAerographeneTheme call waiting for the picker.
++  base::Value import_callback_id_;
++  // theme.json that hit a name conflict, kept for replaceAerographeneTheme.
++  std::string conflict_json_;
++
+   base::WeakPtrFactory<AppearanceHandler> weak_ptr_factory_{this};
+ };
+ 
+diff --git a/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc b/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
+--- a/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
++++ b/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
+@@ -615,6 +615,30 @@ void AddAppearanceStrings(content::WebUIDataSource* html_source,
+        IDS_SETTINGS_AEROGRAPHENE_EXTENSION_THEME_WARNING},
+       {"aerographeneResetExtensionTheme",
+        IDS_SETTINGS_AEROGRAPHENE_RESET_EXTENSION_THEME},
++      {"aerographeneThemeImport",
++       IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT},
++      {"aerographeneThemeImportConflictTitle",
++       IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_CONFLICT_TITLE},
++      {"aerographeneThemeImportConflictBody",
++       IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_CONFLICT_BODY},
++      {"aerographeneThemeImportReplace",
++       IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_REPLACE},
++      {"aerographeneThemeImportDoneTitle",
++       IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_DONE_TITLE},
++      {"aerographeneThemeImportDoneBody",
++       IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_DONE_BODY},
++      {"aerographeneThemeImportApply",
++       IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_APPLY},
++      {"aerographeneThemeImportNotNow",
++       IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_NOT_NOW},
++      {"aerographeneThemeImportErrorArchive",
++       IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_ERROR_ARCHIVE},
++      {"aerographeneThemeImportErrorInvalid",
++       IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_ERROR_INVALID},
++      {"aerographeneThemeImportErrorReserved",
++       IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_ERROR_RESERVED},
++      {"aerographeneThemeImportErrorIo",
++       IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_ERROR_IO},
+       {"centeredLocationBar", IDS_SETTINGS_CENTERED_LOCATION_BAR},
+       {"verticalCollapseShortcut", IDS_SETTINGS_VERTICAL_COLLAPSE_SHORTCUT},
+       {"shiftRightClickContextMenu",

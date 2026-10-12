@@ -110,3 +110,7 @@ aerographene/newtab-fidelity.patch
 aerographene/pinned-context-menu.patch
 aerographene/webui-theme-colors.patch
 aerographene/webui-theme-shape.patch
+aerographene/theme-repo.patch
+aerographene/settings-theme-picker.patch
+aerographene/settings-theme-import.patch
+aerographene/theme-import-cli.patch

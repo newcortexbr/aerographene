@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- tema do aerographene: zip com theme.json na raiz (docs/wiki/temas.md) -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-aerotheme">
+    <comment>aerographene theme</comment>
+    <sub-class-of type="application/zip"/>
+    <icon name="application-x-aerotheme"/>
+    <glob pattern="*.aerotheme" weight="60"/>
+  </mime-type>
+</mime-info>

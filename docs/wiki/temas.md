@@ -25,7 +25,9 @@ o incógnito ignora as camadas 1 e 2 e fica no escuro padrão do Chromium.
 
 ## trocar o tema embutido
 
-ainda não há seletor na interface. A escolha é a pref de perfil `aerographene.theme`, com valor `"default"` (padrão) ou `"pixelized"`.
+desde a v0.2 (patch `settings-theme-picker`) a escolha é feita em `chrome://settings/appearance`, linha "Browser theme": um seletor lista `default`, `pixelized` e os temas válidos do repositório (seção abaixo), com o ativo selecionado. Trocar grava a pref e abre um diálogo: "Restart now" reinicia o navegador; "Later" deixa o tema para o próximo início (aplicar tema continua exigindo reiniciar). Se um tema de extensão estiver ativo, a página avisa que ele substitui o tema escolhido e oferece "Reset to default" (volta ao tema padrão do Chromium). Os textos estão só em inglês (o projeto não traz tradução das strings de configurações).
+
+o seletor grava a pref de perfil `aerographene.theme`, que guarda o nome do tema: `"default"` (padrão), `"pixelized"` ou o nome de uma pasta do repositório. Nome inexistente ou inválido cai em `default`. Sem a interface (ou para scripts), edite a pref à mão:
 
 1. feche o navegador.
 2. abra `~/.config/aerographene/Default/Preferences` (JSON numa linha só).
@@ -42,7 +44,7 @@ f=~/.config/aerographene/Default/Preferences
 jq '.aerographene.theme = "pixelized"' "$f" > "$f.new" && mv "$f.new" "$f"
 ```
 
-4. abra o navegador. Toda troca de tema exige reiniciar.
+4. abra o navegador.
 
 ## trocar só as cores (`theme.json`)
 
@@ -119,16 +121,58 @@ tokens não carregam imagens. Para pôr uma imagem no frame e na nova aba, use u
 
 com tema de extensão ativo, raio, fonte e ícones voltam ao padrão do Chromium, porque são da camada 1. Para remover o tema: `chrome://settings/appearance` → redefinir.
 
+## repositório de temas (`themes/<nome>/theme.json`)
+
+desde a v0.2 (patch `theme-repo`) o navegador lê temas de `${XDG_CONFIG_HOME:-~/.config}/aerographene/themes/<nome>/theme.json`, comum a todos os perfis/spaces. O nome da pasta é o nome do tema e o valor da pref `aerographene.theme`; o campo `name` do arquivo deve ser igual ao da pasta.
+
+```json
+{
+  "name": "Meu Tema",
+  "mode": "dark",
+  "radius": 4,
+  "radius_small": 3,
+  "font": {"family": "JetBrains Mono", "size_px": 12},
+  "icons": {"base": "default"},
+  "style": "default",
+  "tokens": {"frame": "#0A0A0A", "accent": "#6CB6FF"}
+}
+```
+
+- só `name` é obrigatório. Padrões: `mode` `"dark"`, `radius` 4, `radius_small` 3, sem `font` (fonte do sistema), `icons.base` `"default"`, `style` `"default"`, sem tokens (valem as cores padrão escuras do Chromium; defina os tokens que quiser, com os nomes da seção "tokens" acima).
+- `icons.base` aceita só `"default"` ou `"pixelized"` (pacotes compilados). `"overrides"` por ícone virá depois e é ignorado hoje.
+- `style` escolhe uma das variantes de desenho compiladas (`"default"` ou `"pixelized"`: caixa alta dos rótulos, fundo da sidebar, fonte da URL, nova aba), independente de `icons.base`.
+- `radius`/`radius_small` 0 a 32; `font.size_px` 8 a 32 (obrigatório se houver `family`); cor em `#RRGGBB` ou `#RRGGBBAA`. Valor fora disso torna o tema inválido (ele some da lista e, se estava ativo, volta a `default`).
+- nome: 1 a 64 bytes, sem `/`, `\`, controle, nem começar com `.`; espaço e acento valem. `default` e `pixelized` são reservados; conflito entre nomes ignora a caixa e a forma Unicode (o nome é guardado em NFC: `é` composto ou decomposto é o mesmo tema).
+- arquivo acima de 64 KiB é rejeitado. Aplicar tema continua exigindo reiniciar.
+
+desempenho: tema embutido não lê disco no início; um tema do repositório custa uma leitura pequena de `theme.json` em `ThemeService::Init` (já era assim com o `theme.json` de tokens). A varredura da pasta inteira só roda quando alguém lista os temas (seletor), numa tarefa de background.
+
+API do seletor e da importação (`chrome/browser/themes/aerographene_theme_repo.h`; o seletor de configurações usa `ListThemes` pelas mensagens `getAerographeneThemes`/`setAerographeneTheme` do `AppearanceHandler`, e só aceita nomes que `ListThemes` devolve): `ListThemes(callback)` devolve `default`, `pixelized` e os temas válidos do repositório com seus metadados; `InstallTheme(json, replace, callback)` valida e grava `themes/<nome>/theme.json` (`kConflict` se já existe, sem diferenciar caixa, até `replace`). A gravação vai para uma pasta oculta temporária no mesmo diretório e é renomeada no lugar; ao substituir, a pasta antiga sai do caminho e só é apagada depois que a nova está no lugar (falha restaura a antiga). Se a substituição mudou a caixa do nome e a pref ainda aponta a grafia antiga, o próximo início segue a pasta nova e corrige a pref.
+
+## importar tema (`.aerotheme`)
+
+desde a v0.2 (patch `settings-theme-import`) um tema pode ser instalado de um arquivo `.aerotheme`: um zip com exatamente um arquivo, `theme.json`, na raiz (mesmo formato da seção acima). Para criar: `zip -j Meu-Tema.aerotheme theme.json`.
+
+em `chrome://settings/appearance`, botão "Import theme..." abaixo do seletor: abre o seletor de arquivos (filtro `.aerotheme`), valida e grava em `themes/<nome>/`. Se já existe um tema com o mesmo nome (sem diferenciar caixa), um diálogo pergunta "Replace" ou "Cancel"; não há renomeação automática. "Replace" instala o `theme.json` já lido e validado, sem reler o arquivo. Depois de importar, a lista é atualizada e um diálogo oferece "Use theme" (grava a pref e abre o mesmo diálogo de reinício do seletor) ou "Not now".
+
+o arquivo é recusado se: não for arquivo regular, passar de 68 KiB, não for zip, tiver outra entrada além de `theme.json` (pasta, caminho, outro nome, symlink, criptografia) ou se `theme.json` descompactado passar de 64 KiB (o tamanho declarado no zip não é confiado). Nome `default`/`pixelized` e `theme.json` inválido mostram erro na própria linha. A leitura roda fora da UI thread.
+
+API (`chrome/browser/themes/aerographene_theme_archive.h`): `ReadThemeArchive(path, &json)` (bloqueante, só extrai) e `ImportThemeArchive(path, replace, callback)` (lê no thread pool e chama `InstallTheme`; resultado `kInstalled|kBadArchive|kInvalid|kReserved|kConflict|kIoError`, mais o nome e o JSON extraído) e `InstallThemeJson(json, replace, callback)` (usado no "Replace" depois de `kConflict`). Pensada para ser reusada pela importação por linha de comando (`--import-theme=<arquivo>`, abaixo).
+
+### abrir o arquivo (`--import-theme`)
+
+desde a fatia 5 (patch `theme-import-cli`), abrir um `.aerotheme` no gerenciador de arquivos importa o tema, com ou sem o navegador aberto. O pacote Arch registra o tipo `application/x-aerotheme` (glob `*.aerotheme`, ícone do aerographene) e uma entry oculta `aerographene-theme-import.desktop` com `Exec=aerographene --import-theme=%f`. Na linha de comando: `aerographene --import-theme=Meu-Tema.aerotheme`.
+
+- navegador aberto: o comando chega à instância (ProcessSingleton), que mostra só o diálogo, sem janela nova.
+- navegador fechado: o processo sobe sem janela, aba nem restauração de sessão, mostra o diálogo e sai ao fechar. O perfil é carregado (custo da partida do processo do navegador; não medido).
+- diálogos: janelas comuns de nível superior (não bolhas, sem janela pai): conflito de nome ("Replace"/"Cancel"), sucesso ("Use theme" grava a pref; vale no próximo início) ou erro. Sem perfil regular (seletor de perfis na partida, convidado) importa sem oferecer aplicar.
+
+
 ## criar um tema embutido novo
 
-um terceiro tema com raio, fonte ou ícones próprios exige recompilar. Os pontos de mudança:
+desde a v0.2 o tema é dado: a struct `ThemeData` (`chrome/browser/themes/aerographene_theme.h`, em `patches/aerographene/theme-builtin.patch`) reúne nome, esquema (claro/escuro), raios (`radius`, `radius_small`), fonte (`font_family`, `font_size_px`), pacote de ícones compilado (`icons_base`: `default` ou `pixelized`), variante compilada do desenho (`style`) e os tokens de cor. `default` e `pixelized` são instâncias dela em `aerographene_theme.cc`; raio, fonte, esquema, ícones, mockups e páginas internas leem esses campos.
 
-- `patches/aerographene/theme-builtin.patch`: o enum `BuiltinTheme`, o valor da pref e a tabela de cores por tema em `aerographene_theme_tokens.cc`.
-- `patches/aerographene/theme-radius.patch`: raios por tema.
-- `patches/aerographene/theme-font.patch`: fonte por tema.
-- `patches/aerographene/theme-scheme.patch`: o esquema (claro ou escuro) de cada tema.
-- `patches/aerographene/theme-icons-*.patch`: mapa de ícones por tema.
-- `patches/aerographene/webui-theme-*.patch`: tokens das páginas internas.
+um tema embutido novo é mais uma instância em `aerographene_theme.cc` (e o nome em `GetBuiltinTheme`); exige recompilar. Ícones e `style` só aceitam os pacotes/variantes compilados.
 
 leia `docs/BUILD.md` antes; a build completa leva horas.
 
@@ -151,6 +195,11 @@ Browser: aerographene, Chromium 154 fork. Themes are dark by nature; no light/da
 LAYERS (applied in order, last wins):
 1. builtin theme, profile pref "aerographene.theme" = "default" | "pixelized".
    Controls colors + corner radius + font + icons. Needs restart.
+   UI: chrome://settings/appearance "Browser theme" picker (lists builtin + repository themes; asks restart now/later).
+   "Import theme..." installs a .aerotheme = zip with ONLY theme.json at root (zip -j X.aerotheme theme.json),
+   archive <= 68 KiB, theme.json <= 64 KiB; same-name (case-insensitive) asks replace/cancel.
+   Opening a .aerotheme file (Arch package: MIME application/x-aerotheme) runs
+   aerographene --import-theme=<file>: dialog only, no window; "Use theme" applies at next start.
    Set it with the browser CLOSED, in ~/.config/aerographene/Default/Preferences (single-line JSON):
    jq '.aerographene.theme = "pixelized"' Preferences > P.new && mv P.new Preferences
 2. tokens file: ${XDG_CONFIG_HOME:-~/.config}/aerographene/theme.json
@@ -165,6 +214,16 @@ theme.json FORMAT:
 {"mode": "dark", "tokens": {"<token>": "#RRGGBB" | "#RRGGBBAA", ...}}
 - "mode" optional, default "dark". MUST be "dark" (builtin themes are dark; "light" tokens are not applied).
 - Unknown keys ignored. Missing/invalid file = no change. Only listed tokens change.
+
+REPOSITORY THEMES (v0.2): ${XDG_CONFIG_HOME:-~/.config}/aerographene/themes/<name>/theme.json,
+shared by all profiles. Pref "aerographene.theme" = theme name (folder). Unknown/invalid name = "default".
+Folder name == "name" field. Name: 1-64 bytes, no / \ or control chars, not starting with ".",
+spaces/accents OK; "default" and "pixelized" reserved; clashes ignore case. File <= 64 KiB.
+{"name": "<req>", "mode": "dark"|"light" (default dark), "radius": 0-32 (4), "radius_small": 0-32 (3),
+ "font": {"family": "<str>", "size_px": 8-32} (size required with family),
+ "icons": {"base": "default"|"pixelized"}, "style": "default"|"pixelized" (compiled drawing variant),
+ "tokens": {"<token>": "#RRGGBB"|"#RRGGBBAA"}}
+Any invalid field invalidates the whole theme. Tokens below use the same names.
 
 TOKENS (all optional):
 frame, frame_inactive            window background, focused/unfocused

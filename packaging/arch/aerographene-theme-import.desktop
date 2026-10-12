@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=aerographene theme import
+Comment=Importa um tema .aerotheme no aerographene
+Exec=aerographene --import-theme=%f
+Terminal=false
+Type=Application
+Icon=aerographene
+NoDisplay=true
+MimeType=application/x-aerotheme;
+StartupWMClass=aerographene
