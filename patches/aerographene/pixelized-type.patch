@@ -1,0 +1,155 @@
+aerographene: tipografia do tema pixelized (rótulos em caixa alta).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/theme-font.patch, sidebar-mockup.patch,
+topbar-mockup.patch.
+Propósito: mockup R-r01a pixelized (`.row{font-family:var(--mono);
+text-transform:uppercase}`): no tema pixelized os rótulos de linha (nome do
+space, pastas de pinned, "Nova aba" do botão da sidebar, pastas da topbar)
+saem em CAIXA ALTA; títulos de aba não. A conversão é feita uma vez, ao
+definir o texto (Update/SetLabelText/RefreshName), com base::i18n::ToUpper;
+a pintura só desenha o texto já convertido. Tooltip e nome de acessibilidade
+mantêm o texto original. A fonte JetBrains Mono em todo o chrome vem do
+theme-font.patch (corrigido: ReloadFonts() zerava a descrição da fonte).
+
+--- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
++++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
+@@ -11,8 +11,10 @@
+ 
+ #include "base/containers/flat_set.h"
+ #include "base/functional/bind.h"
++#include "base/i18n/case_conversion.h"
+ #include "base/i18n/rtl.h"
+ #include "base/strings/utf_string_conversions.h"
++#include "chrome/browser/themes/aerographene_theme.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "cc/paint/path_effect.h"
+ #include "chrome/browser/ui/color/chrome_color_id.h"
+@@ -339,6 +341,12 @@
+     if (!applied_ || text != text_ || expanded_changed) {
+       applied_ = true;
+       text_ = std::move(text);
++      // Mockup pixelized `.row`: upper case, converted once here, not per
++      // paint. Tooltip and accessibility keep the original text.
++      display_text_ = aerographene::GetBuiltinTheme() ==
++                              aerographene::BuiltinTheme::kPixelized
++                          ? base::i18n::ToUpper(text_)
++                          : text_;
+       SetTooltipText(text_);
+       GetViewAccessibility().SetName(text_);
+       if (expanded_) {
+@@ -402,7 +410,7 @@
+     const gfx::Rect text_bounds(
+         text_x, bounds.y(),
+         std::max(0, chevron_x - kFolderIconGap - text_x), bounds.height());
+-    canvas->DrawStringRect(text_, gfx::FontList(), text_color,
++    canvas->DrawStringRect(display_text_, gfx::FontList(), text_color,
+                            GetMirroredRect(text_bounds));
+   }
+ 
+@@ -412,6 +420,7 @@
+   bool expanded_ = false;
+   bool applied_ = false;
+   std::u16string text_;
++  std::u16string display_text_;
+ };
+ 
+ BEGIN_METADATA(AerographenePinnedFolderView)
+--- a/chrome/browser/ui/views/tabs/vertical/aerographene_space_row.cc
++++ b/chrome/browser/ui/views/tabs/vertical/aerographene_space_row.cc
+@@ -8,8 +8,10 @@
+ #include <utility>
+ 
+ #include "base/functional/bind.h"
++#include "base/i18n/case_conversion.h"
+ #include "chrome/app/chrome_command_ids.h"
+ #include "chrome/browser/browser_process.h"
++#include "chrome/browser/themes/aerographene_theme.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/profiles/profile_attributes_entry.h"
+ #include "chrome/browser/profiles/profile_attributes_storage.h"
+@@ -77,6 +79,11 @@
+     return;
+   }
+   name_ = std::move(name);
++  // Mockup pixelized `.row`: upper case, converted once here, not per paint.
++  display_name_ = aerographene::GetBuiltinTheme() ==
++                          aerographene::BuiltinTheme::kPixelized
++                      ? base::i18n::ToUpper(name_)
++                      : name_;
+   SetTooltipText(name_);
+   GetViewAccessibility().SetName(name_);
+   SetVisible(!name_.empty());
+@@ -115,7 +122,7 @@
+       GetMirroredXWithWidthInView(chevron_x, kIconSize), icon_y);
+   const int text_x = icon_x + kIconSize + kIconGap;
+   canvas->DrawStringRect(
+-      name_, gfx::FontList(), text_color,
++      display_name_, gfx::FontList(), text_color,
+       GetMirroredRect(gfx::Rect(text_x, bounds.y(),
+                                 std::max(0, chevron_x - kIconGap - text_x),
+                                 bounds.height())));
+--- a/chrome/browser/ui/views/tabs/vertical/aerographene_space_row.h
++++ b/chrome/browser/ui/views/tabs/vertical/aerographene_space_row.h
+@@ -38,6 +38,8 @@
+ 
+   const raw_ptr<BrowserWindowInterface> browser_;
+   std::u16string name_;
++  // Upper case in the pixelized theme (set once in RefreshName).
++  std::u16string display_name_;
+ };
+ 
+ #endif  // CHROME_BROWSER_UI_VIEWS_TABS_VERTICAL_AEROGRAPHENE_SPACE_ROW_H_
+--- a/chrome/browser/ui/views/tabs/vertical/vertical_new_tab_button.cc
++++ b/chrome/browser/ui/views/tabs/vertical/vertical_new_tab_button.cc
+@@ -4,6 +4,8 @@
+ 
+ #include "chrome/browser/ui/views/tabs/vertical/vertical_new_tab_button.h"
+ 
++#include "base/i18n/case_conversion.h"
++#include "chrome/browser/themes/aerographene_theme.h"
+ #include "chrome/browser/ui/color/chrome_color_id.h"
+ #include "chrome/browser/ui/layout_constants.h"
+ #include "chrome/grit/generated_resources.h"
+@@ -31,7 +33,13 @@
+                  gfx::Insets::VH(kBasePadding, kBigPadding));
+   SetImageLabelSpacing(kBigPadding);
+   SetShouldShowLabel(true);
+-  SetLabelText(l10n_util::GetStringUTF16(IDS_ACCNAME_NEWTAB));
++  // Mockup pixelized `.row`: upper case, converted once here.
++  std::u16string label = l10n_util::GetStringUTF16(IDS_ACCNAME_NEWTAB);
++  if (aerographene::GetBuiltinTheme() ==
++      aerographene::BuiltinTheme::kPixelized) {
++    label = base::i18n::ToUpper(label);
++  }
++  SetLabelText(label);
+   SetPreferredSize(
+       gfx::Size(-1, GetLayoutConstant(LayoutConstant::kVerticalTabHeight)));
+ }
+--- a/chrome/browser/ui/views/frame/aerographene_topbar_row.cc
++++ b/chrome/browser/ui/views/frame/aerographene_topbar_row.cc
+@@ -9,6 +9,7 @@
+ #include <utility>
+ 
+ #include "base/functional/bind.h"
++#include "base/i18n/case_conversion.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/task/single_thread_task_runner.h"
+ #include "cc/paint/paint_flags.h"
+@@ -219,11 +220,13 @@
+   ~TopbarFolderButton() override = default;
+ 
+   void Update(const aerographene::PinnedItem& item) {
+-    text_ = GetDisplayName(item);
++    const std::u16string name = GetDisplayName(item);
++    // Mockup pixelized `.row`: upper case, converted once here, not per paint.
++    text_ = IsPixelized() ? base::i18n::ToUpper(name) : name;
+     text_width_ = std::min(kFolderMaxTextWidth,
+                            gfx::GetStringWidth(text_, gfx::FontList()));
+-    SetTooltipText(text_);
+-    GetViewAccessibility().SetName(text_);
++    SetTooltipText(name);
++    GetViewAccessibility().SetName(name);
+     GetViewAccessibility().SetIsCollapsed();
+     PreferredSizeChanged();
+     SchedulePaint();
