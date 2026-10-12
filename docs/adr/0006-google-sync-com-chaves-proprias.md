@@ -8,3 +8,7 @@ O aerographene terá login e sync da conta Google (histórico, senhas etc.) usan
 - As chaves nunca entram no repositório (público): vêm de secrets do GitHub Actions no runner, ou de variáveis de ambiente (`GOOGLE_API_KEY`, `GOOGLE_DEFAULT_CLIENT_ID`, `GOOGLE_DEFAULT_CLIENT_SECRET`).
 - O ungoogled-chromium remove parte da integração com contas Google. Antes de prometer o sync, é preciso testar se o login funciona com as chaves sobre essa base, e talvez reverter patches do ungoogled.
 - Plano B, se a base impedir: sync próprio do Helium (`patches/helium/core/sync/`).
+
+## Marco (12/10/2026)
+
+O sync entra na v0.3, junto com Windows 11 e a build Ivy Bridge; antes ficava depois da v0.3 (revoga "depois da v1.2" e "depois da v0.3" do `docs/SCOPE.md`). O teste de login sobre o ungoogled continua sendo o primeiro passo.
