@@ -29,12 +29,12 @@ Estado em 12/10/2026. Fontes: README (roadmap), `docs/SCOPE.md`, `docs/NOITE-202
 
 ## a conferir no desenho
 
-- nome como chave de pasta: definir a regra para nomes com espaço, acento, `/` ou caixa diferente, e o que fazer quando se importa um tema com nome já existente (substituir, perguntar ou renomear).
-- `.aerotheme`: formato do contêiner (zip com `theme.json`?) e a API de zip disponível no Chromium 154 (não verificada).
+- nome como chave de pasta (decidido 12/10): o nome do `theme.json` vira a pasta como está, aceitando espaço e acento; rejeita vazio, `/`, `\`, `.`/`..`, início com `.`, caracteres de controle e mais de 64 bytes. Comparação de conflito sem diferenciar caixa. `default` e `pixelized` são reservados.
+- conflito na importação (decidido 12/10): o diálogo pergunta substituir ou cancelar; sem renomear automático.
+- `.aerotheme` (decidido 12/10): zip com `theme.json` na raiz e nada mais na v0.2; lido com `third_party/zlib/google/zip` (a confirmar na árvore 154 pela fatia).
 - associação de tipo: entra no PKGBUILD (`packaging/arch/`); o `.tar.zst` avulso não registra MIME sozinho.
 - diálogo portátil sem o navegador aberto: janela mínima, sem abrir perfil ou sessão; custo de abertura a medir.
 
 ## não verificado
 
-- se a v0.1.0 (`d83fc39`) inclui as fatias de cold-data.
 - atribuição do PSS +9,6% contra o ungoogled.

@@ -57,7 +57,7 @@
 
 ## git e segurança
 
-- branch padrão: `main`. Crie branch de trabalho a partir da base apropriada, preservando alterações locais do usuário.
+- branch padrão: `main`. Cada versão tem uma branch própria (`v0.2`, `v0.3`...) criada da `main`; ela é apagada depois do merge com testes verdes. Docs avulsas podem ir direto na `main`. Crie branch de trabalho a partir da base apropriada, preservando alterações locais do usuário.
 - commits existentes usam prefixos descritivos como `ci:`, `build:`, `patches:` e `docs:`; faça commit/push apenas quando solicitado.
 - antes de mudar CI, leia `docs/adr/0004-ci-runner-self-hosted.md`: só o dono dispara; nunca executar código de forks com `pull_request`/`pull_request_target` no self-hosted. PRs externos ficam fechados.
 - release tem workflow próprio e gera draft; build não autoriza publicação.
