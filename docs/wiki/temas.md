@@ -157,7 +157,16 @@ em `chrome://settings/appearance`, botão "Import theme..." abaixo do seletor: a
 
 o arquivo é recusado se: não for arquivo regular, passar de 68 KiB, não for zip, tiver outra entrada além de `theme.json` (pasta, caminho, outro nome, symlink, criptografia) ou se `theme.json` descompactado passar de 64 KiB (o tamanho declarado no zip não é confiado). Nome `default`/`pixelized` e `theme.json` inválido mostram erro na própria linha. A leitura roda fora da UI thread.
 
-API (`chrome/browser/themes/aerographene_theme_archive.h`): `ReadThemeArchive(path, &json)` (bloqueante, só extrai) e `ImportThemeArchive(path, replace, callback)` (lê no thread pool e chama `InstallTheme`; resultado `kInstalled|kBadArchive|kInvalid|kReserved|kConflict|kIoError`). Pensada para ser reusada pela importação por linha de comando (`--import-theme=<arquivo>`, fatia 5, ainda não feita).
+API (`chrome/browser/themes/aerographene_theme_archive.h`): `ReadThemeArchive(path, &json)` (bloqueante, só extrai) e `ImportThemeArchive(path, replace, callback)` (lê no thread pool e chama `InstallTheme`; resultado `kInstalled|kBadArchive|kInvalid|kReserved|kConflict|kIoError`). Pensada para ser reusada pela importação por linha de comando (`--import-theme=<arquivo>`, abaixo).
+
+### abrir o arquivo (`--import-theme`)
+
+desde a fatia 5 (patch `theme-import-cli`), abrir um `.aerotheme` no gerenciador de arquivos importa o tema, com ou sem o navegador aberto. O pacote Arch registra o tipo `application/x-aerotheme` (glob `*.aerotheme`, ícone do aerographene) e uma entry oculta `aerographene-theme-import.desktop` com `Exec=aerographene --import-theme=%f`. Na linha de comando: `aerographene --import-theme=Meu-Tema.aerotheme`.
+
+- navegador aberto: o comando chega à instância (ProcessSingleton), que mostra só o diálogo, sem janela nova.
+- navegador fechado: o processo sobe sem janela, aba nem restauração de sessão, mostra o diálogo e sai ao fechar. O perfil é carregado (custo da partida do processo do navegador; não medido).
+- diálogos: conflito de nome ("Replace"/"Cancel"), sucesso ("Use theme" grava a pref; vale no próximo início) ou erro. Sem perfil definido (seletor de perfis na partida) importa sem oferecer aplicar.
+
 
 ## criar um tema embutido novo
 
@@ -189,6 +198,8 @@ LAYERS (applied in order, last wins):
    UI: chrome://settings/appearance "Browser theme" picker (lists builtin + repository themes; asks restart now/later).
    "Import theme..." installs a .aerotheme = zip with ONLY theme.json at root (zip -j X.aerotheme theme.json),
    archive <= 68 KiB, theme.json <= 64 KiB; same-name (case-insensitive) asks replace/cancel.
+   Opening a .aerotheme file (Arch package: MIME application/x-aerotheme) runs
+   aerographene --import-theme=<file>: dialog only, no window; "Use theme" applies at next start.
    Set it with the browser CLOSED, in ~/.config/aerographene/Default/Preferences (single-line JSON):
    jq '.aerographene.theme = "pixelized"' Preferences > P.new && mv P.new Preferences
 2. tokens file: ${XDG_CONFIG_HOME:-~/.config}/aerographene/theme.json

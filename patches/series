@@ -113,3 +113,4 @@ aerographene/webui-theme-shape.patch
 aerographene/theme-repo.patch
 aerographene/settings-theme-picker.patch
 aerographene/settings-theme-import.patch
+aerographene/theme-import-cli.patch
