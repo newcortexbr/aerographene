@@ -13,6 +13,10 @@ Estado em 12/10/2026. Fontes: README (roadmap), `docs/SCOPE.md`, `docs/NOITE-202
      - troca com reinício: modal "reiniciar agora" ou "depois".
      - o seletor lista todos os temas do repositório local de temas (uma pasta de temas dentro do navegador), não só os dois embutidos.
      - ícones fora da v0.2: um tema escolhe um dos pacotes compilados (`default`, `pixelized`). Depois: cerca de 5 pacotes de ícones bem diferentes, compilados, e o tema declara um pacote-base com overrides por ícone vindos de outros pacotes (ex.: base x, ícones 12 e 14 de y, 34 e 35 de z). Sem ícones como dado nem parser em runtime.
+     - distribuição: tema empacotado em arquivo `.aerotheme` (decisão do dono, 12/10/2026). O arquivo tem ícone do aerographene e associação de tipo no sistema (MIME + desktop entry); abrir o arquivo dispara um diálogo portátil de importação, mesmo com o navegador fechado (ex.: `aerographene --import-theme=<arquivo>`). Substitui "só `theme.json` na v0.2".
+     - repositório de temas global, `~/.config/aerographene/themes/<nome>/`, visto por todos os spaces. Pasta e pref pelo nome do tema, não por id.
+     - nomes de ícone (para os pacotes futuros): camelCase, com numeração onde houver variantes. Ex.: `back`, `backArrow`, `backArrow1`, `backArrow2`.
+     - formato: `"icons": {"base": "<pacote>"}` desde a v0.2, para aceitar `"overrides": {"<ícone>": "<pacote>"}` depois sem quebrar temas existentes.
      - desejável: importar tema arrastando um arquivo para um modal de importar tema, ou instalar via extensões. Viabilidade a investigar.
    - verificação: compilar só o alvo afetado no runner; smoke no pacote nos 4 combos.
 4. teste de uso real: roteiro em `docs/TESTE-USO-REAL.md`; execução do dono, com clique e teclado. Falhas viram entrada em `docs/NOITE-*.md`.
@@ -22,6 +26,13 @@ Estado em 12/10/2026. Fontes: README (roadmap), `docs/SCOPE.md`, `docs/NOITE-202
 1. teste de uso real começa já sobre o pacote v0.1.0, em paralelo.
 2. seletor de tema.
 3. v0.2 fecha com pacote novo, smoke, roteiro sem falha bloqueante e baseline sem regressão >2% contra o Helium.
+
+## a conferir no desenho
+
+- nome como chave de pasta: definir a regra para nomes com espaço, acento, `/` ou caixa diferente, e o que fazer quando se importa um tema com nome já existente (substituir, perguntar ou renomear).
+- `.aerotheme`: formato do contêiner (zip com `theme.json`?) e a API de zip disponível no Chromium 154 (não verificada).
+- associação de tipo: entra no PKGBUILD (`packaging/arch/`); o `.tar.zst` avulso não registra MIME sozinho.
+- diálogo portátil sem o navegador aberto: janela mínima, sem abrir perfil ou sessão; custo de abertura a medir.
 
 ## não verificado
 
