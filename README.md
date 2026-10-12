@@ -34,6 +34,10 @@ Até a v0.3, quero ter compatibilidade total com x86-v3 (padrão atual) e x86-v2
 
 Feito por dashwr, com ajuda gigante de Sonnet 5.5, Opus 5.5, 6.1 Sol e 6 Luna. Não confia no código? Verifique ele, é licensiado sob GPL-3.0.
 
+## THANKS
+We IMMENSELY thank projects such as Ungoogled-Chromium, Helium, Thorium and Brave. This browser is based on Ungoogled, with the genius patches provided with Helium, and using some Thorium and Brave tricks. Without these cool projects and their amazing contributors, aerographene would be either stuck in ideation or take much longer to get usable. A full inventory and a thank-you from my agent are at the bottom of this document.
+
+
 ### Content above was 100% human-written. Content below will be updated constantly by AI to reflect the browser's real roadmap and current capabilities, together with instructions and documentation links.
 
 ## roadmap
