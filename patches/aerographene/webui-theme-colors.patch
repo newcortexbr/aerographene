@@ -2,7 +2,7 @@ aerographene: cores dos temas default e pixelized nas páginas internas (chrome:
 
 Origem: aerographene (original). Licença: GPL-3.0.
 Depende de: aerographene/theme-tokens.patch, theme-builtin.patch (tabelas de
-tokens). Independe de webui-theme-shape.patch.
+tokens em aerographene_theme.cc). Independe de webui-theme-shape.patch.
 Propósito: as páginas WebUI leem cores de chrome://theme/colors.css, gerado do
 ColorProvider. Os tokens atuais só cobriam kColorSysBase/Surface/OnSurface/
 Primary/OnPrimary; os ids derivados (fundo de página e de card, texto
@@ -17,7 +17,7 @@ radio e thumb do toggle), com valores nos dois temas e no theme.json.
 
 --- a/chrome/browser/ui/color/aerographene_theme_tokens.cc
 +++ b/chrome/browser/ui/color/aerographene_theme_tokens.cc
-@@ -47,7 +47,7 @@
+@@ -47,7 +47,7 @@ struct TokenOverrides {
  
  struct TokenSpec {
    const char* name;
@@ -26,7 +26,7 @@ radio e thumb do toggle), com valores nos dois temas e no theme.json.
  };
  
  // Curated token -> ColorId mapping. Unused slots are 0 (kUiColorsStart, never
-@@ -71,29 +71,41 @@
+@@ -71,29 +71,41 @@ const TokenSpec kTokens[] = {
        kColorTabBackgroundInactiveFrameInactive}},
      {"omnibox", {kColorLocationBarBackground}},
      {"omnibox_hover", {kColorLocationBarBackgroundHovered}},
@@ -75,7 +75,7 @@ radio e thumb do toggle), com valores nos dois temas e no theme.json.
      {"menu", {ui::kColorMenuBackground}},
      {"menu_text", {ui::kColorMenuItemForeground}},
      // Menu stroke (also the bubble stroke) and secondary text (accelerators).
-@@ -102,11 +114,39 @@
+@@ -102,11 +114,39 @@ const TokenSpec kTokens[] = {
      {"ntp", {kColorNewTabPageBackground}},
      {"ntp_text", {kColorNewTabPageText}},
      // System tokens: also reach WebUI through chrome://theme/colors.css.
@@ -119,8 +119,10 @@ radio e thumb do toggle), com valores nos dois temas e no theme.json.
 +      ui::kColorSegmentedButtonForegroundChecked}},
  };
  
- // Built-in themes (theming/design-language/default.md and pixelized.md).
-@@ -155,6 +195,8 @@
+ // Applies the active theme's tokens (aerographene_theme.h) through the
+--- a/chrome/browser/themes/aerographene_theme.cc
++++ b/chrome/browser/themes/aerographene_theme.cc
+@@ -55,6 +55,8 @@ constexpr BuiltinToken kDefaultTokens[] = {
      {"base", SkColorSetRGB(0x04, 0x07, 0x0E)},
      {"surface", SkColorSetRGB(0x07, 0x0C, 0x18)},
      {"text", SkColorSetRGB(0xEA, 0xF2, 0xFF)},
@@ -129,7 +131,7 @@ radio e thumb do toggle), com valores nos dois temas e no theme.json.
      {"accent", SkColorSetRGB(0x6C, 0xB6, 0xFF)},
      {"on_accent", SkColorSetRGB(0x04, 0x07, 0x0E)},
  };
-@@ -195,6 +237,8 @@
+@@ -95,6 +97,8 @@ constexpr BuiltinToken kPixelizedTokens[] = {
      {"base", SkColorSetRGB(0x0A, 0x0A, 0x0A)},
      {"surface", SkColorSetRGB(0x11, 0x11, 0x11)},
      {"text", SkColorSetRGB(0xF2, 0xF2, 0xF2)},

@@ -1,183 +1,37 @@
-aerographene: temas embutidos default e pixelized + pref aerographene.theme.
+aerographene: temas embutidos default e pixelized como dados + pref aerographene.theme.
 
 Origem: aerographene (original). Licença: GPL-3.0.
 Depende de: aerographene/theme-tokens.patch.
-Propósito: tabelas constexpr com os tokens dos mockups
-(theming/design-language/default.md e pixelized.md), aplicadas pelo mixer de
-theme-tokens antes do theme.json (que continua como override de
-desenvolvimento). Pref de perfil "aerographene.theme" ("default" |
-"pixelized", padrão "default"), lida em ThemeService::Init; aplicar = reiniciar.
-Novos tokens/ColorIds: seleção, hover, separador e menus. Esquema de cor
-padrão passa a escuro (os dois temas são escuros); tema embutido só em
-providers escuros e nunca sobre tema de extensão nem no incógnito.
-
+Propósito: tema é dado, não enum. aerographene_theme.h define ThemeData
+(name, scheme, radius/radius_small, font_family/font_size_px, icons_base =
+pacote de ícones compilado "default"|"pixelized", style = variante compilada
+do desenho do chrome, tokens de cor) e ThemeToken; os temas embutidos são
+instâncias (GetBuiltinTheme(nome)), com as tabelas de tokens dos mockups
+(theming/design-language/default.md e pixelized.md). Os mesmos campos serão
+preenchidos por theme.json (loader fora deste patch). Tema ativo do processo:
+GetActiveTheme()/SetActiveTheme(), definido em ThemeService::Init pela pref de
+perfil "aerographene.theme" (padrão "default"; aplicar = reiniciar). O mixer
+de theme-tokens aplica GetActiveTheme().tokens antes do theme.json (override
+de desenvolvimento). Novos tokens/ColorIds: seleção, hover, separador e menus.
+Esquema de cor padrão passa a escuro; tema embutido nunca sobre tema de
+extensão nem no incógnito.
 
 --- /dev/null
 +++ b/chrome/browser/themes/aerographene_theme.cc
-@@ -0,0 +1,29 @@
+@@ -0,0 +1,173 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
 +#include "chrome/browser/themes/aerographene_theme.h"
++
++#include "base/no_destructor.h"
 +
 +namespace aerographene {
 +
 +namespace {
-+BuiltinTheme g_theme = BuiltinTheme::kDefault;
-+}  // namespace
 +
-+BuiltinTheme ParseBuiltinTheme(std::string_view value) {
-+  return value == kThemePixelized ? BuiltinTheme::kPixelized
-+                                  : BuiltinTheme::kDefault;
-+}
-+
-+BuiltinTheme GetBuiltinTheme() {
-+  return g_theme;
-+}
-+
-+bool SetBuiltinTheme(BuiltinTheme theme) {
-+  if (g_theme == theme) {
-+    return false;
-+  }
-+  g_theme = theme;
-+  return true;
-+}
-+
-+}  // namespace aerographene
-
---- /dev/null
-+++ b/chrome/browser/themes/aerographene_theme.h
-@@ -0,0 +1,29 @@
-+// Copyright 2026 The aerographene Authors
-+// Use of this source code is governed by the GPL-3.0 license.
-+
-+#ifndef CHROME_BROWSER_THEMES_AEROGRAPHENE_THEME_H_
-+#define CHROME_BROWSER_THEMES_AEROGRAPHENE_THEME_H_
-+
-+#include <string_view>
-+
-+namespace aerographene {
-+
-+// Profile pref: "default" | "pixelized". Read once in ThemeService::Init;
-+// a change applies on the next browser start.
-+inline constexpr char kThemePref[] = "aerographene.theme";
-+inline constexpr char kThemeDefault[] = "default";
-+inline constexpr char kThemePixelized[] = "pixelized";
-+
-+enum class BuiltinTheme { kDefault, kPixelized };
-+
-+// Unknown values map to kDefault.
-+BuiltinTheme ParseBuiltinTheme(std::string_view value);
-+
-+// Process-wide active built-in theme (UI thread). Last regular profile
-+// initialized wins. Returns true if the value changed.
-+BuiltinTheme GetBuiltinTheme();
-+bool SetBuiltinTheme(BuiltinTheme theme);
-+
-+}  // namespace aerographene
-+
-+#endif  // CHROME_BROWSER_THEMES_AEROGRAPHENE_THEME_H_
-
---- a/chrome/browser/themes/BUILD.gn
-+++ b/chrome/browser/themes/BUILD.gn
-@@ -8,6 +8,7 @@
- 
- source_set("themes") {
-   public = [
-+    "aerographene_theme.h",
-     "browser_theme_pack.h",
-     "browser_theme_provider_delegate.h",
-     "custom_theme_supplier.h",
-@@ -21,6 +22,7 @@
-     "theme_syncable_service.h",
-   ]
-   sources = [
-+    "aerographene_theme.cc",
-     "browser_theme_pack.cc",
-     "custom_theme_supplier.cc",
-     "theme_helper.cc",
-
---- a/chrome/browser/themes/theme_service.cc
-+++ b/chrome/browser/themes/theme_service.cc
-@@ -43,6 +43,7 @@
- #include "chrome/browser/profiles/profile.h"
- #include "chrome/browser/search/background/ntp_custom_background_service.h"
- #include "chrome/browser/search/background/ntp_custom_background_service_factory.h"
-+#include "chrome/browser/themes/aerographene_theme.h"
- #include "chrome/browser/themes/browser_theme_pack.h"
- #include "chrome/browser/themes/custom_theme_supplier.h"
- #include "chrome/browser/themes/theme_properties.h"
-@@ -314,9 +315,12 @@
-       prefs::kDeprecatedBrowserColorSchemeDoNotUse,
-       std::to_underlying(ThemeService::BrowserColorScheme::kSystem),
-       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-+  // aerographene: the built-in themes are dark (default.md, pixelized.md).
-   registry->RegisterIntegerPref(
-       prefs::kBrowserColorScheme,
--      std::to_underlying(ThemeService::BrowserColorScheme::kSystem));
-+      std::to_underlying(ThemeService::BrowserColorScheme::kDark));
-+  registry->RegisterStringPref(aerographene::kThemePref,
-+                               aerographene::kThemeDefault);
-   registry->RegisterIntegerPref(
-       prefs::kDeprecatedUserColorDoNotUse, SK_ColorTRANSPARENT,
-       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-@@ -355,6 +359,14 @@
- void ThemeService::Init() {
-   theme_helper_->DCheckCalledOnValidSequence();
- 
-+  // aerographene: built-in theme from the profile pref (restart to apply).
-+  // Providers built before this point are dropped if the theme changed.
-+  if (profile_->IsRegularProfile() &&
-+      aerographene::SetBuiltinTheme(aerographene::ParseBuiltinTheme(
-+          profile_->GetPrefs()->GetString(aerographene::kThemePref)))) {
-+    ui::ColorProviderManager::Get().ResetColorProviderCache();
-+  }
-+
-   InitFromPrefs();
- 
-   // ThemeObserver should be constructed before calling
-
---- a/chrome/browser/ui/color/aerographene_theme_tokens.cc
-+++ b/chrome/browser/ui/color/aerographene_theme_tokens.cc
-@@ -20,6 +20,7 @@
- #include "base/no_destructor.h"
- #include "base/nix/xdg_util.h"
- #include "base/values.h"
-+#include "chrome/browser/themes/aerographene_theme.h"
- #include "chrome/browser/ui/color/chrome_color_id.h"
- #include "third_party/skia/include/core/SkColor.h"
- #include "ui/color/color_id.h"
-@@ -76,6 +77,24 @@
-     {"omnibox_results", {kColorOmniboxResultsBackground}},
-     {"omnibox_results_hover", {kColorOmniboxResultsBackgroundHovered}},
-     {"focus_ring", {ui::kColorFocusableBorderFocused}},
-+    // Selection, hover, separators and menus.
-+    {"selection",
-+     {ui::kColorTextSelectionBackground, kColorOmniboxSelectionBackground,
-+      kColorOmniboxResultsBackgroundSelected,
-+      ui::kColorMenuItemBackgroundSelected}},
-+    {"selection_text",
-+     {ui::kColorTextSelectionForeground, kColorOmniboxSelectionForeground,
-+      kColorOmniboxResultsTextSelected, ui::kColorMenuItemForegroundSelected}},
-+    {"selection_text_dim",
-+     {kColorOmniboxResultsTextDimmedSelected, kColorOmniboxResultsUrlSelected,
-+      kColorOmniboxResultsIconSelected}},
-+    {"hover", {kColorToolbarInkDropHover}},
-+    {"tab_hover", {kColorTabBackgroundInactiveHoverFrameActive}},
-+    {"separator",
-+     {ui::kColorSeparator, ui::kColorMenuSeparator, kColorToolbarSeparator,
-+      kColorTabDividerFrameActive, kColorTabDividerFrameInactive}},
-+    {"menu", {ui::kColorMenuBackground}},
-+    {"menu_text", {ui::kColorMenuItemForeground}},
-     {"ntp", {kColorNewTabPageBackground}},
-     {"ntp_text", {kColorNewTabPageText}},
-     // System tokens: also reach WebUI through chrome://theme/colors.css.
-@@ -86,6 +105,110 @@
-     {"on_accent", {ui::kColorSysOnPrimary}},
- };
- 
 +// Built-in themes (theming/design-language/default.md and pixelized.md).
-+// Same token names as theme.json; theme.json is applied on top (dev
++// Same token names as theme.json; theme.json tokens are applied on top (dev
 +// override). Translucent mockup layers are pre-composited over their
 +// backdrop where the Views surface paints opaque.
 +struct BuiltinToken {
@@ -189,7 +43,7 @@ providers escuros e nunca sobre tema de extensão nem no incógnito.
 +// gradient avg, --text #EAF2FF, --text2 #A9B8D0, --accent #6cb6ff,
 +// --line rgba(140,180,255,.16), --hover rgba(120,170,255,.12), floating
 +// rgba(7,12,24,.95).
-+constexpr BuiltinToken kDefaultTheme[] = {
++constexpr BuiltinToken kDefaultTokens[] = {
 +    {"frame", SkColorSetRGB(0x04, 0x07, 0x0E)},
 +    {"frame_inactive", SkColorSetRGB(0x04, 0x07, 0x0E)},
 +    {"toolbar", SkColorSetRGB(0x08, 0x0D, 0x19)},
@@ -227,7 +81,7 @@ providers escuros e nunca sobre tema de extensão nem no incógnito.
 +// pixelized: #0A0A0A/#111/#181818/#222, text #F2F2F2/#8C8C8C/#5A5A5A, line
 +// white 14%, no blue; selection and primary action = white block, black
 +// text (#0B0B0B).
-+constexpr BuiltinToken kPixelizedTheme[] = {
++constexpr BuiltinToken kPixelizedTokens[] = {
 +    {"frame", SkColorSetRGB(0x0A, 0x0A, 0x0A)},
 +    {"frame_inactive", SkColorSetRGB(0x0A, 0x0A, 0x0A)},
 +    {"toolbar", SkColorSetRGB(0x11, 0x11, 0x11)},
@@ -262,12 +116,270 @@ providers escuros e nunca sobre tema de extensão nem no incógnito.
 +    {"on_accent", SkColorSetRGB(0x0B, 0x0B, 0x0B)},
 +};
 +
-+// Applies one built-in table through the kTokens name -> ColorId mapping.
 +template <size_t N>
-+void AddBuiltinColors(ui::ColorMixer& mixer, const BuiltinToken (&table)[N]) {
++std::vector<ThemeToken> ToTokens(const BuiltinToken (&table)[N]) {
++  std::vector<ThemeToken> tokens;
++  tokens.reserve(N);
 +  for (const BuiltinToken& token : table) {
++    tokens.push_back({token.name, token.color});
++  }
++  return tokens;
++}
++
++ThemeData MakeDefaultTheme() {
++  ThemeData theme;
++  theme.name = kThemeDefault;
++  theme.scheme = ThemeScheme::kDark;
++  // default.md: 4px controls, 3px inner items; system UI font.
++  theme.radius = 4;
++  theme.radius_small = 3;
++  theme.icons_base = kIconPackDefault;
++  theme.style = kStyleDefault;
++  theme.tokens = ToTokens(kDefaultTokens);
++  return theme;
++}
++
++ThemeData MakePixelizedTheme() {
++  ThemeData theme;
++  theme.name = kThemePixelized;
++  theme.scheme = ThemeScheme::kDark;
++  // pixelized mockups: 0 on fields, buttons, menus and tabs; 2px on
++  // chips/badges; JetBrains Mono 12px (mono size of the mockups).
++  theme.radius = 0;
++  theme.radius_small = 2;
++  theme.font_family = "JetBrains Mono";
++  theme.font_size_px = 12;
++  theme.icons_base = kIconPackPixelized;
++  theme.style = kStylePixelized;
++  theme.tokens = ToTokens(kPixelizedTokens);
++  return theme;
++}
++
++ThemeData& ActiveTheme() {
++  static base::NoDestructor<ThemeData> active(MakeDefaultTheme());
++  return *active;
++}
++
++}  // namespace
++
++ThemeData::ThemeData() = default;
++ThemeData::ThemeData(const ThemeData&) = default;
++ThemeData& ThemeData::operator=(const ThemeData&) = default;
++ThemeData::~ThemeData() = default;
++
++const ThemeData& GetBuiltinTheme(std::string_view name) {
++  static const base::NoDestructor<ThemeData> default_theme(MakeDefaultTheme());
++  static const base::NoDestructor<ThemeData> pixelized_theme(
++      MakePixelizedTheme());
++  return name == kThemePixelized ? *pixelized_theme : *default_theme;
++}
++
++const ThemeData& GetActiveTheme() {
++  return ActiveTheme();
++}
++
++bool SetActiveTheme(const ThemeData& theme) {
++  ThemeData& active = ActiveTheme();
++  if (active.name == theme.name) {
++    return false;
++  }
++  active = theme;
++  return true;
++}
++
++bool UsesPixelizedStyle() {
++  return GetActiveTheme().style == kStylePixelized;
++}
++
++}  // namespace aerographene
+
+--- /dev/null
++++ b/chrome/browser/themes/aerographene_theme.h
+@@ -0,0 +1,78 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#ifndef CHROME_BROWSER_THEMES_AEROGRAPHENE_THEME_H_
++#define CHROME_BROWSER_THEMES_AEROGRAPHENE_THEME_H_
++
++#include <string>
++#include <string_view>
++#include <vector>
++
++#include "third_party/skia/include/core/SkColor.h"
++
++namespace aerographene {
++
++// Profile pref: theme name ("default" | "pixelized"). Read once in
++// ThemeService::Init; a change applies on the next browser start.
++inline constexpr char kThemePref[] = "aerographene.theme";
++inline constexpr char kThemeDefault[] = "default";
++inline constexpr char kThemePixelized[] = "pixelized";
++
++// Compiled icon packs a theme can pick as its base ("icons": {"base": ...}).
++inline constexpr char kIconPackDefault[] = "default";
++inline constexpr char kIconPackPixelized[] = "pixelized";
++
++// Compiled chrome drawing variants (mockups R-r01a): row label case, sidebar
++// background, URL size, new tab page.
++inline constexpr char kStyleDefault[] = "default";
++inline constexpr char kStylePixelized[] = "pixelized";
++
++// Every theme is dark or light by nature; no light/dark toggle.
++enum class ThemeScheme { kDark, kLight };
++
++// One color token, same names as theme.json "tokens".
++struct ThemeToken {
++  std::string name;
++  SkColor color;
++};
++
++// A theme as data. The built-in themes are instances of it; a theme read
++// from theme.json fills the same fields.
++struct ThemeData {
++  ThemeData();
++  ThemeData(const ThemeData&);
++  ThemeData& operator=(const ThemeData&);
++  ~ThemeData();
++
++  std::string name = kThemeDefault;
++  ThemeScheme scheme = ThemeScheme::kDark;
++  // Corner radii in px: controls, fields, menus, dialogs, tab tops / chips,
++  // badges and small inner items.
++  int radius = 4;
++  int radius_small = 3;
++  // UI font; empty family = system UI font.
++  std::string font_family;
++  int font_size_px = 0;
++  // Compiled icon pack (kIconPack*).
++  std::string icons_base = kIconPackDefault;
++  // Compiled chrome drawing variant (kStyle*).
++  std::string style = kStyleDefault;
++  // Applied in order through the theme token -> ColorId mapping.
++  std::vector<ThemeToken> tokens;
++};
++
++// Built-in theme by name; unknown names map to "default".
++const ThemeData& GetBuiltinTheme(std::string_view name);
++
++// Process-wide active theme (UI thread). Last regular profile initialized
++// wins; "default" until set. SetActiveTheme returns true if the active theme
++// name changed.
++const ThemeData& GetActiveTheme();
++bool SetActiveTheme(const ThemeData& theme);
++
++// Shorthand for GetActiveTheme().style == kStylePixelized.
++bool UsesPixelizedStyle();
++
++}  // namespace aerographene
++
++#endif  // CHROME_BROWSER_THEMES_AEROGRAPHENE_THEME_H_
+
+--- a/chrome/browser/themes/BUILD.gn
++++ b/chrome/browser/themes/BUILD.gn
+@@ -8,6 +8,7 @@
+ 
+ source_set("themes") {
+   public = [
++    "aerographene_theme.h",
+     "browser_theme_pack.h",
+     "browser_theme_provider_delegate.h",
+     "custom_theme_supplier.h",
+@@ -21,6 +22,7 @@
+     "theme_syncable_service.h",
+   ]
+   sources = [
++    "aerographene_theme.cc",
+     "browser_theme_pack.cc",
+     "custom_theme_supplier.cc",
+     "theme_helper.cc",
+
+--- a/chrome/browser/themes/theme_service.cc
++++ b/chrome/browser/themes/theme_service.cc
+@@ -43,6 +43,7 @@
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/search/background/ntp_custom_background_service.h"
+ #include "chrome/browser/search/background/ntp_custom_background_service_factory.h"
++#include "chrome/browser/themes/aerographene_theme.h"
+ #include "chrome/browser/themes/browser_theme_pack.h"
+ #include "chrome/browser/themes/custom_theme_supplier.h"
+ #include "chrome/browser/themes/theme_properties.h"
+@@ -314,9 +315,12 @@ void ThemeService::RegisterProfilePrefs(
+       prefs::kDeprecatedBrowserColorSchemeDoNotUse,
+       std::to_underlying(ThemeService::BrowserColorScheme::kSystem),
+       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
++  // aerographene: the built-in themes are dark (default.md, pixelized.md).
+   registry->RegisterIntegerPref(
+       prefs::kBrowserColorScheme,
+-      std::to_underlying(ThemeService::BrowserColorScheme::kSystem));
++      std::to_underlying(ThemeService::BrowserColorScheme::kDark));
++  registry->RegisterStringPref(aerographene::kThemePref,
++                               aerographene::kThemeDefault);
+   registry->RegisterIntegerPref(
+       prefs::kDeprecatedUserColorDoNotUse, SK_ColorTRANSPARENT,
+       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+@@ -355,6 +359,14 @@ ThemeService::~ThemeService() = default;
+ void ThemeService::Init() {
+   theme_helper_->DCheckCalledOnValidSequence();
+ 
++  // aerographene: built-in theme from the profile pref (restart to apply).
++  // Providers built before this point are dropped if the theme changed.
++  if (profile_->IsRegularProfile() &&
++      aerographene::SetActiveTheme(aerographene::GetBuiltinTheme(
++          profile_->GetPrefs()->GetString(aerographene::kThemePref)))) {
++    ui::ColorProviderManager::Get().ResetColorProviderCache();
++  }
++
+   InitFromPrefs();
+ 
+   // ThemeObserver should be constructed before calling
+
+--- a/chrome/browser/ui/color/aerographene_theme_tokens.cc
++++ b/chrome/browser/ui/color/aerographene_theme_tokens.cc
+@@ -20,6 +20,7 @@
+ #include "base/no_destructor.h"
+ #include "base/nix/xdg_util.h"
+ #include "base/values.h"
++#include "chrome/browser/themes/aerographene_theme.h"
+ #include "chrome/browser/ui/color/chrome_color_id.h"
+ #include "third_party/skia/include/core/SkColor.h"
+ #include "ui/color/color_id.h"
+@@ -76,6 +77,24 @@ const TokenSpec kTokens[] = {
+     {"omnibox_results", {kColorOmniboxResultsBackground}},
+     {"omnibox_results_hover", {kColorOmniboxResultsBackgroundHovered}},
+     {"focus_ring", {ui::kColorFocusableBorderFocused}},
++    // Selection, hover, separators and menus.
++    {"selection",
++     {ui::kColorTextSelectionBackground, kColorOmniboxSelectionBackground,
++      kColorOmniboxResultsBackgroundSelected,
++      ui::kColorMenuItemBackgroundSelected}},
++    {"selection_text",
++     {ui::kColorTextSelectionForeground, kColorOmniboxSelectionForeground,
++      kColorOmniboxResultsTextSelected, ui::kColorMenuItemForegroundSelected}},
++    {"selection_text_dim",
++     {kColorOmniboxResultsTextDimmedSelected, kColorOmniboxResultsUrlSelected,
++      kColorOmniboxResultsIconSelected}},
++    {"hover", {kColorToolbarInkDropHover}},
++    {"tab_hover", {kColorTabBackgroundInactiveHoverFrameActive}},
++    {"separator",
++     {ui::kColorSeparator, ui::kColorMenuSeparator, kColorToolbarSeparator,
++      kColorTabDividerFrameActive, kColorTabDividerFrameInactive}},
++    {"menu", {ui::kColorMenuBackground}},
++    {"menu_text", {ui::kColorMenuItemForeground}},
+     {"ntp", {kColorNewTabPageBackground}},
+     {"ntp_text", {kColorNewTabPageText}},
+     // System tokens: also reach WebUI through chrome://theme/colors.css.
+@@ -86,6 +105,25 @@ const TokenSpec kTokens[] = {
+     {"on_accent", {ui::kColorSysOnPrimary}},
+ };
+ 
++// Applies the active theme's tokens (aerographene_theme.h) through the
++// kTokens name -> ColorId mapping.
++void AddThemeColors(ui::ColorMixer& mixer,
++                    const std::vector<aerographene::ThemeToken>& tokens) {
++  for (const aerographene::ThemeToken& token : tokens) {
 +    for (const TokenSpec& spec : kTokens) {
-+      if (std::string_view(spec.name) != token.name) {
++      if (token.name != spec.name) {
 +        continue;
 +      }
 +      for (ui::ColorId id : spec.ids) {
@@ -283,7 +395,7 @@ providers escuros e nunca sobre tema de extensão nem no incógnito.
  int HexDigit(char c) {
    if (c >= '0' && c <= '9') {
      return c - '0';
-@@ -226,6 +349,18 @@
+@@ -226,6 +264,13 @@ void AddAerographeneThemeTokensMixer(ui::ColorProvider* provider,
        !key.custom_theme) {
      return;
    }
@@ -291,13 +403,8 @@ providers escuros e nunca sobre tema de extensão nem no incógnito.
 +  // over an installed extension theme.
 +  if (key.color_mode == ui::ColorProviderKey::ColorMode::kDark &&
 +      !key.custom_theme) {
-+    ui::ColorMixer& builtin = provider->AddMixer();
-+    if (aerographene::GetBuiltinTheme() ==
-+        aerographene::BuiltinTheme::kPixelized) {
-+      AddBuiltinColors(builtin, kPixelizedTheme);
-+    } else {
-+      AddBuiltinColors(builtin, kDefaultTheme);
-+    }
++    AddThemeColors(provider->AddMixer(),
++                   aerographene::GetActiveTheme().tokens);
 +  }
    const TokenOverrides& overrides = GetOverrides();
    if (overrides.colors.empty() || overrides.mode != key.color_mode) {

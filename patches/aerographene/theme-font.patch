@@ -2,7 +2,7 @@ aerographene: fonte do tema pixelized (JetBrains Mono 12px).
 
 Origem: aerographene (original). Licença: GPL-3.0.
 Depende de: aerographene/theme-radius.patch.
-Propósito: só no pixelized, uma vez por processo, em ThemeService::Init:
+Propósito: só em tema com font_family (ThemeData; hoje o pixelized), uma vez por processo, em ThemeService::Init:
 ResourceBundle::ReloadFonts() e depois
 gfx::FontList::SetDefaultFontDescription("JetBrains Mono, 12px"). A ordem
 importa: ReloadFonts chama InitDefaultFontList, que zera a descrição (fonte do
@@ -38,28 +38,26 @@ fonte do sistema.
  #include "ui/native_theme/native_theme.h"
  
  #if BUILDFLAG(ENABLE_EXTENSIONS)
-@@ -357,6 +361,29 @@
+@@ -357,6 +361,27 @@ ThemeService::ThemeService(Profile* profile, const ThemeHelper& theme_helper)
  
  ThemeService::~ThemeService() = default;
  
 +#if BUILDFLAG(IS_LINUX)
 +namespace {
 +
-+// aerographene: pixelized UI font, JetBrains Mono 12px (mono size in the
-+// pixelized mockups); system monospace if it is not installed. Only called
-+// for pixelized, so the default theme loads no extra font and keeps the
-+// system UI font.
-+void ApplyAerographenePixelizedFont() {
-+  constexpr char kFamily[] = "JetBrains Mono";
-+  constexpr int kSizePx = 12;
++// aerographene: UI font of the active theme (pixelized: JetBrains Mono 12px,
++// mono size in the pixelized mockups); system monospace if the family is not
++// installed. Only called for themes with a font, so the default theme loads
++// no extra font and keeps the system UI font.
++void ApplyAerographeneThemeFont(const std::string& family, int size_px) {
 +  const bool installed = base::EqualsCaseInsensitiveASCII(
-+      gfx::Font(kFamily, kSizePx).GetActualFontName(), kFamily);
++      gfx::Font(family, size_px).GetActualFontName(), family);
 +  // ReloadFonts() calls InitDefaultFontList(), which resets the default font
 +  // description to empty (system font) and clears the font cache, so the
 +  // description has to be set after it; the cache refills from it.
 +  ui::ResourceBundle::GetSharedInstance().ReloadFonts();
 +  gfx::FontList::SetDefaultFontDescription(base::StringPrintf(
-+      "%s, %dpx", installed ? kFamily : "Monospace", kSizePx));
++      "%s, %dpx", installed ? family.c_str() : "Monospace", size_px));
 +}
 +
 +}  // namespace
@@ -68,15 +66,15 @@ fonte do sistema.
  void ThemeService::Init() {
    theme_helper_->DCheckCalledOnValidSequence();
  
-@@ -375,6 +402,12 @@
-                            aerographene::BuiltinTheme::kPixelized;
-     views::LayoutProvider::SetAerographeneCornerRadii(pixelized ? 0 : 4,
-                                                       pixelized ? 2 : 3);
+@@ -373,6 +398,12 @@ void ThemeService::Init() {
+     const aerographene::ThemeData& theme = aerographene::GetActiveTheme();
+     views::LayoutProvider::SetAerographeneCornerRadii(theme.radius,
+                                                       theme.radius_small);
 +    // The UI font is process-wide and set once (first regular profile).
 +    static bool font_applied = false;
-+    if (pixelized && !font_applied) {
++    if (!theme.font_family.empty() && !font_applied) {
 +      font_applied = true;
-+      ApplyAerographenePixelizedFont();
++      ApplyAerographeneThemeFont(theme.font_family, theme.font_size_px);
 +    }
    }
  #endif

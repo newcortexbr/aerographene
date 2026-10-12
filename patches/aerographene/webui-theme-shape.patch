@@ -1,7 +1,7 @@
 aerographene: forma (raio, contorno, fonte) dos temas default e pixelized nas páginas internas (chrome://history, chrome://settings e chrome://settings/security|privacy).
 
 Origem: aerographene (original). Licença: GPL-3.0.
-Depende de: aerographene/theme-builtin.patch (GetBuiltinTheme) e
+Depende de: aerographene/theme-builtin.patch (UsesPixelizedStyle) e
 aerographene/webui-theme-colors.patch (cores; independente em aplicação).
 Propósito: ThemeSource::SendColorsCss acrescenta ao colors.css um bloco
 `html:not(#z){...}` conforme o tema ativo (nunca no incógnito): variáveis
@@ -24,7 +24,7 @@ Radio e checkbox continuam com o raio upstream.
  #include "chrome/browser/resources_util.h"
  #include "chrome/browser/themes/theme_properties.h"
  #include "chrome/browser/themes/theme_service.h"
-@@ -66,6 +67,34 @@
+@@ -66,6 +67,33 @@
  }
  
  #if !BUILDFLAG(IS_ANDROID)
@@ -39,8 +39,7 @@ Radio e checkbox continuam com o raio upstream.
 +  constexpr char kCommon[] =
 +      "--cr-card-shadow:inset 0 0 0 1px var(--color-separator,"
 +      "rgba(255,255,255,.14));";
-+  if (aerographene::GetBuiltinTheme() ==
-+      aerographene::BuiltinTheme::kPixelized) {
++  if (aerographene::UsesPixelizedStyle()) {
 +    return base::StrCat(
 +        {"html:not(#z){", kCommon,
 +         "--aero-radius:0;--aero-radius-sm:0;--cr-card-border-radius:0;"

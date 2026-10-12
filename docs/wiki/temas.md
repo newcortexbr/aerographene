@@ -121,14 +121,9 @@ com tema de extensão ativo, raio, fonte e ícones voltam ao padrão do Chromium
 
 ## criar um tema embutido novo
 
-um terceiro tema com raio, fonte ou ícones próprios exige recompilar. Os pontos de mudança:
+desde a v0.2 o tema é dado: a struct `ThemeData` (`chrome/browser/themes/aerographene_theme.h`, em `patches/aerographene/theme-builtin.patch`) reúne nome, esquema (claro/escuro), raios (`radius`, `radius_small`), fonte (`font_family`, `font_size_px`), pacote de ícones compilado (`icons_base`: `default` ou `pixelized`), variante compilada do desenho (`style`) e os tokens de cor. `default` e `pixelized` são instâncias dela em `aerographene_theme.cc`; raio, fonte, esquema, ícones, mockups e páginas internas leem esses campos.
 
-- `patches/aerographene/theme-builtin.patch`: o enum `BuiltinTheme`, o valor da pref e a tabela de cores por tema em `aerographene_theme_tokens.cc`.
-- `patches/aerographene/theme-radius.patch`: raios por tema.
-- `patches/aerographene/theme-font.patch`: fonte por tema.
-- `patches/aerographene/theme-scheme.patch`: o esquema (claro ou escuro) de cada tema.
-- `patches/aerographene/theme-icons-*.patch`: mapa de ícones por tema.
-- `patches/aerographene/webui-theme-*.patch`: tokens das páginas internas.
+um tema embutido novo é mais uma instância em `aerographene_theme.cc` (e o nome em `GetBuiltinTheme`); exige recompilar. Ícones e `style` só aceitam os pacotes/variantes compilados. Ler temas do disco (`~/.config/aerographene/themes/<nome>/theme.json`) para a mesma struct ainda não existe.
 
 leia `docs/BUILD.md` antes; a build completa leva horas.
 

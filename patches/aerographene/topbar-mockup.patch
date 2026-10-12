@@ -132,7 +132,7 @@ Não verificado em runtime: tudo acima (só compilação dos .cc tocados).
  float TabStyle::GetSelectedTabOpacity() const {
 --- /dev/null
 +++ b/chrome/browser/ui/views/frame/aerographene_topbar_row.cc
-@@ -0,0 +1,524 @@
+@@ -0,0 +1,523 @@
 +// Copyright 2026 The Aerographene Authors
 +// You can use, redistribute, and/or modify this source code under
 +// the terms of the GPL-3.0 license that can be found in the LICENSE file.
@@ -201,8 +201,7 @@ Não verificado em runtime: tudo acima (só compilação dos .cc tocados).
 +}
 +
 +bool IsPixelized() {
-+  return aerographene::GetBuiltinTheme() ==
-+         aerographene::BuiltinTheme::kPixelized;
++  return aerographene::UsesPixelizedStyle();
 +}
 +
 +std::u16string GetDisplayName(const aerographene::PinnedItem& item) {
@@ -955,7 +954,7 @@ Não verificado em runtime: tudo acima (só compilação dos .cc tocados).
  #include "ui/views/widget/widget.h"
  
  HorizontalTabStyleViews::HorizontalTabStyleViews(
-@@ -309,7 +321,180 @@
+@@ -309,7 +321,179 @@
    return path.detach();
  }
  
@@ -975,8 +974,7 @@ Não verificado em runtime: tudo acima (só compilação dos .cc tocados).
 +constexpr int kAeroChipPaddingV = 2;
 +
 +bool IsAeroPixelized() {
-+  return aerographene::GetBuiltinTheme() ==
-+         aerographene::BuiltinTheme::kPixelized;
++  return aerographene::UsesPixelizedStyle();
 +}
 +
 +int GetAeroRadius() {

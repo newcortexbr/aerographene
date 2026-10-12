@@ -6,7 +6,8 @@ Propósito: hook estático em views::LayoutProvider
 (SetAerographeneCornerRadii) usado por GetCornerRadiusMetric (Emphasis e
 ShapeContextTokens) e pelo raio superior de TabStyle. default: 4px em
 controle/menu/diálogo, 3px em chip/badge; pixelized: 0 e 2px. Definido em
-ThemeService::Init (perfil regular).
+ThemeService::Init (perfil regular) a partir de
+GetActiveTheme().radius/radius_small.
 
 
 --- a/chrome/browser/themes/BUILD.gn
@@ -30,18 +31,16 @@ ThemeService::Init (perfil regular).
  #endif
  
  using TP = ThemeProperties;
-@@ -366,6 +367,16 @@
+@@ -366,6 +367,14 @@ void ThemeService::Init() {
            profile_->GetPrefs()->GetString(aerographene::kThemePref)))) {
      ui::ColorProviderManager::Get().ResetColorProviderCache();
    }
 +#if BUILDFLAG(IS_LINUX)
 +  if (profile_->IsRegularProfile()) {
-+    // default.md: 4px controls, 3px inner items. pixelized mockups: 0 on
-+    // fields, buttons, menus and tabs; 2px on chips/badges.
-+    const bool pixelized = aerographene::GetBuiltinTheme() ==
-+                           aerographene::BuiltinTheme::kPixelized;
-+    views::LayoutProvider::SetAerographeneCornerRadii(pixelized ? 0 : 4,
-+                                                      pixelized ? 2 : 3);
++    // Corner radii of the active theme (default 4/3, pixelized 0/2).
++    const aerographene::ThemeData& theme = aerographene::GetActiveTheme();
++    views::LayoutProvider::SetAerographeneCornerRadii(theme.radius,
++                                                      theme.radius_small);
 +  }
 +#endif
  

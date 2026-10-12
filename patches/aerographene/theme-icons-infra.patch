@@ -7,7 +7,8 @@ trocam o ícone (e o badge) antes do cache. Comando novo CAP_BUTT (traço com
 ponta reta; o join padrão do Skia já é miter, limite 4 como no SVG). Alvo
 novo chrome/browser/ui/aerographene_theme_icons (aggregate_vector_icons +
 mapa por tema, vazio aqui) e chamada no PostProfileInit do perfil inicial
-lendo a pref de perfil "aerographene.theme" pelo nome (theme-builtin).
+com GetActiveTheme().icons_base (theme-builtin; ThemeService::Init roda
+na criação do perfil, antes do PostProfileInit).
 Mapa vazio = ponteiro nulo = ícones upstream, sem lookup.
 
 --- /dev/null
@@ -200,41 +201,24 @@ Mapa vazio = ponteiro nulo = ícones upstream, sem lookup.
  #include <utility>
  
  #include "base/command_line.h"
-@@ -15,6 +16,7 @@
+@@ -15,6 +16,8 @@
  #include "chrome/browser/bookmarks/bookmark_merged_surface_service.h"
  #include "chrome/browser/bookmarks/bookmark_merged_surface_service_factory.h"
  #include "chrome/browser/browser_process.h"
++#include "chrome/browser/themes/aerographene_theme.h"
 +#include "chrome/browser/ui/aerographene_theme_icons/aerographene_theme_icons.h"
  #include "chrome/browser/net/system_network_context_manager.h"
  #include "chrome/browser/ui/infobars/browser_infobar_registry.h"
  #include "chrome/browser/ui/views/bookmarks/bookmark_account_storage_move_dialog.h"
-@@ -27,6 +29,7 @@
- #include "chrome/grit/generated_resources.h"
- #include "components/constrained_window/constrained_window_views.h"
- #include "components/infobars/core/infobar_delegate.h"
-+#include "components/prefs/pref_service.h"
- #include "components/media_router/browser/media_router_dialog_controller.h"
- #include "components/strings/grit/components_strings.h"
- #include "components/ui_devtools/devtools_server.h"
-@@ -179,6 +182,22 @@ void ChromeBrowserMainExtraPartsViews::PreProfileInit() {
+@@ -179,6 +182,12 @@ void ChromeBrowserMainExtraPartsViews::PreProfileInit() {
  void ChromeBrowserMainExtraPartsViews::PostProfileInit(
      Profile* profile,
      bool is_initial_profile) {
 +  if (is_initial_profile) {
-+    // aerographene: tema de ícones. A pref "aerographene.theme" é registrada
-+    // pelo patch theme-builtin; aqui só é lida pelo nome, no local state ou,
-+    // se não estiver registrada lá, nas prefs do perfil. Ausente = default.
-+    std::string icon_theme;
-+    for (PrefService* prefs :
-+         {g_browser_process->local_state(), profile->GetPrefs()}) {
-+      const PrefService::Preference* pref =
-+          prefs ? prefs->FindPreference("aerographene.theme") : nullptr;
-+      if (pref && pref->GetValue()->is_string()) {
-+        icon_theme = pref->GetValue()->GetString();
-+        break;
-+      }
-+    }
-+    aerographene_theme_icons::ApplyTheme(icon_theme);
++    // aerographene: pacote de ícones do tema ativo (icons.base), definido
++    // em ThemeService::Init, que roda na criação do perfil, antes daqui.
++    aerographene_theme_icons::ApplyTheme(
++        aerographene::GetActiveTheme().icons_base);
 +  }
    auto* service = BookmarkMergedSurfaceServiceFactory::GetForProfile(profile);
    if (service) {

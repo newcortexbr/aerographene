@@ -119,7 +119,7 @@ theme-font e pixelized-type.
  #include "ui/views/background.h"
  #include "ui/views/controls/button/label_button.h"
  #include "ui/views/controls/focus_ring.h"
-@@ -92,6 +98,36 @@
+@@ -92,6 +98,35 @@
       .light_ambient = 0.0,
       .dark_key = 0.6,
       .dark_ambient = 0.0});
@@ -138,8 +138,7 @@ theme-font e pixelized-type.
 +  }
 +  const gfx::Rect bounds = view->GetLocalBounds();
 +  cc::PaintFlags flags;
-+  if (aerographene::GetBuiltinTheme() ==
-+      aerographene::BuiltinTheme::kPixelized) {
++  if (aerographene::UsesPixelizedStyle()) {
 +    flags.setColor(colors->GetColor(ui::kColorSysSurface));
 +  } else {
 +    flags.setShader(gfx::CreateGradientShader(
@@ -567,7 +566,7 @@ theme-font e pixelized-type.
  #include "ui/views/layout/layout_types.h"
  #include "ui/views/layout/proposed_layout.h"
  #include "ui/views/view.h"
-@@ -129,6 +139,160 @@
+@@ -129,6 +139,159 @@
    return gesture_detail;
  }
  
@@ -585,8 +584,7 @@ theme-font e pixelized-type.
 +constexpr int kAeroChipPaddingV = 2;
 +
 +bool IsAeroPixelized() {
-+  return aerographene::GetBuiltinTheme() ==
-+         aerographene::BuiltinTheme::kPixelized;
++  return aerographene::UsesPixelizedStyle();
 +}
 +
 +int GetAeroRadius() {

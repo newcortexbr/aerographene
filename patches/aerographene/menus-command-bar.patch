@@ -35,7 +35,7 @@ Compilação parcial e runtime: ver patches/README.md.
 
 --- a/chrome/browser/ui/color/aerographene_theme_tokens.cc
 +++ b/chrome/browser/ui/color/aerographene_theme_tokens.cc
-@@ -96,13 +96,16 @@
+@@ -96,13 +96,16 @@ const TokenSpec kTokens[] = {
        kColorTabDividerFrameInactive}},
      {"menu", {ui::kColorMenuBackground}},
      {"menu_text", {ui::kColorMenuItemForeground}},
@@ -53,24 +53,6 @@ Compilação parcial e runtime: ver patches/README.md.
      {"on_accent", {ui::kColorSysOnPrimary}},
  };
  
-@@ -145,6 +148,8 @@
-     {"separator", SkColorSetARGB(0x29, 0x8C, 0xB4, 0xFF)},
-     {"menu", SkColorSetRGB(0x07, 0x0C, 0x18)},
-     {"menu_text", SkColorSetRGB(0xEA, 0xF2, 0xFF)},
-+    {"menu_border", SkColorSetARGB(0x29, 0x8C, 0xB4, 0xFF)},
-+    {"menu_text_dim", SkColorSetRGB(0xA9, 0xB8, 0xD0)},
-     {"ntp", SkColorSetRGB(0x04, 0x07, 0x0E)},
-     {"ntp_text", SkColorSetRGB(0xEA, 0xF2, 0xFF)},
-     {"base", SkColorSetRGB(0x04, 0x07, 0x0E)},
-@@ -183,6 +188,8 @@
-     {"separator", SkColorSetARGB(0x24, 0xFF, 0xFF, 0xFF)},
-     {"menu", SkColorSetRGB(0x11, 0x11, 0x11)},
-     {"menu_text", SkColorSetRGB(0xF2, 0xF2, 0xF2)},
-+    {"menu_border", SkColorSetARGB(0x24, 0xFF, 0xFF, 0xFF)},
-+    {"menu_text_dim", SkColorSetRGB(0x8C, 0x8C, 0x8C)},
-     {"ntp", SkColorSetRGB(0x0A, 0x0A, 0x0A)},
-     {"ntp_text", SkColorSetRGB(0xF2, 0xF2, 0xF2)},
-     {"base", SkColorSetRGB(0x0A, 0x0A, 0x0A)},
 --- a/chrome/browser/ui/views/location_bar/location_bar_view.cc
 +++ b/chrome/browser/ui/views/location_bar/location_bar_view.cc
 @@ -1455,6 +1455,14 @@
@@ -482,3 +464,23 @@ Compilação parcial e runtime: ver patches/README.md.
    // Then, the height for that width.
    const int menu_item_width = width - insets.width();
    bool previous_child_was_lower_separator = false;
+--- a/chrome/browser/themes/aerographene_theme.cc
++++ b/chrome/browser/themes/aerographene_theme.cc
+@@ -48,6 +48,8 @@ constexpr BuiltinToken kDefaultTokens[] = {
+     {"separator", SkColorSetARGB(0x29, 0x8C, 0xB4, 0xFF)},
+     {"menu", SkColorSetRGB(0x07, 0x0C, 0x18)},
+     {"menu_text", SkColorSetRGB(0xEA, 0xF2, 0xFF)},
++    {"menu_border", SkColorSetARGB(0x29, 0x8C, 0xB4, 0xFF)},
++    {"menu_text_dim", SkColorSetRGB(0xA9, 0xB8, 0xD0)},
+     {"ntp", SkColorSetRGB(0x04, 0x07, 0x0E)},
+     {"ntp_text", SkColorSetRGB(0xEA, 0xF2, 0xFF)},
+     {"base", SkColorSetRGB(0x04, 0x07, 0x0E)},
+@@ -86,6 +88,8 @@ constexpr BuiltinToken kPixelizedTokens[] = {
+     {"separator", SkColorSetARGB(0x24, 0xFF, 0xFF, 0xFF)},
+     {"menu", SkColorSetRGB(0x11, 0x11, 0x11)},
+     {"menu_text", SkColorSetRGB(0xF2, 0xF2, 0xF2)},
++    {"menu_border", SkColorSetARGB(0x24, 0xFF, 0xFF, 0xFF)},
++    {"menu_text_dim", SkColorSetRGB(0x8C, 0x8C, 0x8C)},
+     {"ntp", SkColorSetRGB(0x0A, 0x0A, 0x0A)},
+     {"ntp_text", SkColorSetRGB(0xF2, 0xF2, 0xF2)},
+     {"base", SkColorSetRGB(0x0A, 0x0A, 0x0A)},

@@ -109,16 +109,13 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
  #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
  #include "components/omnibox/browser/omnibox_field_trial.h"
  #include "ui/base/default_style.h"
-@@ -59,6 +60,13 @@
+@@ -59,6 +60,10 @@
      case CONTEXT_OMNIBOX_TOOLBELT_BUTTON: {
        const bool is_touch_ui = ui::TouchUiController::Get()->touch_ui();
        int desired_font_size = is_touch_ui ? 15 : 14;
 +      if (context == CONTEXT_OMNIBOX_PRIMARY) {
 +        // aerographene: URL text is 13px (default) / 12px (pixelized).
-+        desired_font_size = aerographene::GetBuiltinTheme() ==
-+                                    aerographene::BuiltinTheme::kPixelized
-+                                ? 12
-+                                : 13;
++        desired_font_size = aerographene::UsesPixelizedStyle() ? 12 : 13;
 +      }
        const int omnibox_primary_delta =
            GetFontSizeDeltaBoundedByAvailableHeight(
