@@ -327,3 +327,23 @@ Modo topbar (abas horizontais): linha 1 de 40 px acima das abas com a linha do s
 ### `aerographene/pixelized-type.patch` (GPL-3.0, mockup R-r01a pixelized, fidelidade de 11/10/2026)
 
 Rótulos de linha em CAIXA ALTA no pixelized (`.row{text-transform:uppercase}`): nome do space (`AerographeneSpaceRow`, também na topbar), linha de pasta de pinned, "Nova aba" do botão da sidebar e pastas da topbar; títulos de aba não. A conversão (`base::i18n::ToUpper`) é feita uma vez ao definir o texto, nunca por pintura; tooltip e nome de acessibilidade ficam com o texto original. A fonte JetBrains Mono em todo o chrome vem do `theme-font`. Depende de `theme-font`, `sidebar-mockup`, `topbar-mockup`.
+
+### `aerographene/newtab-fidelity.patch` (GPL-3.0; fonte 7-Segment SIL OFL 1.1, fidelidade de 11/10/2026)
+
+Nova aba como R-r01a nos dois temas, em cima de `newtab-home.patch` (que o patch reescreve; depende dele e de `theme-builtin`). Toca `aero_newtab.html`, `new_tab_page_third_party_ui.cc`, `aerographene_theme.h` e `theme_service.cc`; nenhum `.gn`, `.grd` ou arquivo novo no Chromium (o recurso `IDR_AERO_NEWTAB_HTML` já existe).
+
+Fonte do relógio: "7-Segment" 3.0, Jan Bobrowski, https://torinak.com/7segment, SIL Open Font License 1.1 (sem Reserved Font Name). Original e licença em `theming/fonts/7segment/` (`7segment.ttf`, `OFL.txt`); o que vai no pacote é o subset `7segment-subset.woff2` (dígitos, `:`, `°`, espaço; 636 bytes) em base64 dentro do HTML, porque patch não carrega binário. Usada nos dois temas (decisão de SCOPE de 11/10, acima do mockup default que usava Noto 13 px); 18 px com `letter-spacing:.24em` em vez dos 13 px/.32em do mockup, pois o 7-Segment a 13 px fica ilegível. No pixelized cai para mono se a fonte falhar, no default para Noto.
+
+Tema: o controller lê `aerographene.theme` (perfil) e injeta `$i18n{aeroTheme}` (`pz` ou vazio) como classe do `<html>`; o CSS pixelized é o do mockup (sem raio, chips `#0a0a0a`, mono, `#181818`/`#111`). Sem `strings.js`, `loadTimeData`, `colors.css` ou `ThemeSource`: uma requisição local (o HTML) por aba nova. Wallpaper default: SVG estático do patch anterior com cores literais (sem blur, sem animação, sem paleta clara; os temas são escuros); pixelized: `wallpaper-bayer.png` do design-language reduzido a 720x450 (cada ponto de 2 px vira 1), 1-bit, 4,2 KB, em data URI com `image-rendering:pixelated` e `cover` (CSP do WebUI de `chrome://` não restringe `img-src`/`font-src`).
+
+Busca: o campo é um botão; o clique chama `chrome.send("focusOmnibox")` e `AeroNewTabHandler` faz `search::FocusOmnibox(true, web_contents)`, o handoff do fakebox da NTP upstream (foco sem cursor; ao digitar abre o popup/command bar). Só clique (e Enter/espaço no botão): foco por Tab não rouba o foco, para poder chegar ao Personalizar. Ctrl+K é o `IDC_FOCUS_SEARCH` nativo (`accelerator_table.cc`), a página não o intercepta. A lógica de busca da página (`searchUrl`, `GetSearchUrl`, submit) foi removida; as dependências `//chrome/browser/search_engines` e `//components/search_engines` do `BUILD.gn` do patch anterior ficam sem uso.
+
+Mensagem do dia: 30 frases curtas em pt-BR no próprio HTML, escolhida por dia do calendário local (índice mod 30); sem rede; oculta se `navigator.language` não for `pt*`. Saudação por hora (bom dia até 11h59, boa tarde até 17h59, boa noite) e relógio `HH:MM` 24 h com `setTimeout` alinhado ao minuto. A data por extenso foi removida (não existe no mockup).
+
+Clima: pref de perfil nova `aerographene.ntp.weather` (bool, padrão `false`, registrada junto da pref do tema em `ThemeService::RegisterProfilePrefs`; constante `aerographene::kNtpWeatherPref`). Desligada: bloco `display:none`, nenhum pedido de rede. Ligada: o bloco aparece como placeholder "--° clima indisponível"; nesta versão não há fonte de dados e nenhuma chamada externa (provedor/API key dependem de decisão do dono). Pendente: fonte de dados do clima e interruptor na UI (não há tela de configurações para a pref; hoje só por Preferences/flag de perfil).
+
+Personalizar: link `chrome://settings/appearance` (canto inferior direito, 32 px, ícone de engrenagem). Não foi aberto o side panel Customize Chrome porque ele depende do NTP upstream com Mojo; não verificado se existe nesta árvore.
+
+Peso (NTP aberta no startup): HTML de 15,5 KB (6,4 KB de base64 da fonte e do PNG), ~9 KB comprimido; nenhuma outra requisição. Não medido no harness.
+
+Compilação e runtime não verificados. Verificado só o HTML em Chromium 1234 do cache do Playwright (renderização dos dois temas em 1440x900, pt-BR).
