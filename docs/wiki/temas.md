@@ -149,6 +149,16 @@ desempenho: tema embutido não lê disco no início; um tema do repositório cus
 
 API do seletor e da importação (`chrome/browser/themes/aerographene_theme_repo.h`; o seletor de configurações usa `ListThemes` pelas mensagens `getAerographeneThemes`/`setAerographeneTheme` do `AppearanceHandler`, e só aceita nomes que `ListThemes` devolve): `ListThemes(callback)` devolve `default`, `pixelized` e os temas válidos do repositório com seus metadados; `InstallTheme(json, replace, callback)` valida e grava `themes/<nome>/theme.json` de forma atômica (`kConflict` se já existe, sem diferenciar caixa, até `replace`).
 
+## importar tema (`.aerotheme`)
+
+desde a v0.2 (patch `settings-theme-import`) um tema pode ser instalado de um arquivo `.aerotheme`: um zip com exatamente um arquivo, `theme.json`, na raiz (mesmo formato da seção acima). Para criar: `zip -j Meu-Tema.aerotheme theme.json`.
+
+em `chrome://settings/appearance`, botão "Import theme..." abaixo do seletor: abre o seletor de arquivos (filtro `.aerotheme`), valida e grava em `themes/<nome>/`. Se já existe um tema com o mesmo nome (sem diferenciar caixa), um diálogo pergunta "Replace" ou "Cancel"; não há renomeação automática. Depois de importar, a lista é atualizada e um diálogo oferece "Use theme" (grava a pref e abre o mesmo diálogo de reinício do seletor) ou "Not now".
+
+o arquivo é recusado se: não for arquivo regular, passar de 68 KiB, não for zip, tiver outra entrada além de `theme.json` (pasta, caminho, outro nome, symlink, criptografia) ou se `theme.json` descompactado passar de 64 KiB (o tamanho declarado no zip não é confiado). Nome `default`/`pixelized` e `theme.json` inválido mostram erro na própria linha. A leitura roda fora da UI thread.
+
+API (`chrome/browser/themes/aerographene_theme_archive.h`): `ReadThemeArchive(path, &json)` (bloqueante, só extrai) e `ImportThemeArchive(path, replace, callback)` (lê no thread pool e chama `InstallTheme`; resultado `kInstalled|kBadArchive|kInvalid|kReserved|kConflict|kIoError`). Pensada para ser reusada pela importação por linha de comando (`--import-theme=<arquivo>`, fatia 5, ainda não feita).
+
 ## criar um tema embutido novo
 
 desde a v0.2 o tema é dado: a struct `ThemeData` (`chrome/browser/themes/aerographene_theme.h`, em `patches/aerographene/theme-builtin.patch`) reúne nome, esquema (claro/escuro), raios (`radius`, `radius_small`), fonte (`font_family`, `font_size_px`), pacote de ícones compilado (`icons_base`: `default` ou `pixelized`), variante compilada do desenho (`style`) e os tokens de cor. `default` e `pixelized` são instâncias dela em `aerographene_theme.cc`; raio, fonte, esquema, ícones, mockups e páginas internas leem esses campos.
@@ -177,6 +187,8 @@ LAYERS (applied in order, last wins):
 1. builtin theme, profile pref "aerographene.theme" = "default" | "pixelized".
    Controls colors + corner radius + font + icons. Needs restart.
    UI: chrome://settings/appearance "Browser theme" picker (lists builtin + repository themes; asks restart now/later).
+   "Import theme..." installs a .aerotheme = zip with ONLY theme.json at root (zip -j X.aerotheme theme.json),
+   archive <= 68 KiB, theme.json <= 64 KiB; same-name (case-insensitive) asks replace/cancel.
    Set it with the browser CLOSED, in ~/.config/aerographene/Default/Preferences (single-line JSON):
    jq '.aerographene.theme = "pixelized"' Preferences > P.new && mv P.new Preferences
 2. tokens file: ${XDG_CONFIG_HOME:-~/.config}/aerographene/theme.json
