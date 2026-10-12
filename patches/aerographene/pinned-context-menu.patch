@@ -1,0 +1,1203 @@
+aerographene: menus de contexto de pinned/pastas (topbar e sidebar), arrastar pinned para pasta e ícones nos menus.
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/topbar-mockup.patch, topbar-folder.patch,
+sidebar-mockup.patch, pinned-folder.patch, pinned-label.patch (último da série).
+Propósito (relato de uso do pacote 9ff0c73):
+1. Clique direito em pinned e pastas abre menu nos dois modos. Classe nova
+   aerographene::PinnedContextMenu (views/frame/aerographene_pinned_menu.*),
+   uma por topbar row e uma por PinnedTabContainerView, sobre o mesmo
+   PinnedModel. Pinned: Abrir, Fechar (se aberto nesta janela), Mover para
+   pasta (submenu: gavetas, "nova pasta", "tirar da pasta"), Renomear,
+   Desafixar (aba aberta nesta janela: SetTabPinned(false), o espelho remove a
+   entrada; senão PinnedModel::Remove). Pasta: Renomear (rótulo, via o mesmo
+   diálogo; o diálogo passou a aceitar pastas), Nova pasta, Excluir (os
+   pinned de dentro vão para o topo, no lugar da pasta, e a pasta é
+   removida). O menu antigo do topbar passava pela aba escondida
+   (TabStrip::ShowContextMenuForTab) e não tinha menu para pinned fechado nem
+   para pasta; o do placeholder da sidebar foi trocado pelo menu comum.
+2. Arrastar um pinned para dentro de uma pasta: botão de pinned do topbar e
+   placeholder (pinned fechado) da sidebar são origem de arrasto
+   (View::GetDragOperations/WriteDragData; texto com prefixo privado com o
+   uuid); botão de pasta do topbar e linha de pasta da sidebar são alvo
+   (GetDropFormats/CanDrop/GetDropCallback) e chamam PinnedModel::Move para o
+   fim da gaveta e SetExpanded(true). Pasta não é arrastável nem aceita
+   pasta. Fora do escopo: aba viva (TabView) da sidebar como origem (usa o
+   arrasto de abas do Chromium), imagem de arrasto, reordenar dentro da
+   gaveta por arrasto.
+3. Ícones (vector icons do Chromium; o tema os troca pelo seu pack): menus
+   novos e, em TabMenuModel::Build, um passe final dá ícone a todo item
+   conhecido que ficou sem (o Chromium só põe com MenuSimplification).
+4. Fixar/desafixar: o item CommandTogglePinned já estava no menu da aba
+   (Build, sempre adicionado e habilitado); ganhou ícone mesmo sem
+   MenuSimplification. Desafixar também está no menu novo do pinned.
+Strings novas em chrome/app/generated_resources.grd (blocos normal e Title
+Case): IDS_AEROGRAPHENE_OPEN_PINNED, _MOVE_PINNED_TO_FOLDER, _NEW_FOLDER,
+_RENAME_FOLDER, _DELETE_FOLDER (pt-BR em build/strings_ptbr_extra.json).
+Reaproveitadas: IDS_AEROGRAPHENE_RENAME_PINNED, _NEW_PINNED_FOLDER,
+_MOVE_PINNED_TO_ROOT, _PINNED_FOLDER_DEFAULT_TITLE, IDS_TAB_CXMENU_UNPIN_TAB,
+IDS_TAB_CXMENU_CLOSETAB.
+
+--- a/chrome/app/generated_resources.grd
++++ b/chrome/app/generated_resources.grd
+@@ -12211,6 +12211,21 @@
+         <message name="IDS_AEROGRAPHENE_PINNED_FOLDER_DEFAULT_TITLE" desc="Default name of a new pinned folder in the vertical pinned grid.">
+           Folder
+         </message>
++        <message name="IDS_AEROGRAPHENE_OPEN_PINNED" desc="The label of the context menu item, on a pinned entry in the pinned grid or the top row, that opens (or switches to) it.">
++          Open
++        </message>
++        <message name="IDS_AEROGRAPHENE_MOVE_PINNED_TO_FOLDER" desc="The label of the context menu submenu, on a pinned entry, that lists the pinned folders it can be moved to.">
++          Move to folder
++        </message>
++        <message name="IDS_AEROGRAPHENE_NEW_FOLDER" desc="The label of the context menu item, on a pinned folder, that creates another pinned folder.">
++          New folder
++        </message>
++        <message name="IDS_AEROGRAPHENE_RENAME_FOLDER" desc="The label of the context menu item, on a pinned folder, that renames it.">
++          Rename folder…
++        </message>
++        <message name="IDS_AEROGRAPHENE_DELETE_FOLDER" desc="The label of the context menu item, on a pinned folder, that deletes it; the pinned entries inside go to the top level.">
++          Delete folder
++        </message>
+         <message name="IDS_TAB_CXMENU_CLOSETAB" desc="The label of the tab context menu item for closing one or more tabs.">
+           Close
+         </message>
+@@ -12357,6 +12372,21 @@
+         <message name="IDS_AEROGRAPHENE_PINNED_FOLDER_DEFAULT_TITLE" desc="Default name of a new pinned folder in the vertical pinned grid.">
+           Folder
+         </message>
++        <message name="IDS_AEROGRAPHENE_OPEN_PINNED" desc="The label of the context menu item, on a pinned entry in the pinned grid or the top row, that opens (or switches to) it.">
++          Open
++        </message>
++        <message name="IDS_AEROGRAPHENE_MOVE_PINNED_TO_FOLDER" desc="In Title Case: The label of the context menu submenu, on a pinned entry, that lists the pinned folders it can be moved to.">
++          Move to Folder
++        </message>
++        <message name="IDS_AEROGRAPHENE_NEW_FOLDER" desc="In Title Case: The label of the context menu item, on a pinned folder, that creates another pinned folder.">
++          New Folder
++        </message>
++        <message name="IDS_AEROGRAPHENE_RENAME_FOLDER" desc="In Title Case: The label of the context menu item, on a pinned folder, that renames it.">
++          Rename Folder…
++        </message>
++        <message name="IDS_AEROGRAPHENE_DELETE_FOLDER" desc="In Title Case: The label of the context menu item, on a pinned folder, that deletes it; the pinned entries inside go to the top level.">
++          Delete Folder
++        </message>
+         <message name="IDS_TAB_CXMENU_CLOSETAB" desc="In Title Case: The label of the tab context menu item for closing one or more tabs.">
+           Close
+         </message>
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -2550,6 +2550,8 @@
+       "views/frame/custom_floating_corner.h",
+       "views/frame/find_bar_owner_views.cc",
+       "views/frame/find_bar_owner_views.h",
++      "views/frame/aerographene_pinned_menu.cc",
++      "views/frame/aerographene_pinned_menu.h",
+       "views/frame/aerographene_topbar_row.cc",
+       "views/frame/aerographene_topbar_row.h",
+       "views/frame/horizontal_tab_strip_region_view.cc",
+--- a/chrome/browser/ui/tabs/tab_menu_model.cc
++++ b/chrome/browser/ui/tabs/tab_menu_model.cc
+@@ -634,6 +634,61 @@
+                tab_strip_->IsContextMenuCommandEnabled(
+                    index,
+                    TabStripModel::CommandCloseTabsToRight));
++
++  // aerographene: Chromium only sets icons on some items, and only with
++  // MenuSimplification. Give every known item without one a vector icon
++  // (the theme maps them to its pack).
++  for (size_t i = 0; i < GetItemCount(); ++i) {
++    if (!GetIconAt(i).IsEmpty()) {
++      continue;
++    }
++    const gfx::VectorIcon* icon = nullptr;
++    switch (GetCommandIdAt(i)) {
++      case TabStripModel::CommandNewTabToRight:
++        icon = &vector_icons::kAdd2Icon;
++        break;
++      case TabStripModel::CommandCopyURL:
++        icon = &vector_icons::kLinkIcon;
++        break;
++      case TabStripModel::CommandReload:
++        icon = &vector_icons::kRefreshIcon;
++        break;
++      case TabStripModel::CommandDuplicate:
++        icon = &vector_icons::kContentCopyIcon;
++        break;
++      case TabStripModel::CommandTogglePinned:
++        icon = will_pin ? &views::kKeepIcon : &views::kKeepFilledIcon;
++        break;
++      case TabStripModel::CommandAerographeneRenamePinned:
++        icon = &vector_icons::kEditIcon;
++        break;
++      case TabStripModel::CommandAerographeneNewPinnedFolder:
++        icon = &vector_icons::kFolderFlippableIcon;
++        break;
++      case TabStripModel::CommandAerographeneMovePinnedToRoot:
++        icon = &vector_icons::kFolderOpenIcon;
++        break;
++      case TabStripModel::CommandToggleSiteMuted:
++        icon = will_mute ? &vector_icons::kVolumeOffIcon
++                         : &vector_icons::kVolumeUpIcon;
++        break;
++      case TabStripModel::CommandCloseTab:
++      case TabStripModel::CommandCloseOtherTabs:
++      case TabStripModel::CommandCloseTabsToRight:
++        icon = &vector_icons::kCloseIcon;
++        break;
++      case TabStripModel::CommandMoveTabsToNewWindow:
++        icon = &::kOpenInNewIcon;
++        break;
++      default:
++        break;
++    }
++    if (icon) {
++      SetIcon(i, ui::ImageModel::FromVectorIcon(
++                     *icon, ui::kColorMenuIcon,
++                     ui::SimpleMenuModel::kDefaultIconSize));
++    }
++  }
+ }
+ 
+ DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(TabMenuModel,
+--- /dev/null
++++ b/chrome/browser/ui/views/frame/aerographene_pinned_menu.cc
+@@ -0,0 +1,307 @@
++// Copyright 2026 The Aerographene Authors
++// You can use, redistribute, and/or modify this source code under
++// the terms of the GPL-3.0 license that can be found in the LICENSE file.
++
++#include "chrome/browser/ui/views/frame/aerographene_pinned_menu.h"
++
++#include <algorithm>
++#include <limits>
++#include <string>
++#include <utility>
++
++#include "base/strings/strcat.h"
++#include "base/strings/string_util.h"
++#include "base/strings/utf_string_conversions.h"
++#include "chrome/app/vector_icons/vector_icons.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/tabs/aerographene/pinned_model.h"
++#include "chrome/browser/ui/tabs/aerographene/pinned_model_factory.h"
++#include "chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.h"
++#include "chrome/browser/ui/tabs/tab_enums.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "components/tabs/public/tab_interface.h"
++#include "chrome/browser/ui/views/tabs/common/aerographene_rename_pinned_dialog.h"
++#include "chrome/grit/generated_resources.h"
++#include "components/vector_icons/vector_icons.h"
++#include "ui/base/dragdrop/os_exchange_data.h"
++#include "ui/base/l10n/l10n_util.h"
++#include "ui/base/models/image_model.h"
++#include "ui/base/mojom/menu_source_type.mojom.h"
++#include "ui/color/color_id.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/gfx/vector_icon_types.h"
++#include "ui/views/controls/menu/menu_runner.h"
++#include "ui/views/vector_icons.h"
++#include "ui/views/widget/widget.h"
++
++namespace aerographene {
++
++namespace {
++
++constexpr char16_t kDragPrefix[] = u"aerographene-pinned:";
++
++enum Command {
++  kOpen = 1,
++  kMoveToFolder,
++  kMoveToNewFolder,
++  kMoveOutOfFolder,
++  kRename,
++  kUnpin,
++  kClose,
++  kNewFolder,
++  kDeleteFolder,
++  // Drawers of the "Move to folder" submenu: kFolderBase + position.
++  kFolderBase = 100,
++};
++
++ui::ImageModel Icon(const gfx::VectorIcon& icon) {
++  return ui::ImageModel::FromVectorIcon(icon, ui::kColorMenuIcon,
++                                        ui::SimpleMenuModel::kDefaultIconSize);
++}
++
++std::u16string GetName(const PinnedItem& item) {
++  return item.label.empty() ? item.title : base::UTF8ToUTF16(item.label);
++}
++
++}  // namespace
++
++PinnedContextMenu::PinnedContextMenu(BrowserWindowInterface* browser,
++                                     OpenCallback open_callback)
++    : browser_(browser), open_callback_(std::move(open_callback)) {}
++
++PinnedContextMenu::~PinnedContextMenu() = default;
++
++PinnedModel* PinnedContextMenu::GetModel() const {
++  return browser_ ? PinnedModelFactory::GetForProfile(browser_->GetProfile())
++                  : nullptr;
++}
++
++void PinnedContextMenu::Show(views::Widget* parent,
++                             const base::Uuid& uuid,
++                             const gfx::Point& screen_point,
++                             ui::mojom::MenuSourceType source_type) {
++  PinnedModel* const model = GetModel();
++  if (!parent || !model || !model->IsLoaded()) {
++    return;
++  }
++  const std::optional<PinnedItem> item = model->Find(uuid);
++  if (!item) {
++    return;
++  }
++  uuid_ = uuid;
++  parent_window_ = parent->GetNativeWindow();
++  folders_.clear();
++  folder_model_.reset();
++  menu_model_ = std::make_unique<ui::SimpleMenuModel>(this);
++
++  if (item->is_folder) {
++    menu_model_->AddItemWithStringIdAndIcon(
++        kRename, IDS_AEROGRAPHENE_RENAME_FOLDER, Icon(vector_icons::kEditIcon));
++    menu_model_->AddItemWithStringIdAndIcon(
++        kNewFolder, IDS_AEROGRAPHENE_NEW_FOLDER, Icon(vector_icons::kAdd2Icon));
++    menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
++    menu_model_->AddItemWithStringIdAndIcon(
++        kDeleteFolder, IDS_AEROGRAPHENE_DELETE_FOLDER,
++        Icon(views::kDeleteIcon));
++  } else {
++    menu_model_->AddItemWithStringIdAndIcon(
++        kOpen, IDS_AEROGRAPHENE_OPEN_PINNED, Icon(::kOpenInNewIcon));
++    if (FindLiveTab(model) >= 0) {
++      menu_model_->AddItemWithStringIdAndIcon(
++          kClose, IDS_TAB_CXMENU_CLOSETAB, Icon(vector_icons::kCloseIcon));
++    }
++
++    // Move to folder: the other drawers, a new one, or out of the drawer.
++    folder_model_ = std::make_unique<ui::SimpleMenuModel>(this);
++    const base::Uuid current_folder = model->GetParentFolder(uuid);
++    for (const PinnedItem& top : model->GetPinned()) {
++      if (!top.is_folder || top.uuid == current_folder) {
++        continue;
++      }
++      folder_model_->AddItemWithIcon(
++          kFolderBase + static_cast<int>(folders_.size()), GetName(top),
++          Icon(vector_icons::kFolderFlippableIcon));
++      folders_.push_back(top.uuid);
++    }
++    if (!folders_.empty()) {
++      folder_model_->AddSeparator(ui::NORMAL_SEPARATOR);
++    }
++    folder_model_->AddItemWithStringIdAndIcon(
++        kMoveToNewFolder, IDS_AEROGRAPHENE_NEW_PINNED_FOLDER,
++        Icon(vector_icons::kAdd2Icon));
++    if (current_folder.is_valid()) {
++      folder_model_->AddItemWithStringIdAndIcon(
++          kMoveOutOfFolder, IDS_AEROGRAPHENE_MOVE_PINNED_TO_ROOT,
++          Icon(vector_icons::kFolderOpenIcon));
++    }
++    menu_model_->AddSubMenuWithStringIdAndIcon(
++        kMoveToFolder, IDS_AEROGRAPHENE_MOVE_PINNED_TO_FOLDER,
++        folder_model_.get(), Icon(vector_icons::kFolderFlippableIcon));
++    menu_model_->AddItemWithStringIdAndIcon(
++        kRename, IDS_AEROGRAPHENE_RENAME_PINNED, Icon(vector_icons::kEditIcon));
++    menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
++    menu_model_->AddItemWithStringIdAndIcon(
++        kUnpin, IDS_TAB_CXMENU_UNPIN_TAB, Icon(views::kKeepFilledIcon));
++  }
++
++  menu_runner_ = std::make_unique<views::MenuRunner>(
++      menu_model_.get(),
++      views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU);
++  menu_runner_->RunMenuAt(parent, nullptr, gfx::Rect(screen_point, gfx::Size()),
++                          views::MenuAnchorPosition::kTopLeft, source_type);
++}
++
++void PinnedContextMenu::ExecuteCommand(int command_id, int event_flags) {
++  PinnedModel* const model = GetModel();
++  if (!model || !model->IsLoaded() || !model->Contains(uuid_)) {
++    return;
++  }
++  if (command_id >= kFolderBase) {
++    const size_t position = static_cast<size_t>(command_id - kFolderBase);
++    if (position >= folders_.size()) {
++      return;
++    }
++    const base::Uuid folder = folders_[position];
++    const std::optional<PinnedItem> target = model->Find(folder);
++    if (!target) {
++      return;
++    }
++    PinnedModel::ScopedBatch batch(model);
++    model->Move(uuid_, folder, target->children.size());
++    model->SetExpanded(folder, true);
++    return;
++  }
++  switch (command_id) {
++    case kOpen:
++      open_callback_.Run(uuid_);
++      break;
++    case kMoveToNewFolder:
++      model->MoveIntoNewFolder(
++          uuid_, l10n_util::GetStringUTF16(
++                     IDS_AEROGRAPHENE_PINNED_FOLDER_DEFAULT_TITLE));
++      break;
++    case kMoveOutOfFolder:
++      model->MoveToTopLevel(uuid_);
++      break;
++    case kRename:
++      ShowRenamePinnedDialog(browser_->GetProfile(), uuid_, std::u16string(),
++                             parent_window_);
++      break;
++    case kUnpin:
++      Unpin(model);
++      break;
++    case kClose:
++      if (const int tab_index = FindLiveTab(model); tab_index >= 0) {
++        // Closing the pinned tab keeps the entry, as a closed pinned.
++        browser_->GetTabStripModel()->CloseWebContentsAt(
++            tab_index, CLOSE_USER_GESTURE | CLOSE_CREATE_HISTORICAL_TAB);
++      }
++      break;
++    case kNewFolder:
++      model->AddFolder(l10n_util::GetStringUTF16(
++                           IDS_AEROGRAPHENE_PINNED_FOLDER_DEFAULT_TITLE),
++                       std::numeric_limits<size_t>::max());
++      break;
++    case kDeleteFolder:
++      DeleteFolder(model);
++      break;
++    default:
++      break;
++  }
++}
++
++int PinnedContextMenu::FindLiveTab(PinnedModel* model) const {
++  TabStripModel* const tab_strip_model = browser_->GetTabStripModel();
++  PinnedTabMirror* const mirror = model->tab_mirror();
++  if (!tab_strip_model || !mirror) {
++    return -1;
++  }
++  for (int i = 0; i < tab_strip_model->count(); ++i) {
++    const std::optional<base::Uuid> entry =
++        mirror->GetEntryForTab(tab_strip_model->GetTabAtIndex(i));
++    if (entry && *entry == uuid_) {
++      return i;
++    }
++  }
++  return -1;
++}
++
++void PinnedContextMenu::Unpin(PinnedModel* model) {
++  // Open in this window: unpin the tab, the mirror then removes the entry
++  // (pinned tab and entry are the same element). Otherwise just drop the entry.
++  if (const int tab_index = FindLiveTab(model); tab_index >= 0) {
++    browser_->GetTabStripModel()->SetTabPinned(tab_index, false);
++    return;
++  }
++  model->Remove(uuid_);
++}
++
++void PinnedContextMenu::DeleteFolder(PinnedModel* model) {
++  const std::optional<PinnedItem> folder = model->Find(uuid_);
++  if (!folder || !folder->is_folder) {
++    return;
++  }
++  // The entries are kept: they go to the top level where the folder was.
++  PinnedModel::ScopedBatch batch(model);
++  const int index = model->GetTopLevelIndex(uuid_);
++  size_t at = index >= 0 ? static_cast<size_t>(index) + 1
++                         : std::numeric_limits<size_t>::max();
++  for (const PinnedItem& child : folder->children) {
++    model->Move(child.uuid, base::Uuid(), at);
++    if (at != std::numeric_limits<size_t>::max()) {
++      ++at;
++    }
++  }
++  model->Remove(uuid_);
++}
++
++void WritePinnedDragData(const base::Uuid& uuid, ui::OSExchangeData* data) {
++  data->SetString(base::StrCat(
++      {std::u16string_view(kDragPrefix),
++       base::UTF8ToUTF16(uuid.AsLowercaseString())}));
++}
++
++std::optional<base::Uuid> ReadPinnedDragData(const ui::OSExchangeData& data) {
++  const std::optional<std::u16string> text = data.GetString();
++  const std::u16string_view prefix(kDragPrefix);
++  if (!text || !base::StartsWith(*text, prefix)) {
++    return std::nullopt;
++  }
++  const base::Uuid uuid = base::Uuid::ParseCaseInsensitive(
++      base::UTF16ToUTF8(text->substr(prefix.size())));
++  return uuid.is_valid() ? std::optional<base::Uuid>(uuid) : std::nullopt;
++}
++
++bool CanDropPinnedIntoFolder(PinnedModel* model,
++                             const ui::OSExchangeData& data,
++                             const base::Uuid& folder) {
++  if (!model || !model->IsLoaded()) {
++    return false;
++  }
++  const std::optional<base::Uuid> uuid = ReadPinnedDragData(data);
++  if (!uuid) {
++    return false;
++  }
++  const std::optional<PinnedItem> item = model->Find(*uuid);
++  const std::optional<PinnedItem> target = model->Find(folder);
++  return item && !item->is_folder && target && target->is_folder &&
++         model->GetParentFolder(*uuid) != folder;
++}
++
++bool DropPinnedIntoFolder(PinnedModel* model,
++                          const ui::OSExchangeData& data,
++                          const base::Uuid& folder) {
++  if (!CanDropPinnedIntoFolder(model, data, folder)) {
++    return false;
++  }
++  const std::optional<PinnedItem> target = model->Find(folder);
++  PinnedModel::ScopedBatch batch(model);
++  const bool moved = model->Move(*ReadPinnedDragData(data), folder,
++                                 target->children.size());
++  if (moved) {
++    model->SetExpanded(folder, true);
++  }
++  return moved;
++}
++
++}  // namespace aerographene
+--- /dev/null
++++ b/chrome/browser/ui/views/frame/aerographene_pinned_menu.h
+@@ -0,0 +1,98 @@
++// Copyright 2026 The Aerographene Authors
++// You can use, redistribute, and/or modify this source code under
++// the terms of the GPL-3.0 license that can be found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_FRAME_AEROGRAPHENE_PINNED_MENU_H_
++#define CHROME_BROWSER_UI_VIEWS_FRAME_AEROGRAPHENE_PINNED_MENU_H_
++
++#include <memory>
++#include <optional>
++#include <vector>
++
++#include "base/functional/callback.h"
++#include "base/memory/raw_ptr.h"
++#include "base/uuid.h"
++#include "ui/base/mojom/menu_source_type.mojom-forward.h"
++#include "ui/gfx/geometry/point.h"
++#include "ui/gfx/native_ui_types.h"
++#include "ui/menus/simple_menu_model.h"
++
++class BrowserWindowInterface;
++
++namespace ui {
++class OSExchangeData;
++}  // namespace ui
++
++namespace views {
++class MenuRunner;
++class Widget;
++}  // namespace views
++
++namespace aerographene {
++
++class PinnedModel;
++
++// Context menu of a pinned entry or of a drawer folder, shared by the topbar
++// row and the sidebar grid (both read the same PinnedModel).
++//  - pinned: open, move to folder (submenu with the drawers, a new one, or out
++//    of the drawer), rename, unpin;
++//  - folder: rename, new folder, delete (its entries go to the top level).
++// Owned by the view that shows it; one menu at a time.
++class PinnedContextMenu : public ui::SimpleMenuModel::Delegate {
++ public:
++  // `open_callback` activates or reopens an entry in the window of `browser`.
++  using OpenCallback = base::RepeatingCallback<void(const base::Uuid&)>;
++
++  PinnedContextMenu(BrowserWindowInterface* browser,
++                    OpenCallback open_callback);
++  PinnedContextMenu(const PinnedContextMenu&) = delete;
++  PinnedContextMenu& operator=(const PinnedContextMenu&) = delete;
++  ~PinnedContextMenu() override;
++
++  // `screen_point` is in screen coordinates. Does nothing if the entry is gone
++  // or the model is not loaded.
++  void Show(views::Widget* parent,
++            const base::Uuid& uuid,
++            const gfx::Point& screen_point,
++            ui::mojom::MenuSourceType source_type);
++
++  // ui::SimpleMenuModel::Delegate:
++  void ExecuteCommand(int command_id, int event_flags) override;
++
++ private:
++  PinnedModel* GetModel() const;
++  // Index in this window's tab strip of the live tab of the entry, or -1.
++  int FindLiveTab(PinnedModel* model) const;
++  void Unpin(PinnedModel* model);
++  void DeleteFolder(PinnedModel* model);
++
++  const raw_ptr<BrowserWindowInterface> browser_;
++  const OpenCallback open_callback_;
++  base::Uuid uuid_;
++  gfx::NativeWindow parent_window_ = gfx::NativeWindow();
++  // Drawers listed in the "Move to folder" submenu, by command id order.
++  std::vector<base::Uuid> folders_;
++  std::unique_ptr<ui::SimpleMenuModel> menu_model_;
++  std::unique_ptr<ui::SimpleMenuModel> folder_model_;
++  std::unique_ptr<views::MenuRunner> menu_runner_;
++};
++
++// Drag and drop of a pinned entry into a drawer folder. The payload is the
++// entry uuid as text with a private prefix.
++void WritePinnedDragData(const base::Uuid& uuid, ui::OSExchangeData* data);
++// The uuid carried by `data`, if it was written by WritePinnedDragData().
++std::optional<base::Uuid> ReadPinnedDragData(const ui::OSExchangeData& data);
++// True if `data` carries a URL entry (not a folder) that is not yet in
++// `folder`.
++bool CanDropPinnedIntoFolder(PinnedModel* model,
++                             const ui::OSExchangeData& data,
++                             const base::Uuid& folder);
++// Moves the dragged entry to the end of the drawer `folder` and opens the
++// drawer. False if nothing was moved.
++bool DropPinnedIntoFolder(PinnedModel* model,
++                          const ui::OSExchangeData& data,
++                          const base::Uuid& folder);
++
++}  // namespace aerographene
++
++#endif  // CHROME_BROWSER_UI_VIEWS_FRAME_AEROGRAPHENE_PINNED_MENU_H_
+--- a/chrome/browser/ui/views/frame/aerographene_topbar_row.cc
++++ b/chrome/browser/ui/views/frame/aerographene_topbar_row.cc
+@@ -5,7 +5,9 @@
+ #include "chrome/browser/ui/views/frame/aerographene_topbar_row.h"
+ 
+ #include <algorithm>
++#include <memory>
+ #include <optional>
++#include <set>
+ #include <utility>
+ 
+ #include "base/functional/bind.h"
+@@ -20,13 +22,19 @@
+ #include "chrome/browser/ui/tabs/aerographene/pinned_model_factory.h"
+ #include "chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.h"
+ #include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "chrome/browser/ui/views/frame/aerographene_pinned_menu.h"
+ #include "chrome/browser/ui/views/tabs/tab_strip.h"
+ #include "components/tabs/public/tab_interface.h"
+ #include "components/vector_icons/vector_icons.h"
++#include "ui/base/dragdrop/drag_drop_types.h"
++#include "ui/base/dragdrop/drop_target_event.h"
++#include "ui/base/dragdrop/mojom/drag_drop_types.mojom.h"
++#include "ui/base/dragdrop/os_exchange_data.h"
+ #include "ui/base/metadata/metadata_impl_macros.h"
+ #include "ui/base/mojom/menu_source_type.mojom.h"
+ #include "ui/color/color_id.h"
+ #include "ui/color/color_provider.h"
++#include "ui/compositor/layer_tree_owner.h"
+ #include "ui/gfx/canvas.h"
+ #include "ui/gfx/font_list.h"
+ #include "ui/gfx/geometry/rect.h"
+@@ -202,6 +210,16 @@
+     menu_callback_.Run(point, source_type);
+   }
+ 
++ protected:
++  // Drag source: the entry can be dropped on a folder button.
++  int GetDragOperations(const gfx::Point& press_pt) override {
++    return ui::DragDropTypes::DRAG_MOVE;
++  }
++  void WriteDragData(const gfx::Point& press_pt,
++                     ui::OSExchangeData* data) override {
++    aerographene::WritePinnedDragData(uuid_, data);
++  }
++
+  private:
+   base::Uuid uuid_;
+   bool open_ = false;
+@@ -215,12 +233,27 @@
+ 
+ // Drawer folder: theme folder glyph in the accent, name, chevron at the end
+ // (› closed, ⌄ open).
+-class TopbarFolderButton : public views::Button {
++class TopbarFolderButton : public views::Button,
++                           public views::ContextMenuController {
+   METADATA_HEADER(TopbarFolderButton, views::Button)
+ 
+  public:
+-  explicit TopbarFolderButton(PressedCallback callback)
+-      : views::Button(std::move(callback)) {}
++  using MenuCallback =
++      base::RepeatingCallback<void(const gfx::Point&,
++                                   ui::mojom::MenuSourceType)>;
++  using DropCheckCallback =
++      base::RepeatingCallback<bool(const ui::OSExchangeData&)>;
++
++  explicit TopbarFolderButton(PressedCallback callback,
++                              MenuCallback menu_callback,
++                              DropCheckCallback can_drop,
++                              DropCheckCallback perform_drop)
++      : views::Button(std::move(callback)),
++        menu_callback_(std::move(menu_callback)),
++        can_drop_(std::move(can_drop)),
++        perform_drop_(std::move(perform_drop)) {
++    set_context_menu_controller(this);
++  }
+   TopbarFolderButton(const TopbarFolderButton&) = delete;
+   TopbarFolderButton& operator=(const TopbarFolderButton&) = delete;
+   ~TopbarFolderButton() override = default;
+@@ -257,8 +290,8 @@
+       return;
+     }
+     const gfx::Rect bounds = GetLocalBounds();
+-    const bool hovered =
+-        GetState() == STATE_HOVERED || GetState() == STATE_PRESSED;
++    const bool hovered = GetState() == STATE_HOVERED ||
++                         GetState() == STATE_PRESSED || drop_hover_;
+     if (hovered) {
+       cc::PaintFlags fill;
+       fill.setAntiAlias(true);
+@@ -291,10 +324,60 @@
+             bounds.height())));
+   }
+ 
++  // views::ContextMenuController:
++  void ShowContextMenuForViewImpl(
++      views::View* source,
++      const gfx::Point& point,
++      ui::mojom::MenuSourceType source_type) override {
++    menu_callback_.Run(point, source_type);
++  }
++
++  // Drop target for pinned entries (moves them into this folder).
++  bool GetDropFormats(
++      int* formats,
++      std::set<ui::ClipboardFormatType>* format_types) override {
++    *formats = ui::OSExchangeData::STRING;
++    return true;
++  }
++  bool CanDrop(const ui::OSExchangeData& data) override {
++    return can_drop_.Run(data);
++  }
++  void OnDragEntered(const ui::DropTargetEvent& event) override {
++    SetDropHover(true);
++  }
++  int OnDragUpdated(const ui::DropTargetEvent& event) override {
++    return ui::DragDropTypes::DRAG_MOVE;
++  }
++  void OnDragExited() override { SetDropHover(false); }
++  views::View::DropCallback GetDropCallback(
++      const ui::DropTargetEvent& event) override {
++    SetDropHover(false);
++    const bool moved = perform_drop_.Run(event.data());
++    return base::BindOnce(
++        [](bool moved, const ui::DropTargetEvent&,
++           ui::mojom::DragOperation& output_drag_op,
++           std::unique_ptr<ui::LayerTreeOwner>) {
++          output_drag_op = moved ? ui::mojom::DragOperation::kMove
++                                 : ui::mojom::DragOperation::kNone;
++        },
++        moved);
++  }
++
+  private:
++  void SetDropHover(bool hover) {
++    if (drop_hover_ != hover) {
++      drop_hover_ = hover;
++      SchedulePaint();
++    }
++  }
++
+   std::u16string text_;
+   int text_width_ = 0;
+   bool expanded_ = false;
++  bool drop_hover_ = false;
++  MenuCallback menu_callback_;
++  DropCheckCallback can_drop_;
++  DropCheckCallback perform_drop_;
+ };
+ 
+ BEGIN_METADATA(TopbarFolderButton)
+@@ -421,6 +504,12 @@
+     }
+     auto* const folder = AddChildView(std::make_unique<TopbarFolderButton>(
+         base::BindRepeating(&AerographeneTopbarRow::ToggleFolder,
++                            base::Unretained(this), item.uuid),
++        base::BindRepeating(&AerographeneTopbarRow::ShowPinContextMenu,
++                            base::Unretained(this), item.uuid),
++        base::BindRepeating(&AerographeneTopbarRow::CanDropIntoFolder,
++                            base::Unretained(this), item.uuid),
++        base::BindRepeating(&AerographeneTopbarRow::DropIntoFolder,
+                             base::Unretained(this), item.uuid)));
+     folder->Update(item);
+     item_views_.push_back(folder);
+@@ -491,24 +580,28 @@
+     const base::Uuid& uuid,
+     const gfx::Point& screen_point,
+     ui::mojom::MenuSourceType source_type) {
+-  TabStripModel* const tab_strip_model = browser_->GetTabStripModel();
+-  aerographene::PinnedTabMirror* const mirror =
+-      model_ ? model_->tab_mirror() : nullptr;
+-  if (!tab_strip_model || !mirror || !tab_strip_) {
++  // Pinned entries (open or closed) and folders share one menu; the hidden
++  // tab of an open entry is not involved.
++  if (!model_ || !GetWidget()) {
+     return;
+   }
+-  // Open entries only: the regular tab menu (unpin, rename, close...) of the
+-  // hidden pinned tab. Closed entries have no menu in this row.
+-  for (int i = 0; i < tab_strip_model->count(); ++i) {
+-    const std::optional<base::Uuid> entry =
+-        mirror->GetEntryForTab(tab_strip_model->GetTabAtIndex(i));
+-    if (entry && *entry == uuid) {
+-      if (Tab* const tab = tab_strip_->tab_at(i)) {
+-        tab_strip_->ShowContextMenuForTab(tab, screen_point, source_type);
+-      }
+-      return;
+-    }
++  if (!menu_) {
++    menu_ = std::make_unique<aerographene::PinnedContextMenu>(
++        browser_,
++        base::BindRepeating(&AerographeneTopbarRow::ActivateEntry,
++                            base::Unretained(this)));
+   }
++  menu_->Show(GetWidget(), uuid, screen_point, source_type);
++}
++
++bool AerographeneTopbarRow::CanDropIntoFolder(const base::Uuid& folder,
++                                              const ui::OSExchangeData& data) {
++  return aerographene::CanDropPinnedIntoFolder(model_, data, folder);
++}
++
++bool AerographeneTopbarRow::DropIntoFolder(const base::Uuid& folder,
++                                           const ui::OSExchangeData& data) {
++  return aerographene::DropPinnedIntoFolder(model_, data, folder);
+ }
+ 
+ void AerographeneTopbarRow::ToggleFolder(const base::Uuid& uuid) {
+--- a/chrome/browser/ui/views/frame/aerographene_topbar_row.h
++++ b/chrome/browser/ui/views/frame/aerographene_topbar_row.h
+@@ -23,6 +23,14 @@
+ class TabStrip;
+ class TabStripModel;
+ 
++namespace aerographene {
++class PinnedContextMenu;
++}  // namespace aerographene
++
++namespace ui {
++class OSExchangeData;
++}  // namespace ui
++
+ // First row of the topbar mode (horizontal tabs), mockup R-r01b:
+ // pinned entries as 30x30 buttons and drawer folders as "icon name ›" buttons
+ // that open/close the drawer in the row itself (the children follow the
+@@ -74,9 +82,14 @@
+   base::Uuid GetActiveEntry() const;
+   // Activates the open tab of the entry in this window, or opens it.
+   void ActivateEntry(const base::Uuid& uuid);
++  // Context menu of a pinned entry or a folder (right click).
+   void ShowPinContextMenu(const base::Uuid& uuid,
+                           const gfx::Point& screen_point,
+                           ui::mojom::MenuSourceType source_type);
++  // Drag and drop of a pinned entry onto a folder button.
++  bool CanDropIntoFolder(const base::Uuid& folder,
++                         const ui::OSExchangeData& data);
++  bool DropIntoFolder(const base::Uuid& folder, const ui::OSExchangeData& data);
+   // Click on a folder: toggles aerographene.expanded in the model.
+   void ToggleFolder(const base::Uuid& uuid);
+ 
+@@ -90,6 +103,7 @@
+   bool has_content_ = false;
+   bool rebuild_pending_ = false;
+   base::RepeatingClosure on_content_changed_;
++  std::unique_ptr<aerographene::PinnedContextMenu> menu_;
+ 
+   base::ScopedObservation<aerographene::PinnedModel,
+                           aerographene::PinnedModel::Observer>
+--- a/chrome/browser/ui/views/tabs/common/aerographene_rename_pinned_dialog.cc
++++ b/chrome/browser/ui/views/tabs/common/aerographene_rename_pinned_dialog.cc
+@@ -77,8 +77,10 @@
+   if (!model || !model->IsLoaded()) {
+     return;
+   }
++  // Drawer folders are renamed through the same label (shown instead of the
++  // folder title).
+   const std::optional<PinnedItem> item = model->Find(uuid);
+-  if (!item || item->is_folder) {
++  if (!item) {
+     return;
+   }
+   const bool had_label = !item->label.empty();
+--- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
++++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.cc
+@@ -7,6 +7,7 @@
+ #include <algorithm>
+ #include <iterator>
+ #include <memory>
++#include <set>
+ #include <string>
+ 
+ #include "base/containers/flat_set.h"
+@@ -23,6 +24,7 @@
+ #include "chrome/browser/ui/tabs/aerographene/pinned_tab_mirror.h"
+ #include "chrome/browser/ui/tabs/features.h"
+ #include "chrome/browser/ui/tabs/tab_style.h"
++#include "chrome/browser/ui/views/frame/aerographene_pinned_menu.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h"
+ #include "chrome/browser/ui/views/tabs/common/aerographene_rename_pinned_dialog.h"
+@@ -37,10 +39,15 @@
+ #include "components/vector_icons/vector_icons.h"
+ #include "ui/base/cursor/cursor.h"
+ #include "ui/base/cursor/mojom/cursor_type.mojom.h"
++#include "ui/base/dragdrop/drag_drop_types.h"
++#include "ui/base/dragdrop/drop_target_event.h"
++#include "ui/base/dragdrop/mojom/drag_drop_types.mojom.h"
++#include "ui/base/dragdrop/os_exchange_data.h"
+ #include "ui/base/l10n/l10n_util.h"
+ #include "ui/base/metadata/metadata_impl_macros.h"
+ #include "ui/color/color_id.h"
+ #include "ui/color/color_provider.h"
++#include "ui/compositor/layer_tree_owner.h"
+ #include "ui/gfx/canvas.h"
+ #include "ui/gfx/font_list.h"
+ #include "ui/gfx/geometry/point_f.h"
+@@ -101,8 +108,6 @@
+ constexpr int kClosedPinnedTextPadding = 8;
+ constexpr int kClosedPinnedIconSize = 16;
+ constexpr int kClosedPinnedIconTextGap = 6;
+-constexpr int kClosedPinnedRenameCommand = 1;
+-constexpr int kClosedPinnedFolderCommand = 2;
+ 
+ // Drawer folder row (mockups): theme folder glyph, label, chevron at the end.
+ constexpr int kFolderRowPadding = 8;
+@@ -133,17 +138,18 @@
+ // up, the label (or title) follows the favicon. No layer of its own: the
+ // animating layout manager destroys layers of direct children.
+ class AerographeneClosedPinnedView : public views::Button,
+-                                     public views::ContextMenuController,
+-                                     public ui::SimpleMenuModel::Delegate {
++                                     public views::ContextMenuController {
+   METADATA_HEADER(AerographeneClosedPinnedView, views::Button)
+ 
+  public:
++  using MenuCallback =
++      base::RepeatingCallback<void(const gfx::Point&,
++                                   ui::mojom::MenuSourceType)>;
++
+   AerographeneClosedPinnedView(PressedCallback callback,
+-                               base::RepeatingClosure rename_callback,
+-                               base::RepeatingClosure folder_callback)
++                               MenuCallback menu_callback)
+       : views::Button(std::move(callback)),
+-        rename_callback_(std::move(rename_callback)),
+-        folder_callback_(std::move(folder_callback)) {
++        menu_callback_(std::move(menu_callback)) {
+     set_context_menu_controller(this);
+   }
+   AerographeneClosedPinnedView(const AerographeneClosedPinnedView&) = delete;
+@@ -275,27 +281,17 @@
+       views::View* source,
+       const gfx::Point& point,
+       ui::mojom::MenuSourceType source_type) override {
+-    menu_model_ = std::make_unique<ui::SimpleMenuModel>(this);
+-    menu_model_->AddItemWithStringId(kClosedPinnedRenameCommand,
+-                                     IDS_AEROGRAPHENE_RENAME_PINNED);
+-    menu_model_->AddItemWithStringId(
+-        kClosedPinnedFolderCommand, folder_.is_valid()
+-                                        ? IDS_AEROGRAPHENE_MOVE_PINNED_TO_ROOT
+-                                        : IDS_AEROGRAPHENE_NEW_PINNED_FOLDER);
+-    menu_runner_ = std::make_unique<views::MenuRunner>(
+-        menu_model_.get(),
+-        views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU);
+-    menu_runner_->RunMenuAt(GetWidget(), nullptr, gfx::Rect(point, gfx::Size()),
+-                            views::MenuAnchorPosition::kTopLeft, source_type);
+-  }
+-
+-  // ui::SimpleMenuModel::Delegate:
+-  void ExecuteCommand(int command_id, int event_flags) override {
+-    if (command_id == kClosedPinnedRenameCommand) {
+-      rename_callback_.Run();
+-    } else if (command_id == kClosedPinnedFolderCommand) {
+-      folder_callback_.Run();
+-    }
++    menu_callback_.Run(point, source_type);
++  }
++
++ protected:
++  // Drag source: the placeholder can be dropped on a folder row.
++  int GetDragOperations(const gfx::Point& press_pt) override {
++    return ui::DragDropTypes::DRAG_MOVE;
++  }
++  void WriteDragData(const gfx::Point& press_pt,
++                     ui::OSExchangeData* data) override {
++    aerographene::WritePinnedDragData(uuid_, data);
+   }
+ 
+  private:
+@@ -306,10 +302,7 @@
+   gfx::ImageSkia favicon_;
+   std::u16string tooltip_;
+   std::u16string text_;
+-  base::RepeatingClosure rename_callback_;
+-  base::RepeatingClosure folder_callback_;
+-  std::unique_ptr<ui::SimpleMenuModel> menu_model_;
+-  std::unique_ptr<views::MenuRunner> menu_runner_;
++  MenuCallback menu_callback_;
+ };
+ 
+ BEGIN_METADATA(AerographeneClosedPinnedView)
+@@ -318,12 +311,27 @@
+ // Full-width row of a drawer folder in the vertical pinned grid. Clicking it
+ // opens or closes the drawer. Painted with the canvas only (chevron, folder
+ // glyph, text); no layer of its own, like the placeholders.
+-class AerographenePinnedFolderView : public views::Button {
++class AerographenePinnedFolderView : public views::Button,
++                                     public views::ContextMenuController {
+   METADATA_HEADER(AerographenePinnedFolderView, views::Button)
+ 
+  public:
+-  explicit AerographenePinnedFolderView(PressedCallback callback)
+-      : views::Button(std::move(callback)) {}
++  using MenuCallback =
++      base::RepeatingCallback<void(const gfx::Point&,
++                                   ui::mojom::MenuSourceType)>;
++  using DropCheckCallback =
++      base::RepeatingCallback<bool(const ui::OSExchangeData&)>;
++
++  AerographenePinnedFolderView(PressedCallback callback,
++                               MenuCallback menu_callback,
++                               DropCheckCallback can_drop,
++                               DropCheckCallback perform_drop)
++      : views::Button(std::move(callback)),
++        menu_callback_(std::move(menu_callback)),
++        can_drop_(std::move(can_drop)),
++        perform_drop_(std::move(perform_drop)) {
++    set_context_menu_controller(this);
++  }
+   AerographenePinnedFolderView(const AerographenePinnedFolderView&) = delete;
+   AerographenePinnedFolderView& operator=(
+       const AerographenePinnedFolderView&) = delete;
+@@ -377,8 +385,8 @@
+       return;
+     }
+     const gfx::Rect bounds = GetLocalBounds();
+-    const bool hovered =
+-        GetState() == STATE_HOVERED || GetState() == STATE_PRESSED;
++    const bool hovered = GetState() == STATE_HOVERED ||
++                         GetState() == STATE_PRESSED || drop_hover_;
+ 
+     // Mockup `.row`: no box; hover color behind, folder glyph in the accent,
+     // label in the secondary text color, chevron at the end (right when
+@@ -425,13 +433,63 @@
+                            GetMirroredRect(text_bounds));
+   }
+ 
++  // views::ContextMenuController:
++  void ShowContextMenuForViewImpl(
++      views::View* source,
++      const gfx::Point& point,
++      ui::mojom::MenuSourceType source_type) override {
++    menu_callback_.Run(point, source_type);
++  }
++
++  // Drop target for pinned entries (moves them into this drawer).
++  bool GetDropFormats(
++      int* formats,
++      std::set<ui::ClipboardFormatType>* format_types) override {
++    *formats = ui::OSExchangeData::STRING;
++    return true;
++  }
++  bool CanDrop(const ui::OSExchangeData& data) override {
++    return can_drop_.Run(data);
++  }
++  void OnDragEntered(const ui::DropTargetEvent& event) override {
++    SetDropHover(true);
++  }
++  int OnDragUpdated(const ui::DropTargetEvent& event) override {
++    return ui::DragDropTypes::DRAG_MOVE;
++  }
++  void OnDragExited() override { SetDropHover(false); }
++  views::View::DropCallback GetDropCallback(
++      const ui::DropTargetEvent& event) override {
++    SetDropHover(false);
++    const bool moved = perform_drop_.Run(event.data());
++    return base::BindOnce(
++        [](bool moved, const ui::DropTargetEvent&,
++           ui::mojom::DragOperation& output_drag_op,
++           std::unique_ptr<ui::LayerTreeOwner>) {
++          output_drag_op = moved ? ui::mojom::DragOperation::kMove
++                                 : ui::mojom::DragOperation::kNone;
++        },
++        moved);
++  }
++
+  private:
++  void SetDropHover(bool hover) {
++    if (drop_hover_ != hover) {
++      drop_hover_ = hover;
++      SchedulePaint();
++    }
++  }
++
+   base::Uuid uuid_;
+   int model_index_ = 0;
+   bool expanded_ = false;
+   bool applied_ = false;
++  bool drop_hover_ = false;
+   std::u16string text_;
+   std::u16string display_text_;
++  MenuCallback menu_callback_;
++  DropCheckCallback can_drop_;
++  DropCheckCallback perform_drop_;
+ };
+ 
+ BEGIN_METADATA(AerographenePinnedFolderView)
+@@ -1235,9 +1293,7 @@
+       view = AddChildView(std::make_unique<AerographeneClosedPinnedView>(
+           base::BindRepeating(&PinnedTabContainerView::OpenClosedPinned,
+                               base::Unretained(this), item.uuid),
+-          base::BindRepeating(&PinnedTabContainerView::RenameClosedPinned,
+-                              base::Unretained(this), item.uuid),
+-          base::BindRepeating(&PinnedTabContainerView::MoveClosedPinnedFolder,
++          base::BindRepeating(&PinnedTabContainerView::ShowPinnedMenu,
+                               base::Unretained(this), item.uuid)));
+       layout_changed = true;
+     }
+@@ -1259,6 +1315,12 @@
+     } else {
+       row = AddChildView(std::make_unique<AerographenePinnedFolderView>(
+           base::BindRepeating(&PinnedTabContainerView::ToggleFolder,
++                              base::Unretained(this), item.uuid),
++          base::BindRepeating(&PinnedTabContainerView::ShowPinnedMenu,
++                              base::Unretained(this), item.uuid),
++          base::BindRepeating(&PinnedTabContainerView::CanDropIntoFolder,
++                              base::Unretained(this), item.uuid),
++          base::BindRepeating(&PinnedTabContainerView::DropIntoFolder,
+                               base::Unretained(this), item.uuid)));
+       layout_changed = true;
+     }
+@@ -1408,7 +1470,10 @@
+   mirror->OpenClosedEntry(browser_view->browser(), uuid);
+ }
+ 
+-void PinnedTabContainerView::RenameClosedPinned(const base::Uuid& uuid) {
++void PinnedTabContainerView::ShowPinnedMenu(
++    const base::Uuid& uuid,
++    const gfx::Point& screen_point,
++    ui::mojom::MenuSourceType source_type) {
+   TabStripCollectionController* controller =
+       collection_node_ ? collection_node_->GetController() : nullptr;
+   BrowserView* browser_view =
+@@ -1416,23 +1481,26 @@
+   if (!browser_view || !GetWidget() || !GetWindowPinnedModel()) {
+     return;
+   }
+-  aerographene::ShowRenamePinnedDialog(browser_view->GetProfile(), uuid,
+-                                       std::u16string(),
+-                                       GetWidget()->GetNativeWindow());
+-}
+-
+-void PinnedTabContainerView::MoveClosedPinnedFolder(const base::Uuid& uuid) {
+-  aerographene::PinnedModel* model = GetWindowPinnedModel();
+-  if (!model || !model->IsLoaded()) {
+-    return;
+-  }
+-  if (model->GetParentFolder(uuid).is_valid()) {
+-    model->MoveToTopLevel(uuid);
+-  } else {
+-    model->MoveIntoNewFolder(
+-        uuid, l10n_util::GetStringUTF16(
+-                  IDS_AEROGRAPHENE_PINNED_FOLDER_DEFAULT_TITLE));
+-  }
++  if (!menu_) {
++    menu_ = std::make_unique<aerographene::PinnedContextMenu>(
++        browser_view->browser(),
++        base::BindRepeating(&PinnedTabContainerView::OpenClosedPinned,
++                            base::Unretained(this)));
++  }
++  menu_->Show(GetWidget(), uuid, screen_point, source_type);
++}
++
++bool PinnedTabContainerView::CanDropIntoFolder(
++    const base::Uuid& folder,
++    const ui::OSExchangeData& data) {
++  return aerographene::CanDropPinnedIntoFolder(GetWindowPinnedModel(), data,
++                                               folder);
++}
++
++bool PinnedTabContainerView::DropIntoFolder(const base::Uuid& folder,
++                                            const ui::OSExchangeData& data) {
++  return aerographene::DropPinnedIntoFolder(GetWindowPinnedModel(), data,
++                                            folder);
+ }
+ 
+ void PinnedTabContainerView::ToggleFolder(const base::Uuid& uuid) {
+--- a/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h
++++ b/chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h
+@@ -6,6 +6,7 @@
+ #define CHROME_BROWSER_UI_VIEWS_TABS_COMMON_PINNED_TAB_CONTAINER_VIEW_H_
+ 
+ #include <map>
++#include <memory>
+ #include <optional>
+ #include <vector>
+ 
+@@ -17,6 +18,8 @@
+ #include "chrome/browser/ui/views/tabs/common/tab_collection_animating_layout_manager.h"
+ #include "components/tabs/public/tab_collection.h"
+ #include "ui/base/metadata/metadata_header_macros.h"
++#include "ui/base/mojom/menu_source_type.mojom-forward.h"
++#include "ui/gfx/geometry/point.h"
+ #include "ui/views/layout/delegating_layout_manager.h"
+ #include "ui/views/view.h"
+ #include "ui/views/view_targeter_delegate.h"
+@@ -25,6 +28,14 @@
+ class AerographenePinnedFolderView;
+ class TabCollectionNode;
+ 
++namespace aerographene {
++class PinnedContextMenu;
++}  // namespace aerographene
++
++namespace ui {
++class OSExchangeData;
++}  // namespace ui
++
+ // The view class that represents the pinned tab region for the
+ // tab strip. It manages the layout of all the pinned tabs and serves
+ // as the drag target for pinned tabs.
+@@ -152,6 +163,8 @@
+   std::vector<raw_ptr<AerographeneClosedPinnedView>> closed_views_;
+   // Rows of drawer folders, in model order. Not tab collection nodes either.
+   std::vector<raw_ptr<AerographenePinnedFolderView>> folder_views_;
++  // Context menu of placeholders and folder rows; created on first use.
++  std::unique_ptr<aerographene::PinnedContextMenu> menu_;
+   // Model position of every entry (top-level index, or child index inside a
+   // drawer) and drawer of each drawer child, refreshed with `closed_views_`
+   // on every model change so layout does not copy the model.
+@@ -187,11 +200,14 @@
+       std::vector<int>* sections = nullptr) const;
+   // Click on a placeholder: reopens the entry as a pinned tab in this window.
+   void OpenClosedPinned(const base::Uuid& uuid);
+-  // Placeholder context menu: edits the label of the entry.
+-  void RenameClosedPinned(const base::Uuid& uuid);
+-  // Placeholder context menu: moves a top-level entry into a new drawer
+-  // folder, or an entry inside a drawer back to the top level.
+-  void MoveClosedPinnedFolder(const base::Uuid& uuid);
++  // Context menu of a placeholder or a folder row (shared with the topbar).
++  void ShowPinnedMenu(const base::Uuid& uuid,
++                      const gfx::Point& screen_point,
++                      ui::mojom::MenuSourceType source_type);
++  // Drop of a pinned placeholder on a folder row: moves it into the drawer.
++  bool CanDropIntoFolder(const base::Uuid& folder,
++                         const ui::OSExchangeData& data);
++  bool DropIntoFolder(const base::Uuid& folder, const ui::OSExchangeData& data);
+   // Click on a folder row: opens or closes the drawer (aerographene.expanded).
+   void ToggleFolder(const base::Uuid& uuid);
+ 
