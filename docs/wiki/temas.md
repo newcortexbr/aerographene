@@ -142,22 +142,22 @@ desde a v0.2 (patch `theme-repo`) o navegador lê temas de `${XDG_CONFIG_HOME:-~
 - `icons.base` aceita só `"default"` ou `"pixelized"` (pacotes compilados). `"overrides"` por ícone virá depois e é ignorado hoje.
 - `style` escolhe uma das variantes de desenho compiladas (`"default"` ou `"pixelized"`: caixa alta dos rótulos, fundo da sidebar, fonte da URL, nova aba), independente de `icons.base`.
 - `radius`/`radius_small` 0 a 32; `font.size_px` 8 a 32 (obrigatório se houver `family`); cor em `#RRGGBB` ou `#RRGGBBAA`. Valor fora disso torna o tema inválido (ele some da lista e, se estava ativo, volta a `default`).
-- nome: 1 a 64 bytes, sem `/`, `\`, controle, nem começar com `.`; espaço e acento valem. `default` e `pixelized` são reservados; conflito entre nomes ignora a caixa.
+- nome: 1 a 64 bytes, sem `/`, `\`, controle, nem começar com `.`; espaço e acento valem. `default` e `pixelized` são reservados; conflito entre nomes ignora a caixa e a forma Unicode (o nome é guardado em NFC: `é` composto ou decomposto é o mesmo tema).
 - arquivo acima de 64 KiB é rejeitado. Aplicar tema continua exigindo reiniciar.
 
 desempenho: tema embutido não lê disco no início; um tema do repositório custa uma leitura pequena de `theme.json` em `ThemeService::Init` (já era assim com o `theme.json` de tokens). A varredura da pasta inteira só roda quando alguém lista os temas (seletor), numa tarefa de background.
 
-API do seletor e da importação (`chrome/browser/themes/aerographene_theme_repo.h`; o seletor de configurações usa `ListThemes` pelas mensagens `getAerographeneThemes`/`setAerographeneTheme` do `AppearanceHandler`, e só aceita nomes que `ListThemes` devolve): `ListThemes(callback)` devolve `default`, `pixelized` e os temas válidos do repositório com seus metadados; `InstallTheme(json, replace, callback)` valida e grava `themes/<nome>/theme.json` de forma atômica (`kConflict` se já existe, sem diferenciar caixa, até `replace`).
+API do seletor e da importação (`chrome/browser/themes/aerographene_theme_repo.h`; o seletor de configurações usa `ListThemes` pelas mensagens `getAerographeneThemes`/`setAerographeneTheme` do `AppearanceHandler`, e só aceita nomes que `ListThemes` devolve): `ListThemes(callback)` devolve `default`, `pixelized` e os temas válidos do repositório com seus metadados; `InstallTheme(json, replace, callback)` valida e grava `themes/<nome>/theme.json` (`kConflict` se já existe, sem diferenciar caixa, até `replace`). A gravação vai para uma pasta oculta temporária no mesmo diretório e é renomeada no lugar; ao substituir, a pasta antiga sai do caminho e só é apagada depois que a nova está no lugar (falha restaura a antiga). Se a substituição mudou a caixa do nome e a pref ainda aponta a grafia antiga, o próximo início segue a pasta nova e corrige a pref.
 
 ## importar tema (`.aerotheme`)
 
 desde a v0.2 (patch `settings-theme-import`) um tema pode ser instalado de um arquivo `.aerotheme`: um zip com exatamente um arquivo, `theme.json`, na raiz (mesmo formato da seção acima). Para criar: `zip -j Meu-Tema.aerotheme theme.json`.
 
-em `chrome://settings/appearance`, botão "Import theme..." abaixo do seletor: abre o seletor de arquivos (filtro `.aerotheme`), valida e grava em `themes/<nome>/`. Se já existe um tema com o mesmo nome (sem diferenciar caixa), um diálogo pergunta "Replace" ou "Cancel"; não há renomeação automática. Depois de importar, a lista é atualizada e um diálogo oferece "Use theme" (grava a pref e abre o mesmo diálogo de reinício do seletor) ou "Not now".
+em `chrome://settings/appearance`, botão "Import theme..." abaixo do seletor: abre o seletor de arquivos (filtro `.aerotheme`), valida e grava em `themes/<nome>/`. Se já existe um tema com o mesmo nome (sem diferenciar caixa), um diálogo pergunta "Replace" ou "Cancel"; não há renomeação automática. "Replace" instala o `theme.json` já lido e validado, sem reler o arquivo. Depois de importar, a lista é atualizada e um diálogo oferece "Use theme" (grava a pref e abre o mesmo diálogo de reinício do seletor) ou "Not now".
 
 o arquivo é recusado se: não for arquivo regular, passar de 68 KiB, não for zip, tiver outra entrada além de `theme.json` (pasta, caminho, outro nome, symlink, criptografia) ou se `theme.json` descompactado passar de 64 KiB (o tamanho declarado no zip não é confiado). Nome `default`/`pixelized` e `theme.json` inválido mostram erro na própria linha. A leitura roda fora da UI thread.
 
-API (`chrome/browser/themes/aerographene_theme_archive.h`): `ReadThemeArchive(path, &json)` (bloqueante, só extrai) e `ImportThemeArchive(path, replace, callback)` (lê no thread pool e chama `InstallTheme`; resultado `kInstalled|kBadArchive|kInvalid|kReserved|kConflict|kIoError`). Pensada para ser reusada pela importação por linha de comando (`--import-theme=<arquivo>`, abaixo).
+API (`chrome/browser/themes/aerographene_theme_archive.h`): `ReadThemeArchive(path, &json)` (bloqueante, só extrai) e `ImportThemeArchive(path, replace, callback)` (lê no thread pool e chama `InstallTheme`; resultado `kInstalled|kBadArchive|kInvalid|kReserved|kConflict|kIoError`, mais o nome e o JSON extraído) e `InstallThemeJson(json, replace, callback)` (usado no "Replace" depois de `kConflict`). Pensada para ser reusada pela importação por linha de comando (`--import-theme=<arquivo>`, abaixo).
 
 ### abrir o arquivo (`--import-theme`)
 
@@ -165,7 +165,7 @@ desde a fatia 5 (patch `theme-import-cli`), abrir um `.aerotheme` no gerenciador
 
 - navegador aberto: o comando chega à instância (ProcessSingleton), que mostra só o diálogo, sem janela nova.
 - navegador fechado: o processo sobe sem janela, aba nem restauração de sessão, mostra o diálogo e sai ao fechar. O perfil é carregado (custo da partida do processo do navegador; não medido).
-- diálogos: conflito de nome ("Replace"/"Cancel"), sucesso ("Use theme" grava a pref; vale no próximo início) ou erro. Sem perfil definido (seletor de perfis na partida) importa sem oferecer aplicar.
+- diálogos: janelas comuns de nível superior (não bolhas, sem janela pai): conflito de nome ("Replace"/"Cancel"), sucesso ("Use theme" grava a pref; vale no próximo início) ou erro. Sem perfil regular (seletor de perfis na partida, convidado) importa sem oferecer aplicar.
 
 
 ## criar um tema embutido novo

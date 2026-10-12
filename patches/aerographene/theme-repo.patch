@@ -7,18 +7,22 @@ Propósito: v0.2, fatia theme-repo. aerographene_theme_repo.{h,cc} (novos, no
 source_set "themes") leem ${XDG_CONFIG_HOME:-~/.config}/aerographene/themes/
 <nome>/theme.json para a ThemeData. Pref aerographene.theme guarda o nome
 (built-in ou pasta). ThemeService::Init resolve o nome (ResolveTheme): built-in
-sem acesso a disco; outro nome = uma leitura POSIX de theme.json (cap 64 KiB),
-fallback default se faltar/inválido. Migração: built-in em outra caixa vira o
-canônico; nome impossível (vazio, "../x"...) vira "default" na pref; nome válido
-sem pasta mantém a pref (a escolha sobrevive a disco ausente) e usa default na
-execução. API: ListThemes (varredura em thread pool, MayBlock) e InstallTheme
-(valida, grava atômico, conflito sem diferenciar caixa -> kConflict até
-replace=true), para as fatias 3/4. A nova aba usa UsesPixelizedStyle() em vez
+sem acesso a disco; outro nome = uma leitura POSIX de theme.json (arquivo
+regular, O_NONBLOCK, cap 64 KiB), fallback default se faltar/inválido.
+Migração: built-in em outra caixa vira o canônico; nome impossível (vazio,
+"../x"...) vira "default" na pref; nome válido sem pasta mantém a pref (a
+escolha sobrevive a disco ausente) e usa default na execução; pasta só com
+caixa/forma Unicode diferente (replace renomeou) é seguida e a pref corrigida.
+Nomes em NFC (ICU Normalizer2) e comparados sem caixa. API: ListThemes
+(varredura em thread pool, MayBlock) e InstallTheme (valida; conflito sem
+diferenciar caixa -> kConflict até replace=true; grava em pasta oculta
+temporária no mesmo diretório e renomeia; a pasta antiga só é apagada depois,
+e volta se a troca falhar), para as fatias 3/4. A nova aba usa UsesPixelizedStyle() em vez
 de comparar a pref.
 
 --- /dev/null
 +++ b/chrome/browser/themes/aerographene_theme_repo.h
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,103 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -46,6 +50,7 @@ de comparar a pref.
 +
 +// Name as folder key: non-empty, valid UTF-8, <= 64 bytes, not starting with
 +// '.', no '/', '\\' or control characters. Spaces and accents are allowed.
++// Names are stored and compared in NFC; comparisons also ignore case.
 +bool IsValidThemeName(std::string_view name);
 +
 +// "default" and "pixelized" (case-insensitive) belong to the built-in themes.
@@ -77,9 +82,11 @@ de comparar a pref.
 +struct ResolvedTheme {
 +  ThemeData theme;
 +  // Value the pref should hold after resolving: canonical case for built-ins,
-+  // "default" for names that can never be valid, else the input unchanged
-+  // (a valid name whose folder is missing or broken keeps the user's choice
-+  // and falls back to "default" only for this run).
++  // "default" for names that can never be valid, the folder's spelling when
++  // only a folder differing in case/normalization exists (a replace renamed
++  // it), else the input unchanged (a valid name whose folder is missing or
++  // broken keeps the user's choice and falls back to "default" only for this
++  // run).
 +  std::string pref_value;
 +};
 +
@@ -106,10 +113,12 @@ de comparar a pref.
 +  kIoError,
 +};
 +
-+// Validates `json` and writes it to themes/<name>/theme.json (atomic) on a
-+// thread-pool task. An existing theme with the same name, compared without
-+// case, is replaced only if `replace`; otherwise kConflict (the import dialog
-+// asks, then calls again with replace). `callback` gets the result and the
++// Validates `json` and writes it to themes/<name>/theme.json on a
++// thread-pool task: staged in a hidden folder of the same directory and
++// renamed in place. An existing theme with the same name, compared without
++// case, is replaced only if `replace` (moved aside, deleted after the new one
++// is in place, restored on failure); otherwise kConflict (the import dialog
++// asks, then calls again with the same json and replace). `callback` gets the result and the
 +// theme name ("" when `json` has no valid name), on the calling sequence.
 +using InstallCallback = base::OnceCallback<void(InstallResult, std::string)>;
 +void InstallTheme(std::string json, bool replace, InstallCallback callback);
@@ -119,13 +128,16 @@ de comparar a pref.
 +#endif  // CHROME_BROWSER_THEMES_AEROGRAPHENE_THEME_REPO_H_
 --- /dev/null
 +++ b/chrome/browser/themes/aerographene_theme_repo.cc
-@@ -0,0 +1,412 @@
+@@ -0,0 +1,508 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
 +#include "chrome/browser/themes/aerographene_theme_repo.h"
 +
++#include <dirent.h>
 +#include <fcntl.h>
++#include <stdio.h>
++#include <sys/stat.h>
 +#include <unistd.h>
 +
 +#include <algorithm>
@@ -143,12 +155,15 @@ de comparar a pref.
 +#include "base/location.h"
 +#include "base/nix/xdg_util.h"
 +#include "base/no_destructor.h"
++#include "base/posix/eintr_wrapper.h"
 +#include "base/strings/string_util.h"
 +#include "base/strings/utf_string_conversions.h"
 +#include "base/task/sequenced_task_runner.h"
 +#include "base/task/task_traits.h"
 +#include "base/task/thread_pool.h"
 +#include "base/values.h"
++#include "third_party/icu/source/common/unicode/normalizer2.h"
++#include "third_party/icu/source/common/unicode/unistr.h"
 +
 +namespace aerographene {
 +
@@ -163,8 +178,28 @@ de comparar a pref.
 +  return *dir;
 +}
 +
++// NFC, so "é" typed composed or decomposed is the same theme name. Input
++// that ICU cannot normalize is returned unchanged.
++std::string NormalizeName(std::string_view name) {
++  UErrorCode status = U_ZERO_ERROR;
++  const icu::Normalizer2* nfc = icu::Normalizer2::getNFCInstance(status);
++  if (U_FAILURE(status)) {
++    return std::string(name);
++  }
++  const icu::UnicodeString src = icu::UnicodeString::fromUTF8(
++      icu::StringPiece(name.data(), static_cast<int32_t>(name.size())));
++  const icu::UnicodeString normalized = nfc->normalize(src, status);
++  if (U_FAILURE(status)) {
++    return std::string(name);
++  }
++  std::string out;
++  normalized.toUTF8String(out);
++  return out;
++}
++
++// Comparison key: NFC, then case folded.
 +std::u16string FoldName(std::string_view name) {
-+  return base::i18n::FoldCase(base::UTF8ToUTF16(name));
++  return base::i18n::FoldCase(base::UTF8ToUTF16(NormalizeName(name)));
 +}
 +
 +bool HasControlOrSeparator(std::string_view s, bool allow_slash) {
@@ -246,36 +281,64 @@ de comparar a pref.
 +  return true;
 +}
 +
-+// Plain POSIX read of a small file. Like theme_tokens, avoids base::File so
-+// the UI thread blocking assertions do not fire; capped at kMaxThemeFileBytes.
-+std::optional<std::string> ReadSmallFile(const base::FilePath& path) {
-+  const int fd = open(path.value().c_str(), O_RDONLY | O_CLOEXEC);
-+  if (fd < 0) {
++// Reads an open fd of a regular file, capped at kMaxThemeFileBytes.
++std::optional<std::string> ReadSmallFd(int fd) {
++  struct stat st;
++  if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) ||
++      static_cast<size_t>(st.st_size) > kMaxThemeFileBytes) {
 +    return std::nullopt;
 +  }
 +  std::string data;
 +  char buf[4096];
-+  bool ok = true;
 +  while (true) {
-+    const ssize_t n = read(fd, buf, sizeof(buf));
++    const ssize_t n = HANDLE_EINTR(read(fd, buf, sizeof(buf)));
 +    if (n < 0) {
-+      ok = false;
-+      break;
++      return std::nullopt;
 +    }
 +    if (n == 0) {
-+      break;
++      return data;
 +    }
 +    data.append(buf, static_cast<size_t>(n));
 +    if (data.size() > kMaxThemeFileBytes) {
-+      ok = false;
++      return std::nullopt;
++    }
++  }
++}
++
++// Plain POSIX read of a small file. Like theme_tokens, avoids base::File so
++// the UI thread blocking assertions do not fire. O_NONBLOCK + fstat keep a
++// FIFO or device in place of theme.json from blocking the UI thread.
++std::optional<std::string> ReadSmallFile(const base::FilePath& path) {
++  const int fd = HANDLE_EINTR(
++      open(path.value().c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK));
++  if (fd < 0) {
++    return std::nullopt;
++  }
++  std::optional<std::string> data = ReadSmallFd(fd);
++  IGNORE_EINTR(close(fd));
++  return data;
++}
++
++// Folder of `dir` whose name matches `name` without case/normalization
++// differences, POSIX only (UI thread safe like ReadSmallFile). Covers a pref
++// left with the old spelling after a replace that changed the case.
++std::optional<std::string> FindFolderFolded(const base::FilePath& dir,
++                                            std::string_view name) {
++  DIR* d = opendir(dir.value().c_str());
++  if (!d) {
++    return std::nullopt;
++  }
++  const std::u16string key = FoldName(name);
++  std::optional<std::string> found;
++  while (const dirent* entry = readdir(d)) {
++    const std::string_view folder(entry->d_name);
++    if (IsValidThemeName(folder) && FoldName(folder) == key) {
++      found = std::string(folder);
 +      break;
 +    }
 +  }
-+  close(fd);
-+  if (!ok) {
-+    return std::nullopt;
-+  }
-+  return data;
++  closedir(d);
++  return found;
 +}
 +
 +// Reads themes/<folder>/theme.json; the file's "name" must equal the folder.
@@ -288,7 +351,7 @@ de comparar a pref.
 +      ReadSmallFile(dir.Append(folder).Append(kThemeFileName));
 +  ThemeData theme;
 +  if (!json || ParseThemeJson(*json, &theme) != ThemeParseResult::kOk ||
-+      theme.name != folder) {
++      theme.name != NormalizeName(folder)) {
 +    return std::nullopt;
 +  }
 +  return theme;
@@ -328,6 +391,9 @@ de comparar a pref.
 +                         std::string name,
 +                         std::string json,
 +                         bool replace) {
++  if (!base::CreateDirectory(dir)) {
++    return InstallResult::kIoError;
++  }
 +  const std::u16string key = FoldName(name);
 +  base::FilePath existing;
 +  {
@@ -335,26 +401,48 @@ de comparar a pref.
 +                                    base::FileEnumerator::DIRECTORIES);
 +    for (base::FilePath path = enumerator.Next(); !path.empty();
 +         path = enumerator.Next()) {
-+      if (FoldName(path.BaseName().AsUTF8Unsafe()) == key) {
++      const std::string folder = path.BaseName().AsUTF8Unsafe();
++      if (IsValidThemeName(folder) && FoldName(folder) == key) {
 +        existing = path;
 +        break;
 +      }
 +    }
 +  }
++  if (!existing.empty() && !replace) {
++    return InstallResult::kConflict;
++  }
++  // The new theme is written to a hidden staging folder in the same
++  // directory (scans skip names starting with '.'), then renamed in place.
++  // The old folder moves aside first and is deleted only after the new one
++  // is in place; any failure restores it.
++  base::FilePath staging;
++  if (!base::CreateTemporaryDirInDir(dir, ".install-", &staging)) {
++    return InstallResult::kIoError;
++  }
++  if (!base::ImportantFileWriter::WriteFileAtomically(
++          staging.Append(kThemeFileName), json)) {
++    base::DeletePathRecursively(staging);
++    return InstallResult::kIoError;
++  }
++  base::FilePath backup;
 +  if (!existing.empty()) {
-+    if (!replace) {
-+      return InstallResult::kConflict;
-+    }
-+    if (!base::DeletePathRecursively(existing)) {
++    backup = staging.AddExtension("old");
++    if (rename(existing.value().c_str(), backup.value().c_str()) != 0) {
++      base::DeletePathRecursively(staging);
 +      return InstallResult::kIoError;
 +    }
 +  }
 +  // `name` passed IsValidThemeName: a single path component.
 +  const base::FilePath target = dir.Append(name);
-+  if (!base::CreateDirectory(target) ||
-+      !base::ImportantFileWriter::WriteFileAtomically(
-+          target.Append(kThemeFileName), json)) {
++  if (rename(staging.value().c_str(), target.value().c_str()) != 0) {
++    if (!backup.empty()) {
++      rename(backup.value().c_str(), existing.value().c_str());
++    }
++    base::DeletePathRecursively(staging);
 +    return InstallResult::kIoError;
++  }
++  if (!backup.empty()) {
++    base::DeletePathRecursively(backup);
 +  }
 +  return InstallResult::kInstalled;
 +}
@@ -382,16 +470,21 @@ de comparar a pref.
 +    return ThemeParseResult::kInvalidJson;
 +  }
 +
-+  const std::string* name = root->FindString("name");
-+  if (!name || !IsValidThemeName(*name)) {
++  const std::string* raw_name = root->FindString("name");
++  if (!raw_name || !IsValidThemeName(*raw_name)) {
 +    return ThemeParseResult::kInvalidName;
 +  }
-+  if (IsReservedThemeName(*name)) {
++  // The folder, the pref and comparisons use the NFC form.
++  const std::string name = NormalizeName(*raw_name);
++  if (!IsValidThemeName(name)) {
++    return ThemeParseResult::kInvalidName;
++  }
++  if (IsReservedThemeName(name)) {
 +    return ThemeParseResult::kReservedName;
 +  }
 +
 +  ThemeData theme;
-+  theme.name = *name;
++  theme.name = name;
 +
 +  if (const base::Value* mode = root->Find("mode")) {
 +    if (!mode->is_string() ||
@@ -491,9 +584,21 @@ de comparar a pref.
 +    return resolved;
 +  }
 +  resolved.pref_value = std::string(pref_value);
++  const base::FilePath dir = GetThemeRepoDir();
 +  if (std::optional<ThemeData> theme =
-+          LoadRepoTheme(GetThemeRepoDir(), resolved.pref_value)) {
++          LoadRepoTheme(dir, resolved.pref_value)) {
 +    resolved.theme = std::move(*theme);
++    return resolved;
++  }
++  // A replace may have changed the case (or normalization) of the folder:
++  // follow it and point the pref at the folder in use.
++  if (std::optional<std::string> folder =
++          FindFolderFolded(dir, resolved.pref_value);
++      folder && *folder != resolved.pref_value) {
++    if (std::optional<ThemeData> theme = LoadRepoTheme(dir, *folder)) {
++      resolved.theme = std::move(*theme);
++      resolved.pref_value = std::move(*folder);
++    }
 +  }
 +  return resolved;
 +}
@@ -534,7 +639,7 @@ de comparar a pref.
 +}  // namespace aerographene
 --- /dev/null
 +++ b/chrome/browser/themes/aerographene_theme_repo_unittest.cc
-@@ -0,0 +1,179 @@
+@@ -0,0 +1,220 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -543,6 +648,7 @@ de comparar a pref.
 +#include <string>
 +#include <vector>
 +
++#include "base/files/file_enumerator.h"
 +#include "base/files/file_util.h"
 +#include "base/files/scoped_temp_dir.h"
 +#include "base/test/task_environment.h"
@@ -586,6 +692,7 @@ de comparar a pref.
 +  EXPECT_FALSE(IsValidThemeName("a\nb"));
 +  EXPECT_FALSE(IsValidThemeName(std::string("a\0b", 3)));
 +  EXPECT_FALSE(IsValidThemeName("\xff\xfe"));
++  EXPECT_TRUE(IsValidThemeName("caf\u00e9"));
 +  EXPECT_TRUE(IsReservedThemeName("default"));
 +  EXPECT_TRUE(IsReservedThemeName("PIXELIZED"));
 +  EXPECT_FALSE(IsReservedThemeName("defaults"));
@@ -663,6 +770,31 @@ de comparar a pref.
 +  EXPECT_EQ(ResolveTheme("outro").theme.name, "default");
 +}
 +
++TEST_F(AerographeneThemeRepoTest, NamesNormalizedToNfc) {
++  // "café" with a combining acute accent (NFD) is stored as NFC.
++  ThemeData theme;
++  ASSERT_EQ(ParseThemeJson("{\"name\": \"cafe\u0301\"}", &theme),
++            ThemeParseResult::kOk);
++  EXPECT_EQ(theme.name, "caf\u00e9");
++  {
++    base::test::TestFuture<InstallResult, std::string> future;
++    InstallTheme("{\"name\": \"caf\u00e9\"}", false, future.GetCallback());
++    EXPECT_EQ(future.Get<0>(), InstallResult::kInstalled);
++  }
++  {
++    base::test::TestFuture<InstallResult, std::string> future;
++    InstallTheme("{\"name\": \"CAFE\u0301\"}", false, future.GetCallback());
++    EXPECT_EQ(future.Get<0>(), InstallResult::kConflict);
++  }
++}
++
++TEST_F(AerographeneThemeRepoTest, ReadSkipsNonRegularFile) {
++  // A directory named theme.json is not read (fstat S_ISREG).
++  ASSERT_TRUE(base::CreateDirectory(
++      dir_.GetPath().Append("pasta").Append(kThemeFileName)));
++  EXPECT_EQ(ResolveTheme("pasta").theme.name, "default");
++}
++
 +TEST_F(AerographeneThemeRepoTest, ListSkipsBroken) {
 +  WriteTheme("zeta", R"({"name":"zeta"})");
 +  WriteTheme("Alfa", R"({"name":"Alfa"})");
@@ -700,6 +832,20 @@ de comparar a pref.
 +    EXPECT_EQ(future.Get<0>(), InstallResult::kInstalled);
 +  }
 +  EXPECT_EQ(ResolveTheme("meu tema").theme.radius, 0);
++  // Replaced in place: one folder, no staging or backup folder left.
++  EXPECT_FALSE(base::PathExists(dir_.GetPath().Append("Meu Tema")));
++  int folders = 0;
++  base::FileEnumerator enumerator(dir_.GetPath(), /*recursive=*/false,
++                                  base::FileEnumerator::DIRECTORIES);
++  for (base::FilePath path = enumerator.Next(); !path.empty();
++       path = enumerator.Next()) {
++    ++folders;
++  }
++  EXPECT_EQ(folders, 1);
++  // The pref still holds the old case: it follows the renamed folder.
++  ResolvedTheme renamed = ResolveTheme("Meu Tema");
++  EXPECT_EQ(renamed.theme.name, "meu tema");
++  EXPECT_EQ(renamed.pref_value, "meu tema");
 +  {
 +    base::test::TestFuture<InstallResult, std::string> future;
 +    InstallTheme(R"({"name": "default"})", true, future.GetCallback());
@@ -732,15 +878,16 @@ de comparar a pref.
      "browser_theme_pack.cc",
      "custom_theme_supplier.cc",
      "theme_helper.cc",
-@@ -34,6 +36,7 @@
+@@ -34,6 +36,8 @@
      "theme_syncable_service.cc",
    ]
    deps = [
 +    "//base:i18n",
++    "//third_party/icu",
      "//chrome/app/theme:theme_resources",
      "//chrome/browser:browser_process",
      "//chrome/browser/infobars",
-@@ -144,6 +147,7 @@
+@@ -144,6 +148,7 @@
      testonly = true
  
      sources = [

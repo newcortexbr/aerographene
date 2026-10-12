@@ -9,12 +9,15 @@ Propósito: switch --import-theme=<arquivo> (Linux). ProcessCmdLineImpl o trata
 antes de qualquer janela: chama aerographene::ShowThemeImport e retorna sem
 abrir janela, aba ou restaurar sessão. Com instância rodando, o
 ProcessSingleton entrega o argv e o mesmo caminho mostra só o diálogo.
-Caminho relativo é resolvido contra cur_dir. Diálogos views sem pai
-(ui::DialogModel + BubbleDialogModelHost::CreateModal, ModalType kNone):
-conflito (substituir/cancelar) -> reimporta com replace; sucesso -> "usar
-tema" grava a pref aerographene.theme do perfil (efeito no próximo início);
-erro -> título IDS_AEROGRAPHENE_THEME_IMPORT_ERROR_TITLE + mensagem da fatia 4.
-Sem perfil (seletor de perfis na partida) importa sem oferecer aplicar.
+Caminho relativo é resolvido contra cur_dir. Diálogos sem pai:
+views::DialogDelegate comum (não bolha) em widget de nível superior,
+CLIENT_OWNS_WIDGET + MakeCloseSynchronous, mesmo caminho do message box sem pai
+(bolha sem pai cai no DCHECK de CreateModal com kNone e no CHECK de autosize
+sem custom frame no Linux): conflito (substituir/cancelar) -> InstallThemeJson
+com o JSON já lido; sucesso -> "usar tema" grava a pref aerographene.theme do
+perfil (efeito no próximo início); erro -> título
+IDS_AEROGRAPHENE_THEME_IMPORT_ERROR_TITLE + mensagem da fatia 4. Sem perfil
+regular (seletor de perfis na partida, convidado) importa sem oferecer aplicar.
 ScopedKeepAlive (origem APP_LAUNCH, sem entrada nova no enum) até o último
 diálogo fechar: processo aberto só para importar sai depois. Custo: partida
 normal do browser process (perfil carregado), sem janela nem sessão; não
@@ -63,7 +66,7 @@ diff --git a/chrome/browser/ui/startup/aerographene_theme_import.h b/chrome/brow
 new file mode 100644
 --- /dev/null
 +++ b/chrome/browser/ui/startup/aerographene_theme_import.h
-@@ -0,0 +1,27 @@
+@@ -0,0 +1,29 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -83,7 +86,9 @@ new file mode 100644
 +// pref of the profile at `profile_path`; effect at the next start) or an
 +// error. Holds a keep-alive until the last dialog closes, so a process
 +// started only for the import exits afterwards. An empty `profile_path`
-+// (e.g. profile picker at startup) imports without offering to apply.
++// (profile picker at startup, guest or other non-regular profile) imports
++// without offering to apply. A name conflict reinstalls the theme.json read
++// the first time; the file is not read again.
 +// Implemented in chrome/browser/ui/views/aerographene_theme_import_dialog.cc.
 +void ShowThemeImport(const base::FilePath& profile_path,
 +                     const base::FilePath& file);
@@ -102,7 +107,7 @@ diff --git a/chrome/browser/ui/startup/startup_browser_creator.cc b/chrome/brows
  #include "chrome/browser/ui/startup/launch_mode_recorder.h"
  #include "chrome/browser/ui/startup/profile_launch_observer.h"
  #include "chrome/browser/ui/startup/startup_browser_creator_impl.h"
-@@ -1049,6 +1050,29 @@
+@@ -1049,6 +1050,34 @@
    }
  #endif  // !BUILDFLAG(IS_ANDROID)
  
@@ -117,9 +122,14 @@ diff --git a/chrome/browser/ui/startup/startup_browser_creator.cc b/chrome/brows
 +    if (!file.empty() && !file.IsAbsolute()) {
 +      file = cur_dir.Append(file);
 +    }
++    // Only a regular profile is offered to apply the theme (guest and
++    // system profiles do not read the theme pref).
 +    Profile* profile = privacy_safe_profile
 +                           ? privacy_safe_profile->GetOriginalProfile()
 +                           : nullptr;
++    if (profile && !profile->IsRegularProfile()) {
++      profile = nullptr;
++    }
 +    aerographene::ShowThemeImport(
 +        profile ? profile->GetPath() : base::FilePath(), file);
 +    if (process_startup == chrome::startup::IsProcessStartup::kYes) {
@@ -136,7 +146,7 @@ diff --git a/chrome/browser/ui/views/aerographene_theme_import_dialog.cc b/chrom
 new file mode 100644
 --- /dev/null
 +++ b/chrome/browser/ui/views/aerographene_theme_import_dialog.cc
-@@ -0,0 +1,194 @@
+@@ -0,0 +1,226 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -148,7 +158,6 @@ new file mode 100644
 +#include "base/files/file_path.h"
 +#include "base/functional/bind.h"
 +#include "base/functional/callback.h"
-+#include "base/functional/callback_helpers.h"
 +#include "base/location.h"
 +#include "base/strings/utf_string_conversions.h"
 +#include "base/task/sequenced_task_runner.h"
@@ -163,10 +172,11 @@ new file mode 100644
 +#include "components/keep_alive_registry/scoped_keep_alive.h"
 +#include "components/prefs/pref_service.h"
 +#include "ui/base/l10n/l10n_util.h"
-+#include "ui/base/models/dialog_model.h"
++#include "ui/base/mojom/dialog_button.mojom.h"
 +#include "ui/base/mojom/ui_base_types.mojom-shared.h"
++#include "ui/base/ui_base_types.h"
 +#include "ui/gfx/native_ui_types.h"
-+#include "ui/views/bubble/bubble_dialog_model_host.h"
++#include "ui/views/controls/message_box_view.h"
 +#include "ui/views/widget/widget.h"
 +#include "ui/views/window/dialog_delegate.h"
 +
@@ -184,15 +194,24 @@ new file mode 100644
 +  ThemeImportFlow(const ThemeImportFlow&) = delete;
 +  ThemeImportFlow& operator=(const ThemeImportFlow&) = delete;
 +
-+  void Import(bool replace) {
-+    ImportThemeArchive(file_, replace,
++  void Import() {
++    ImportThemeArchive(file_, /*replace=*/false,
 +                       base::BindOnce(&ThemeImportFlow::OnImported,
 +                                      base::Unretained(this)));
 +  }
 +
 + private:
-+  void OnImported(ImportResult result, std::string name) {
++  // After a conflict: installs the json already read and validated, so the
++  // file is not read again (it may have changed since).
++  void Replace() {
++    InstallThemeJson(std::move(json_), /*replace=*/true,
++                     base::BindOnce(&ThemeImportFlow::OnImported,
++                                    base::Unretained(this)));
++  }
++
++  void OnImported(ImportResult result, std::string name, std::string json) {
 +    name_ = std::move(name);
++    json_ = std::move(json);
 +    const std::u16string name16 = base::UTF8ToUTF16(name_);
 +    switch (result) {
 +      case ImportResult::kConflict:
@@ -204,8 +223,7 @@ new file mode 100644
 +            l10n_util::GetStringUTF16(
 +                IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_REPLACE),
 +            /*cancel_label=*/std::u16string(),
-+            base::BindOnce(&ThemeImportFlow::Import, base::Unretained(this),
-+                           /*replace=*/true));
++            base::BindOnce(&ThemeImportFlow::Replace, base::Unretained(this)));
 +        return;
 +      case ImportResult::kInstalled:
 +        if (profile_path_.empty()) {
@@ -254,15 +272,21 @@ new file mode 100644
 +  void Apply() {
 +    Profile* profile =
 +        g_browser_process->profile_manager()->GetProfileByPath(profile_path_);
-+    if (profile) {
++    if (profile && profile->IsRegularProfile()) {
 +      profile->GetPrefs()->SetString(kThemePref, name_);
 +    }
 +    Finish();
 +  }
 +
-+  // One parentless dialog at a time. `on_ok` (null = just close) runs after
-+  // the dialog is gone; cancel, Esc and the close button end the flow.
-+  // `cancel_label` nullopt = no cancel button; empty = default label.
++  // One parentless dialog at a time: a plain views::DialogDelegate in a
++  // top-level widget, the same path as chrome::ShowWarningMessageBoxAsync
++  // without a parent. Not a bubble: an unparented bubble needs a modal type
++  // (BubbleDialogModelHost::CreateModal DCHECK) and, on Linux desktop aura,
++  // has no custom frame, which autosized bubbles CHECK on. The flow owns the
++  // delegate and the widget (CLIENT_OWNS_WIDGET).
++  // `on_ok` (null = just close) runs after the dialog is gone; cancel, Esc
++  // and the close button end the flow. `cancel_label` nullopt = no cancel
++  // button; empty = default label.
 +  void ShowDialog(std::u16string title,
 +                  std::u16string body,
 +                  std::u16string ok_label,
@@ -270,43 +294,56 @@ new file mode 100644
 +                  base::OnceClosure on_ok) {
 +    accepted_ = false;
 +    on_ok_ = std::move(on_ok);
-+    ui::DialogModel::Button::Params ok_params;
-+    if (!ok_label.empty()) {
-+      ok_params.SetLabel(std::move(ok_label));
-+    }
-+    ui::DialogModel::Builder builder;
-+    builder.SetTitle(std::move(title))
-+        .AddParagraph(ui::DialogModelLabel(std::move(body)))
-+        .AddOkButton(base::BindOnce(&ThemeImportFlow::OnAccepted,
-+                                    base::Unretained(this)),
-+                     ok_params)
-+        .SetDialogDestroyingCallback(base::BindOnce(
-+            &ThemeImportFlow::OnDialogDestroying, base::Unretained(this)));
++    auto dialog = std::make_unique<views::DialogDelegate>();
++    dialog->SetOwnershipOfNewWidget(
++        views::Widget::InitParams::CLIENT_OWNS_WIDGET);
++    dialog->SetModalType(ui::mojom::ModalType::kNone);
++    dialog->SetTitle(title);
++    dialog->SetShowCloseButton(true);
++    int buttons = static_cast<int>(ui::mojom::DialogButton::kOk);
 +    if (cancel_label) {
-+      ui::DialogModel::Button::Params cancel_params;
-+      if (!cancel_label->empty()) {
-+        cancel_params.SetLabel(std::move(*cancel_label));
-+      }
-+      builder.AddCancelButton(base::DoNothing(), cancel_params);
++      buttons |= static_cast<int>(ui::mojom::DialogButton::kCancel);
 +    }
-+    auto host = views::BubbleDialogModelHost::CreateModal(
-+        builder.Build(), ui::mojom::ModalType::kNone);
-+    views::Widget* widget = views::DialogDelegate::CreateDialogWidget(
-+        std::move(host), gfx::NativeWindow(), gfx::NativeView());
-+    widget->Show();
++    dialog->SetButtons(buttons);
++    if (!ok_label.empty()) {
++      dialog->SetButtonLabel(ui::mojom::DialogButton::kOk, std::move(ok_label));
++    }
++    if (cancel_label && !cancel_label->empty()) {
++      dialog->SetButtonLabel(ui::mojom::DialogButton::kCancel,
++                             std::move(*cancel_label));
++    }
++    dialog->SetAcceptCallback(
++        base::BindOnce(&ThemeImportFlow::OnAccepted, base::Unretained(this)));
++    dialog->SetContentsView(std::make_unique<views::MessageBoxView>(body));
++    dialog_ = std::move(dialog);
++    widget_.reset(views::DialogDelegate::CreateDialogWidget(
++        dialog_.get(), gfx::NativeWindow(), gfx::NativeView()));
++    widget_->MakeCloseSynchronous(
++        base::BindOnce(&ThemeImportFlow::OnDialogClosed,
++                       base::Unretained(this)));
++    // No parent window: keep it above other windows, like message boxes.
++    widget_->SetZOrderLevel(ui::ZOrderLevel::kFloatingWindow);
++    widget_->Show();
 +  }
 +
 +  void OnAccepted() { accepted_ = true; }
 +
-+  // Posted so the next dialog is not created while this widget is being torn
-+  // down.
-+  void OnDialogDestroying() {
++  // Close() of the widget (OK, cancel, Esc, close button, window manager).
++  // The widget goes now; the delegate, still on the stack of the button
++  // handler, and the next step go in a posted task.
++  void OnDialogClosed(views::Widget::ClosedReason) {
++    widget_.reset();
 +    base::OnceClosure next =
 +        accepted_ && on_ok_ ? std::move(on_ok_)
 +                            : base::BindOnce(&ThemeImportFlow::Finish,
 +                                             base::Unretained(this));
-+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(FROM_HERE,
-+                                                             std::move(next));
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE,
++        base::BindOnce(
++            [](std::unique_ptr<views::DialogDelegate>, base::OnceClosure next) {
++              std::move(next).Run();
++            },
++            std::move(dialog_), std::move(next)));
 +  }
 +
 +  // Releasing the keep-alive lets a process started only for the import exit
@@ -316,8 +353,13 @@ new file mode 100644
 +  const base::FilePath profile_path_;
 +  const base::FilePath file_;
 +  std::string name_;
++  // theme.json read from `file_`, kept for Replace().
++  std::string json_;
 +  bool accepted_ = false;
 +  base::OnceClosure on_ok_;
++  // Declared before widget_: the widget is destroyed first.
++  std::unique_ptr<views::DialogDelegate> dialog_;
++  std::unique_ptr<views::Widget> widget_;
 +  // KeepAliveOrigin has no theme entry; APP_LAUNCH avoids patching the enum.
 +  ScopedKeepAlive keep_alive_{KeepAliveOrigin::APP_LAUNCH,
 +                              KeepAliveRestartOption::DISABLED};
@@ -327,7 +369,7 @@ new file mode 100644
 +
 +void ShowThemeImport(const base::FilePath& profile_path,
 +                     const base::FilePath& file) {
-+  (new ThemeImportFlow(profile_path, file))->Import(/*replace=*/false);
++  (new ThemeImportFlow(profile_path, file))->Import();
 +}
 +
 +}  // namespace aerographene
