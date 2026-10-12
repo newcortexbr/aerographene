@@ -48,6 +48,13 @@
 - mockups usam conteúdo fictício: não executar comandos de terminais ilustrativos, acessar dados privados nem alegar integração real de notas/mcode.
 - aprovação visual tem escopo: não estendê-la a outros estudos ou a contratos de integração.
 
+## repositório público, README, release e wiki
+
+- o repo `newcortexbr/aerographene` é público: tudo em `main` fica visível; nada de dados privados, caminhos pessoais ou segredos.
+- ao entregar função nova ou mudar estado do projeto, atualize o README abaixo da linha "Content above was 100% human-written" (roadmap, docs, thanks). Nunca edite o texto humano acima dessa linha.
+- ao criar ou editar release, consulte no vault `agents/procedimentos/navegador-fork-formato-release.md` e siga o formato; se mudar o formato, atualize a nota.
+- documente cada função nova em `docs/wiki/` (pt-BR, uma página por assunto, com seção final "resumo para agentes") e linke na seção docs do README.
+
 ## git e segurança
 
 - branch padrão: `main`. Crie branch de trabalho a partir da base apropriada, preservando alterações locais do usuário.
