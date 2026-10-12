@@ -192,8 +192,8 @@ def activate(title_part):
 
 # coordenadas (px da janela 1440x900) dos alvos de clique, por modo; ajustadas pelas capturas reais
 # a janela real tem 1366x740 (tela 1366x768); o botão de menu fica a 122 px da borda direita
-CLICK = {"sidebar": {"tab": (110, 160), "menu": (1244, 22)},
-         "topbar": {"tab": (230, 20), "menu": (1343, 61)}}
+CLICK = {"sidebar": {"tab": (110, 350), "menu": (1244, 22)},
+         "topbar": {"tab": (520, 58), "menu": (1343, 97)}}
 
 
 def run_combo(pkg, out, theme, mode, wait):
