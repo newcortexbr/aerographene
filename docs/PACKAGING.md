@@ -71,6 +71,7 @@ Cores `#RRGGBB` ou `#RRGGBBAA`. Tokens e ColorIds:
 - `omnibox`, `omnibox_hover`, `omnibox_border`: `kColorLocationBarBackground[Hovered]`, `kColorLocationBarBorder`; `omnibox_text`, `omnibox_text_dim`: `kColorOmniboxText[Dimmed]`; `omnibox_results`, `omnibox_results_hover`: `kColorOmniboxResultsBackground[Hovered]`.
 - `focus_ring`: `kColorFocusableBorderFocused`; `ntp`, `ntp_text`: `kColorNewTabPageBackground`, `kColorNewTabPageText`.
 - `base`, `surface`, `text`, `accent`, `on_accent`: `kColorSysBase`, `kColorSysSurface`, `kColorSysOnSurface`, `kColorSysPrimary`, `kColorSysOnPrimary`; cores derivadas desses tokens também mudam.
+- `text_dim`, `outline` (`webui-theme-colors.patch`): texto secundário e contorno de controle das páginas WebUI (`kColorSecondaryForeground`, `kColorSysOnSurfaceSubtle`…; `kColorSysOutline`, `kColorCheckboxOutline`…). Os tokens `base`, `surface`, `text`, `accent`, `on_accent`, `hover`, `separator`, `selection*`, `omnibox_border` e `omnibox_results_hover` também cobrem os ids derivados usados por histórico e configurações (fundo de página/card, link, controles, divisor, seleção).
 
 Páginas internas (WebUI) usam `chrome://theme/colors.css`, gerado do ColorProvider, então também recebem os tokens. Desligar: `--disable-features=AerographeneThemeTokens`. Custo: uma leitura de arquivo pequeno (até 64 KiB) na primeira montagem de cores; medir contra a linha de base (regra de 2%). Não testado em navegador.
 

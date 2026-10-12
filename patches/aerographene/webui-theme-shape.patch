@@ -1,0 +1,236 @@
+aerographene: forma (raio, contorno, fonte) dos temas default e pixelized nas páginas internas (chrome://history, chrome://settings e chrome://settings/security|privacy).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/theme-builtin.patch (GetBuiltinTheme) e
+aerographene/webui-theme-colors.patch (cores; independente em aplicação).
+Propósito: ThemeSource::SendColorsCss acrescenta ao colors.css um bloco
+`html:not(#z){...}` conforme o tema ativo (nunca no incógnito): variáveis
+--aero-radius/--aero-radius-sm, raios de card/diálogo/menu/campo/chip,
+--cr-card-shadow como contorno inset de 1px (sem sombra de elevação) e, no
+pixelized, fonte JetBrains Mono no body/button. Os cr_elements (cr-button,
+cr-toggle, nav menu, md-select, toast, busca da toolbar) e o CSS do histórico
+e das configurações passam a consumir --aero-radius com o valor upstream como
+fallback, então páginas sem o bloco (e o incógnito) ficam como antes.
+Raios: default 4/3 px; pixelized 0 (chip 2 px), como theme-radius.patch.
+Radio e checkbox continuam com o raio upstream.
+
+--- a/chrome/browser/ui/webui/theme_source.cc
++++ b/chrome/browser/ui/webui/theme_source.cc
+@@ -18,6 +18,7 @@
+ #include "base/strings/stringprintf.h"
+ #include "base/timer/elapsed_timer.h"
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/themes/aerographene_theme.h"
+ #include "chrome/browser/resources_util.h"
+ #include "chrome/browser/themes/theme_properties.h"
+ #include "chrome/browser/themes/theme_service.h"
+@@ -66,6 +67,34 @@
+ }
+ 
+ #if !BUILDFLAG(IS_ANDROID)
++// aerographene: shape (and, for pixelized, font) of the WebUI pages, appended
++// to colors.css so it follows the active built-in theme and is refreshed with
++// the colors. Variables are consumed by cr_elements, chrome://history and
++// chrome://settings with their upstream value as fallback. `html:not(#z)`
++// out-ranks the `html {}` defaults of cr_shared_vars.css (same trick as the
++// colors block).
++std::string AerographeneThemeCss() {
++  // Both themes: no pill, no elevation shadow; contour as an inset hairline.
++  constexpr char kCommon[] =
++      "--cr-card-shadow:inset 0 0 0 1px var(--color-separator,"
++      "rgba(255,255,255,.14));";
++  if (aerographene::GetBuiltinTheme() ==
++      aerographene::BuiltinTheme::kPixelized) {
++    return base::StrCat(
++        {"html:not(#z){", kCommon,
++         "--aero-radius:0;--aero-radius-sm:0;--cr-card-border-radius:0;"
++         "--cr-dialog-border-radius:0;--cr-menu-border-radius:0;"
++         "--cr-input-border-radius:0;--cr-chip-border-radius:2px;}"
++         "html:not(#z) body,html:not(#z) button{"
++         "font-family:\"JetBrains Mono\",monospace;}"});
++  }
++  return base::StrCat(
++      {"html:not(#z){", kCommon,
++       "--aero-radius:4px;--aero-radius-sm:3px;--cr-card-border-radius:4px;"
++       "--cr-dialog-border-radius:4px;--cr-menu-border-radius:4px;"
++       "--cr-input-border-radius:4px;--cr-chip-border-radius:4px;}"});
++}
++
+ bool IsNewTabCssPath(const std::string& path) {
+   static const char kNewTabThemeCssPath[] = "css/new_tab_theme.css";
+   static const char kIncognitoTabThemeCssPath[] = "css/incognito_tab_theme.css";
+@@ -396,6 +425,13 @@
+     return;
+   }
+ 
++#if !BUILDFLAG(IS_ANDROID)
++  // Incognito keeps the upstream look (it takes no built-in theme colors).
++  if (!profile_->IsOffTheRecord()) {
++    css_content->append(AerographeneThemeCss());
++  }
++#endif
++
+   std::move(callback).Run(
+       base::MakeRefCounted<base::RefCountedString>(std::move(*css_content)));
+ 
+--- a/ui/webui/resources/cr_elements/cr_button/cr_button.css
++++ b/ui/webui/resources/cr_elements/cr_button/cr_button.css
+@@ -40,7 +40,7 @@
+   user-select: none;
+   -webkit-tap-highlight-color: transparent;
+   border: var(--cr-button-border, 1px solid var(--cr-button-border-color));
+-  border-radius: 100px;
++  border-radius: var(--aero-radius, 100px);
+   background: var(--cr-button-background-color);
+   color: var(--cr-button-text-color);
+   font-weight: 500;
+@@ -92,7 +92,7 @@
+ }
+ 
+ :host(.floating-button) {
+-  border-radius: 8px;
++  border-radius: var(--aero-radius, 8px);
+   height: 40px;
+   transition: box-shadow 80ms linear;
+ }
+--- a/ui/webui/resources/cr_elements/cr_toggle/cr_toggle.css
++++ b/ui/webui/resources/cr_elements/cr_toggle/cr_toggle.css
+@@ -88,7 +88,7 @@
+ #bar {
+   background-color: var(--cr-toggle-unchecked-bar-color);
+   border: var(--cr-toggle-bar-border);
+-  border-radius: 50px;
++  border-radius: var(--aero-radius-sm, 50px);
+   box-sizing: border-box;
+   display: block;
+   height: 16px;
+@@ -142,7 +142,7 @@
+       var(--cr-toggle-knob-travel-distance_));
+ 
+   background-color: var(--cr-toggle-unchecked-button-color);
+-  border-radius: 50%;
++  border-radius: var(--aero-radius-sm, 50%);
+   box-shadow: none;
+   display: block;
+   height: var(--cr-toggle-knob-diameter);
+@@ -175,7 +175,7 @@
+ 
+ :host(:hover) #knob::before {
+   background-color: var(--cr-hover-on-subtle-background-color);
+-  border-radius: 50%;
++  border-radius: var(--aero-radius-sm, 50%);
+   content: '';
+   height: var(--cr-toggle-ripple-diameter);
+   left: 50%;
+--- a/ui/webui/resources/cr_elements/cr_nav_menu_item_style_lit.css
++++ b/ui/webui/resources/cr_elements/cr_nav_menu_item_style_lit.css
+@@ -25,8 +25,8 @@
+   /* Sizes icons for cr-icons. */
+   --cr-icon-ripple-size: 20px;
+   align-items: center;
+-  border-end-end-radius: 100px;
+-  border-start-end-radius: 100px;
++  border-end-end-radius: var(--aero-radius, 100px);
++  border-start-end-radius: var(--aero-radius, 100px);
+   box-sizing: border-box;
+   color: var(--cr-nav-menu-item-color);
+   display: flex;
+--- a/ui/webui/resources/cr_elements/md_select_lit.css
++++ b/ui/webui/resources/cr_elements/md_select_lit.css
+@@ -23,7 +23,7 @@
+   background-size: var(--md-arrow-width);
+   border: solid 1px var(--color-combobox-container-outline,
+       var(--cr-fallback-color-neutral-outline));
+-  border-radius: 8px;
++  border-radius: var(--aero-radius, 8px);
+   box-sizing: border-box;
+   color: var(--md-select-text-color);
+   cursor: pointer;
+--- a/ui/webui/resources/cr_elements/cr_toast/cr_toast.css
++++ b/ui/webui/resources/cr_elements/cr_toast/cr_toast.css
+@@ -19,7 +19,7 @@
+ 
+   align-items: center;
+   background: var(--cr-toast-background);
+-  border-radius: 8px;
++  border-radius: var(--aero-radius, 8px);
+   bottom: 0;
+   box-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.28);
+   box-sizing: border-box;
+--- a/ui/webui/resources/cr_elements/cr_toolbar/cr_toolbar_search_field.css
++++ b/ui/webui/resources/cr_elements/cr_toolbar/cr_toolbar_search_field.css
+@@ -170,7 +170,7 @@
+   padding: 0 6px;
+   position: relative;
+   width: var(--cr-toolbar-field-width, 680px);
+-  --cr-toolbar-search-field-border-radius: 100px;
++  --cr-toolbar-search-field-border-radius: var(--aero-radius, 100px);
+ }
+ 
+ @media (prefers-color-scheme: dark) {
+--- a/chrome/browser/resources/history/history_item.css
++++ b/chrome/browser/resources/history/history_item.css
+@@ -228,7 +228,7 @@
+ 
+ .critical-action-row {
+   align-items: center;
+-  border-radius: 8px;
++  border-radius: var(--aero-radius, 8px);
+   box-sizing: border-box;
+   cursor: pointer;
+   display: flex;
+--- a/chrome/browser/resources/history/history_sync_promo.css
++++ b/chrome/browser/resources/history/history_sync_promo.css
+@@ -19,7 +19,7 @@
+   display: flex;
+   align-items: center;
+   background: var(--cr-card-background-color);
+-  border-radius: 8px;
++  border-radius: var(--cr-card-border-radius, 8px);
+   box-shadow: var(--cr-card-shadow);
+   box-sizing: border-box;
+   margin-block-start: 16px;
+--- a/chrome/browser/resources/history/history_embeddings_promo.css
++++ b/chrome/browser/resources/history/history_embeddings_promo.css
+@@ -19,7 +19,7 @@
+   display: flex;
+   align-items: center;
+   background: var(--cr-card-background-color);
+-  border-radius: 8px;
++  border-radius: var(--cr-card-border-radius, 8px);
+   box-shadow: var(--cr-card-shadow);
+   box-sizing: border-box;
+   margin-block-start: 16px;
+--- a/chrome/browser/resources/history/history_cross_device_signin_promo.css
++++ b/chrome/browser/resources/history/history_cross_device_signin_promo.css
+@@ -19,7 +19,7 @@
+   display: flex;
+   align-items: center;
+   background: var(--cr-card-background-color);
+-  border-radius: 8px;
++  border-radius: var(--cr-card-border-radius, 8px);
+   box-shadow: var(--cr-card-shadow);
+   box-sizing: border-box;
+   margin-block-start: 16px;
+--- a/chrome/browser/resources/history/synced_device_manager.css
++++ b/chrome/browser/resources/history/synced_device_manager.css
+@@ -144,7 +144,7 @@
+ }
+ 
+ .profile-icon {
+-  border-radius: 20px;
++  border-radius: var(--aero-radius, 20px);
+   height: 40px;
+   width: 40px;
+ }
+--- a/chrome/browser/resources/settings/people_page/people_page.css
++++ b/chrome/browser/resources/settings/people_page/people_page.css
+@@ -17,7 +17,7 @@
+ 
+ #profile-icon {
+   background: center / cover no-repeat;
+-  border-radius: 20px;
++  border-radius: var(--aero-radius, 20px);
+   flex-shrink: 0;
+   height: 40px;
+   width: 40px;
