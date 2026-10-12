@@ -194,7 +194,41 @@ def collect_files(root_path):
     return order
 
 
-PTBR_NEW_TAB = re.compile(r"\b([Nn])ova guia")
+# pt-BR: "guia(s)" (tab) -> "aba(s)" em toda a UI. Mesmo gênero (feminino), então artigos,
+# adjetivos e "nova/outra/esta" concordam sem mudança. Fica de fora "guia" no sentido de
+# manual/tutorial (masculino: "o guia", "um guia", "do guia"...; "Guia de privacidade",
+# "Guia de configuração"). Só texto fora de tags (<ph>, <ex>, atributos) é tocado.
+PTBR_TAB = re.compile(r"\b(G|g)(?:UIA|uia)([sS]?)\b")
+PTBR_TAB_GUIDE_BEFORE = re.compile(r"(?:\b(?:o|O|um|Um|do|ao|no|pelo)\s+)$")
+PTBR_TAB_GUIDE_AFTER = re.compile(r"^\s+de\s+(?:privacidade|configura)")
+
+
+def _ptbr_tab_repl(text):
+    def repl(m):
+        if PTBR_TAB_GUIDE_BEFORE.search(text[: m.start()]) or PTBR_TAB_GUIDE_AFTER.match(text[m.end():]):
+            return m.group(0)
+        word = m.group(0)
+        out = "aba" + m.group(2)
+        if word.isupper():
+            return out.upper()
+        return out.capitalize() if m.group(1) == "G" else out
+    return repl
+
+
+def ptbr_tab_terms(xtb):
+    """Troca guia(s) por aba(s) no texto dos <translation>. Retorna (novo, nº de trocas)."""
+    n = 0
+    out = []
+    for part in _TAG.split(xtb):
+        if part.startswith("<") or not PTBR_TAB.search(part):
+            out.append(part)
+            continue
+        new, k = PTBR_TAB.subn(_ptbr_tab_repl(part), part)
+        n += k
+        out.append(new)
+    return "".join(out), n
+
+
 _PH = re.compile(r'<ph\s+name="([^"]+)"')
 _PH_XTB = re.compile(r'(<ph\s+name="[A-Za-z0-9_]+"\s*/>)')
 
@@ -346,16 +380,16 @@ def process_root(root, ids, check, stats, src, backup, listing=False, extra=None
             out = inject_extra(files, contents, xp, cur, extra, ids, stats, src)
             if out is not None:
                 new_xtb[xp] = out
-    # aerographene: "Nova guia" -> "Nova aba" no pt-BR (menus, atalhos, botão da sidebar).
+    # aerographene: "guia(s)" -> "aba(s)" no pt-BR (menus, atalhos, botão da sidebar, avisos).
     for xp, lang in xtbs:
         if lang != EXTRA_LANG or not os.path.isfile(xp):
             continue
         cur = new_xtb.get(xp)
         if cur is None:
             cur = open(xp, encoding="utf-8", newline="").read()
-        out, n = PTBR_NEW_TAB.subn(r"\1ova aba", cur)
+        out, n = ptbr_tab_terms(cur)
         if n:
-            print("  termo %-6s 'Nova guia' -> 'Nova aba' em %d traduções  %s" % (lang, n, os.path.relpath(xp, src)))
+            print("  termo %-6s 'guia' -> 'aba' em %d ocorrências  %s" % (lang, n, os.path.relpath(xp, src)))
             new_xtb[xp] = out
     stats["xtb_files"] += len(new_xtb)
 
