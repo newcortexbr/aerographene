@@ -104,4 +104,5 @@ aerographene/menus-command-bar.patch
 aerographene/topbar-mockup.patch
 aerographene/pixelized-type.patch
 aerographene/topbar-row-fix.patch
+aerographene/topbar-frame-height.patch
 aerographene/newtab-fidelity.patch
