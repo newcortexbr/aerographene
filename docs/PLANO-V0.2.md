@@ -12,6 +12,7 @@ Estado em 12/10/2026. Fontes: README (roadmap), `docs/SCOPE.md`, `docs/NOITE-202
    - decisões do dono (12/10/2026):
      - troca com reinício: modal "reiniciar agora" ou "depois".
      - o seletor lista todos os temas do repositório local de temas (uma pasta de temas dentro do navegador), não só os dois embutidos.
+     - ícones fora da v0.2: um tema escolhe um dos pacotes compilados (`default`, `pixelized`). Depois: cerca de 5 pacotes de ícones bem diferentes, compilados, e o tema declara um pacote-base com overrides por ícone vindos de outros pacotes (ex.: base x, ícones 12 e 14 de y, 34 e 35 de z). Sem ícones como dado nem parser em runtime.
      - desejável: importar tema arrastando um arquivo para um modal de importar tema, ou instalar via extensões. Viabilidade a investigar.
    - verificação: compilar só o alvo afetado no runner; smoke no pacote nos 4 combos.
 4. teste de uso real: roteiro em `docs/TESTE-USO-REAL.md`; execução do dono, com clique e teclado. Falhas viram entrada em `docs/NOITE-*.md`.
