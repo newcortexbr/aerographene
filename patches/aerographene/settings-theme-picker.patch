@@ -1,0 +1,471 @@
+aerographene: seletor de tema em chrome://settings/appearance (v0.2, fatia 3).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/theme-repo.patch (ListThemes, ThemeInfo, pref
+aerographene.theme por nome), helium/ui/layout/settings.patch (página de
+aparência com as linhas de layout).
+Propósito: escolher o tema do navegador na página de configurações.
+AppearanceHandler ganha getAerographeneThemes(callback_id) -> {themes:
+[{name, builtin, dark}], active} (ListThemes: embutidos + repositório;
+"active" é a pref, ou "default" se a pref nomeia pasta ausente, como o
+ResolveTheme faz na execução) e setAerographeneTheme(callback_id, name),
+que só grava a pref aerographene.theme se o nome estiver em ListThemes
+(nada de caminho vindo da página) e responde se gravou. O handler já está
+registrado em settings_ui.cc; a pref é gravada pelo próprio handler no
+perfil, então não entra na allowlist de prefs_util.cc. Aplicar continua
+exigindo reiniciar (ThemeService::Init lê a pref uma vez).
+Página: um <select> (md-select) com os temas, o ativo selecionado. Trocar
+grava a pref e abre cr-dialog "reiniciar agora" (performRestart(
+RestartType.RESTART), com o relaunch-confirmation-dialog do mixin, como
+system_page) ou "depois" (vale no próximo início). Se um tema de extensão
+estiver ativo (extensions.theme.id que não seja autogerado/cor do usuário),
+uma linha avisa que ele substitui o embutido, com botão que chama o
+useDefaultTheme existente (reset para o padrão do Chromium).
+Strings: IDS_SETTINGS_AEROGRAPHENE_* em settings_strings.grdp, só em inglês
+(o projeto não traz .xtb; o Helium faz igual) e ligadas em
+AddAppearanceStrings. Nenhum arquivo novo (sem mudança em BUILD.gn).
+
+diff --git a/chrome/app/settings_strings.grdp b/chrome/app/settings_strings.grdp
+--- a/chrome/app/settings_strings.grdp
++++ b/chrome/app/settings_strings.grdp
+@@ -286,6 +286,27 @@
+     <message name="IDS_SETTINGS_BROWSER_LAYOUT_VERTICAL" desc="Vertical option in the browser layout dropdown.">
+       Vertical
+     </message>
++    <message name="IDS_SETTINGS_AEROGRAPHENE_THEME" desc="Label of the dropdown, in the Appearance settings, that picks the browser theme (colors, corner radius, font, icons) from the built-in and installed themes.">
++      Browser theme
++    </message>
++    <message name="IDS_SETTINGS_AEROGRAPHENE_THEME_RESTART_TITLE" desc="Title of the dialog shown after the user picks another browser theme in the Appearance settings.">
++      Restart to apply the theme?
++    </message>
++    <message name="IDS_SETTINGS_AEROGRAPHENE_THEME_RESTART_BODY" desc="Body of the dialog shown after the user picks another browser theme: the theme is saved and takes effect when the browser restarts.">
++      The theme is saved. It takes effect when the browser restarts.
++    </message>
++    <message name="IDS_SETTINGS_AEROGRAPHENE_THEME_RESTART_NOW" desc="Button of the theme dialog that restarts the browser now to apply the new theme.">
++      Restart now
++    </message>
++    <message name="IDS_SETTINGS_AEROGRAPHENE_THEME_RESTART_LATER" desc="Button of the theme dialog that keeps the new theme for the next browser start without restarting now.">
++      Later
++    </message>
++    <message name="IDS_SETTINGS_AEROGRAPHENE_EXTENSION_THEME_WARNING" desc="Warning in the Appearance settings, shown when a theme from an extension is active: that theme replaces the browser theme picked in the dropdown above.">
++      A theme from an extension is active and replaces the browser theme chosen above. Reset to the default theme to use the chosen one.
++    </message>
++    <message name="IDS_SETTINGS_AEROGRAPHENE_RESET_EXTENSION_THEME" desc="Button next to the extension theme warning that removes the extension theme and goes back to the default Chromium theme.">
++      Reset to default
++    </message>
+     <message name="IDS_SETTINGS_TAB_STRIP_RIGHT_ALIGN" desc="Label for the toggle that displays vertical tabs on the right side of the browser window.">
+       Show vertical tabs on right side
+     </message>
+diff --git a/chrome/browser/resources/settings/appearance_page/appearance_browser_proxy.ts b/chrome/browser/resources/settings/appearance_page/appearance_browser_proxy.ts
+--- a/chrome/browser/resources/settings/appearance_page/appearance_browser_proxy.ts
++++ b/chrome/browser/resources/settings/appearance_page/appearance_browser_proxy.ts
+@@ -8,7 +8,20 @@
+ import {loadTimeData} from '../i18n_setup.js';
+ // clang-format on
+ 
++export interface AerographeneThemeEntry {
++  name: string;
++  builtin: boolean;
++  dark: boolean;
++}
++
++export interface AerographeneThemes {
++  themes: AerographeneThemeEntry[];
++  active: string;
++}
++
+ export interface AppearanceBrowserProxy {
++  getAerographeneThemes(): Promise<AerographeneThemes>;
++  setAerographeneTheme(name: string): Promise<boolean>;
+   getDefaultZoom(): Promise<number>;
+   getThemeInfo(themeId: string): Promise<chrome.management.ExtensionInfo>;
+ 
+@@ -34,6 +47,14 @@
+ }
+ 
+ export class AppearanceBrowserProxyImpl implements AppearanceBrowserProxy {
++  getAerographeneThemes() {
++    return sendWithPromise<AerographeneThemes>('getAerographeneThemes');
++  }
++
++  setAerographeneTheme(name: string) {
++    return sendWithPromise<boolean>('setAerographeneTheme', name);
++  }
++
+   getDefaultZoom(): Promise<number> {
+     return chrome.settingsPrivate.getDefaultZoom();
+   }
+diff --git a/chrome/browser/resources/settings/appearance_page/appearance_page.html.ts b/chrome/browser/resources/settings/appearance_page/appearance_page.html.ts
+--- a/chrome/browser/resources/settings/appearance_page/appearance_page.html.ts
++++ b/chrome/browser/resources/settings/appearance_page/appearance_page.html.ts
+@@ -4,6 +4,8 @@
+ 
+ import {html} from '//resources/lit/v3_0/lit.rollup.js';
+ 
++import {RestartType} from '../relaunch_mixin_lit.js';
++
+ import type {SettingsAppearancePageElement} from './appearance_page.js';
+ 
+ export function getHtml(this: SettingsAppearancePageElement) {
+@@ -48,6 +50,32 @@
+       </div>
+ </if>
+     </div>
++    <div class="cr-row" id="aerographeneThemeRow">
++      <div class="flex cr-padded-text" id="aerographeneThemeLabel">
++        $i18n{aerographeneTheme}
++      </div>
++      <select id="aerographeneThemeSelect" class="md-select"
++          aria-labelledby="aerographeneThemeLabel"
++          @change="${this.onAerographeneThemeChange_}">
++        ${this.aerographeneThemes_.map(item => html`
++          <option value="${item.name}"
++              ?selected="${item.name === this.aerographeneActiveTheme_}">
++            ${item.name}
++          </option>
++        `)}
++      </select>
++    </div>
++    ${this.showAerographeneExtensionWarning_() ? html`
++      <div class="cr-row continuation" id="aerographeneExtensionThemeWarning">
++        <div class="flex cr-padded-text secondary">
++          $i18n{aerographeneExtensionThemeWarning}
++        </div>
++        <cr-button id="aerographeneResetExtensionTheme"
++            @click="${this.onUseDefaultClick_}">
++          $i18n{aerographeneResetExtensionTheme}
++        </cr-button>
++      </div>
++    ` : ''}
+     <div id="toolbarRow" class="settings-row">
+       <cr-link-row id="customizeToolbar"
+           label="$i18n{customizeToolbar}"
+@@ -283,6 +311,28 @@
+ </if>
+   </div>
+ </settings-section>
++${this.showAerographeneRestartDialog_ ? html`
++  <cr-dialog id="aerographeneRestartDialog" show-on-attach
++      close-text="$i18n{close}" @close="${this.onAerographeneRestartDialogClose_}">
++    <div slot="title">$i18n{aerographeneThemeRestartTitle}</div>
++    <div slot="body">$i18n{aerographeneThemeRestartBody}</div>
++    <div slot="button-container">
++      <cr-button id="aerographeneRestartLater" class="cancel-button"
++          @click="${this.onAerographeneRestartLaterClick_}">
++        $i18n{aerographeneThemeRestartLater}
++      </cr-button>
++      <cr-button id="aerographeneRestartNow" class="action-button"
++          @click="${this.onAerographeneRestartNowClick_}">
++        $i18n{aerographeneThemeRestartNow}
++      </cr-button>
++    </div>
++  </cr-dialog>
++` : ''}
++${this.shouldShowRelaunchDialog ? html`
++  <relaunch-confirmation-dialog .restartType="${RestartType.RESTART}"
++      @close="${this.onRelaunchDialogClose}">
++  </relaunch-confirmation-dialog>
++` : ''}
+ ${this.showManagedThemeDialog_ ? html`
+   <managed-dialog @close="${this.onManagedDialogClose_}"
+       title="$i18n{themeManagedDialogTitle}"
+diff --git a/chrome/browser/resources/settings/appearance_page/appearance_page.ts b/chrome/browser/resources/settings/appearance_page/appearance_page.ts
+--- a/chrome/browser/resources/settings/appearance_page/appearance_page.ts
++++ b/chrome/browser/resources/settings/appearance_page/appearance_page.ts
+@@ -12,6 +12,8 @@
+ import '../settings_page/settings_section.js';
+ import './home_url_input.js';
+ import '../controls/settings_dropdown_menu.js';
++import '../relaunch_confirmation_dialog.js';
++import 'chrome://resources/cr_elements/cr_dialog/cr_dialog.js';
+ 
+ import {PrefService} from '/shared/settings/prefs2/pref_service.js';
+ import {PrefServiceObserverMixinLit} from '/shared/settings/prefs2/pref_service_observer_mixin_lit.js';
+@@ -29,12 +31,12 @@
+ import {MetricsBrowserProxyImpl} from '../metrics_browser_proxy.js';
+ import {pageVisibility} from '../page_visibility.js';
+ import type {AppearancePageVisibility} from '../page_visibility.js';
+-import {RelaunchMixinLit} from '../relaunch_mixin_lit.js';
++import {RelaunchMixinLit, RestartType} from '../relaunch_mixin_lit.js';
+ import {routes} from '../route.js';
+ import {Router} from '../router.js';
+ import {SettingsViewMixinLit} from '../settings_page/settings_view_mixin_lit.js';
+ 
+-import type {AppearanceBrowserProxy} from './appearance_browser_proxy.js';
++import type {AerographeneThemeEntry, AppearanceBrowserProxy} from './appearance_browser_proxy.js';
+ import {AppearanceBrowserProxyImpl} from './appearance_browser_proxy.js';
+ import {getCss} from './appearance_page.css.js';
+ import {getHtml} from './appearance_page.html.js';
+@@ -65,6 +67,7 @@
+ 
+ export interface SettingsAppearancePageElement {
+   $: {
++    aerographeneThemeSelect: HTMLSelectElement,
+     defaultFontSize: SettingsDropdownMenuElement,
+     zoomLevel: HTMLSelectElement,
+   };
+@@ -172,6 +175,9 @@
+ 
+       showHoverCardImagesOption_: {type: Boolean},
+       showManagedThemeDialog_: {type: Boolean},
++      aerographeneThemes_: {type: Array},
++      aerographeneActiveTheme_: {type: String},
++      showAerographeneRestartDialog_: {type: Boolean},
+       glassEffectOptions_: {type: Array},
+       browserLayoutOptions_: {type: Array},
+       showGlassEffectEnabled_: {type: Boolean},
+@@ -226,6 +232,11 @@
+       undefined;
+   // </if>
+ 
++  // aerographene: theme picker (built-in + repository themes).
++  protected accessor aerographeneThemes_: AerographeneThemeEntry[] = [];
++  protected accessor aerographeneActiveTheme_: string = '';
++  protected accessor showAerographeneRestartDialog_: boolean = false;
++
+   protected accessor colorSchemeModeOptions_:
+       Array<{value: ColorSchemeMode, name: string}> = [
+         {
+@@ -365,6 +376,8 @@
+       'webkit.webprefs.default_font_size': 'defaultFontSizePref_',
+     });
+ 
++    this.refreshAerographeneThemes_();
++
+     // TODO(dschuyler): Look into adding a listener for the
+     // default zoom percent.
+     this.appearanceBrowserProxy_.getDefaultZoom().then(zoom => {
+@@ -482,6 +495,51 @@
+     this.appearanceBrowserProxy_.openCustomizeChromeToolbarSection();
+   }
+ 
++  private async refreshAerographeneThemes_() {
++    const result = await this.appearanceBrowserProxy_.getAerographeneThemes();
++    this.aerographeneThemes_ = result.themes;
++    this.aerographeneActiveTheme_ = result.active;
++  }
++
++  /**
++   * @return Whether a theme from an extension is active. It replaces the
++   *     built-in theme, so the picker warns about it.
++   */
++  protected showAerographeneExtensionWarning_(): boolean {
++    const themeId = this.themeIdPref_?.value;
++    return !!themeId && themeId !== AUTOGENERATED_THEME_ID &&
++        themeId !== USER_COLOR_THEME_ID;
++  }
++
++  protected async onAerographeneThemeChange_() {
++    const name = this.$.aerographeneThemeSelect.value;
++    if (name === this.aerographeneActiveTheme_) {
++      return;
++    }
++    const saved = await this.appearanceBrowserProxy_.setAerographeneTheme(name);
++    if (!saved) {
++      // The theme vanished from the repository: show what is really stored.
++      await this.refreshAerographeneThemes_();
++      this.$.aerographeneThemeSelect.value = this.aerographeneActiveTheme_;
++      return;
++    }
++    this.aerographeneActiveTheme_ = name;
++    this.showAerographeneRestartDialog_ = true;
++  }
++
++  protected onAerographeneRestartLaterClick_() {
++    this.showAerographeneRestartDialog_ = false;
++  }
++
++  protected onAerographeneRestartNowClick_() {
++    this.showAerographeneRestartDialog_ = false;
++    this.performRestart(RestartType.RESTART);
++  }
++
++  protected onAerographeneRestartDialogClose_() {
++    this.showAerographeneRestartDialog_ = false;
++  }
++
+   protected onUseDefaultClick_() {
+     if (this.isForcedTheme_) {
+       this.showManagedThemeDialog_ = true;
+diff --git a/chrome/browser/ui/webui/settings/appearance_handler.cc b/chrome/browser/ui/webui/settings/appearance_handler.cc
+--- a/chrome/browser/ui/webui/settings/appearance_handler.cc
++++ b/chrome/browser/ui/webui/settings/appearance_handler.cc
+@@ -4,12 +4,18 @@
+ 
+ #include "chrome/browser/ui/webui/settings/appearance_handler.h"
+ 
++#include <string>
++#include <utility>
++#include <vector>
++
+ #include "base/check.h"
+ #include "base/functional/bind.h"
+ #include "base/values.h"
+ #include "build/build_config.h"
+ #include "chrome/app/chrome_command_ids.h"
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/themes/aerographene_theme.h"
++#include "chrome/browser/themes/aerographene_theme_repo.h"
+ #include "chrome/browser/themes/theme_service_factory.h"
+ #include "chrome/browser/ui/browser_commands.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+@@ -19,6 +25,7 @@
+ #include "chrome/browser/ui/tabs/vertical_tab_strip_metrics.h"
+ #include "chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.h"
+ #include "chrome/common/pref_names.h"
++#include "components/prefs/pref_service.h"
+ #include "content/public/browser/web_ui.h"
+ #include "ui/actions/actions.h"
+ 
+@@ -65,6 +72,14 @@
+       base::BindRepeating(&AppearanceHandler::PinnedToolbarActionsAreDefault,
+                           base::Unretained(this)));
+   web_ui()->RegisterMessageCallback(
++      "getAerographeneThemes",
++      base::BindRepeating(&AppearanceHandler::HandleGetAerographeneThemes,
++                          base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "setAerographeneTheme",
++      base::BindRepeating(&AppearanceHandler::HandleSetAerographeneTheme,
++                          base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
+       "recordVerticalTabStripModeChanged",
+       base::BindRepeating(
+           &AppearanceHandler::HandleRecordVerticalTabStripModeChanged,
+@@ -117,4 +132,74 @@
+       is_vertical, tabs::VerticalTabStripEntryPoint::kSettings);
+ }
+ 
++void AppearanceHandler::HandleGetAerographeneThemes(
++    const base::ListValue& args) {
++  CHECK_EQ(1U, args.size());
++  AllowJavascript();
++  aerographene::ListThemes(
++      base::BindOnce(&AppearanceHandler::OnAerographeneThemesListed,
++                     weak_ptr_factory_.GetWeakPtr(), args[0].Clone()));
++}
++
++void AppearanceHandler::OnAerographeneThemesListed(
++    base::Value callback_id,
++    std::vector<aerographene::ThemeInfo> themes) {
++  if (!IsJavascriptAllowed()) {
++    return;
++  }
++  const std::string pref =
++      profile_->GetPrefs()->GetString(aerographene::kThemePref);
++  // A name without a valid folder runs as "default" (ResolveTheme), so the
++  // picker shows "default" for it.
++  std::string active = aerographene::kThemeDefault;
++  base::ListValue list;
++  for (const aerographene::ThemeInfo& info : themes) {
++    if (info.theme.name == pref) {
++      active = pref;
++    }
++    base::DictValue entry;
++    entry.Set("name", info.theme.name);
++    entry.Set("builtin", info.builtin);
++    entry.Set("dark", info.theme.scheme == aerographene::ThemeScheme::kDark);
++    list.Append(std::move(entry));
++  }
++  base::DictValue result;
++  result.Set("themes", std::move(list));
++  result.Set("active", active);
++  ResolveJavascriptCallback(callback_id, result);
++}
++
++void AppearanceHandler::HandleSetAerographeneTheme(
++    const base::ListValue& args) {
++  CHECK_EQ(2U, args.size());
++  AllowJavascript();
++  // Only names that ListThemes reports (built-ins and valid repository
++  // folders) are accepted; the page never sends a raw path.
++  aerographene::ListThemes(
++      base::BindOnce(&AppearanceHandler::OnAerographeneThemeValidated,
++                     weak_ptr_factory_.GetWeakPtr(), args[0].Clone(),
++                     args[1].GetString()));
++}
++
++void AppearanceHandler::OnAerographeneThemeValidated(
++    base::Value callback_id,
++    std::string name,
++    std::vector<aerographene::ThemeInfo> themes) {
++  if (!IsJavascriptAllowed()) {
++    return;
++  }
++  bool found = false;
++  for (const aerographene::ThemeInfo& info : themes) {
++    if (info.theme.name == name) {
++      found = true;
++      break;
++    }
++  }
++  if (found) {
++    // Read once in ThemeService::Init: applies on the next browser start.
++    profile_->GetPrefs()->SetString(aerographene::kThemePref, name);
++  }
++  ResolveJavascriptCallback(callback_id, base::Value(found));
++}
++
+ }  // namespace settings
+diff --git a/chrome/browser/ui/webui/settings/appearance_handler.h b/chrome/browser/ui/webui/settings/appearance_handler.h
+--- a/chrome/browser/ui/webui/settings/appearance_handler.h
++++ b/chrome/browser/ui/webui/settings/appearance_handler.h
+@@ -5,9 +5,14 @@
+ #ifndef CHROME_BROWSER_UI_WEBUI_SETTINGS_APPEARANCE_HANDLER_H_
+ #define CHROME_BROWSER_UI_WEBUI_SETTINGS_APPEARANCE_HANDLER_H_
+ 
++#include <string>
++#include <vector>
++
+ #include "base/memory/raw_ptr.h"
+ #include "base/memory/weak_ptr.h"
+ #include "build/build_config.h"
++#include "base/values.h"
++#include "chrome/browser/themes/aerographene_theme_repo.h"
+ #include "chrome/browser/themes/theme_service.h"
+ #include "chrome/browser/ui/webui/settings/settings_page_ui_handler.h"
+ 
+@@ -49,6 +54,20 @@
+   // Records the vertical tab strip mode change.
+   void HandleRecordVerticalTabStripModeChanged(const base::ListValue& args);
+ 
++  // aerographene: theme picker. getAerographeneThemes(callback_id) resolves
++  // {themes: [{name, builtin, dark}], active}; setAerographeneTheme(callback_id,
++  // name) writes the aerographene.theme pref (applies on the next start) and
++  // resolves whether `name` is a listed theme.
++  void HandleGetAerographeneThemes(const base::ListValue& args);
++  void HandleSetAerographeneTheme(const base::ListValue& args);
++  void OnAerographeneThemesListed(
++      base::Value callback_id,
++      std::vector<aerographene::ThemeInfo> themes);
++  void OnAerographeneThemeValidated(
++      base::Value callback_id,
++      std::string name,
++      std::vector<aerographene::ThemeInfo> themes);
++
+   raw_ptr<Profile> profile_;  // Weak pointer.
+ 
+   base::WeakPtrFactory<AppearanceHandler> weak_ptr_factory_{this};
+diff --git a/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc b/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
+--- a/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
++++ b/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
+@@ -602,6 +602,19 @@
+       {"browserLayoutCompact", IDS_SETTINGS_BROWSER_LAYOUT_COMPACT},
+       {"browserLayoutVertical", IDS_SETTINGS_BROWSER_LAYOUT_VERTICAL},
+       {"tabStripRightAlign", IDS_SETTINGS_TAB_STRIP_RIGHT_ALIGN},
++      {"aerographeneTheme", IDS_SETTINGS_AEROGRAPHENE_THEME},
++      {"aerographeneThemeRestartTitle",
++       IDS_SETTINGS_AEROGRAPHENE_THEME_RESTART_TITLE},
++      {"aerographeneThemeRestartBody",
++       IDS_SETTINGS_AEROGRAPHENE_THEME_RESTART_BODY},
++      {"aerographeneThemeRestartNow",
++       IDS_SETTINGS_AEROGRAPHENE_THEME_RESTART_NOW},
++      {"aerographeneThemeRestartLater",
++       IDS_SETTINGS_AEROGRAPHENE_THEME_RESTART_LATER},
++      {"aerographeneExtensionThemeWarning",
++       IDS_SETTINGS_AEROGRAPHENE_EXTENSION_THEME_WARNING},
++      {"aerographeneResetExtensionTheme",
++       IDS_SETTINGS_AEROGRAPHENE_RESET_EXTENSION_THEME},
+       {"centeredLocationBar", IDS_SETTINGS_CENTERED_LOCATION_BAR},
+       {"verticalCollapseShortcut", IDS_SETTINGS_VERTICAL_COLLAPSE_SHORTCUT},
+       {"shiftRightClickContextMenu",

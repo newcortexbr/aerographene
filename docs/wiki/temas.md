@@ -25,7 +25,9 @@ o incógnito ignora as camadas 1 e 2 e fica no escuro padrão do Chromium.
 
 ## trocar o tema embutido
 
-ainda não há seletor na interface. A escolha é a pref de perfil `aerographene.theme`, que guarda o nome do tema: `"default"` (padrão), `"pixelized"` ou o nome de uma pasta do repositório de temas (seção abaixo). Nome inexistente ou inválido cai em `default`.
+desde a v0.2 (patch `settings-theme-picker`) a escolha é feita em `chrome://settings/appearance`, linha "Browser theme": um seletor lista `default`, `pixelized` e os temas válidos do repositório (seção abaixo), com o ativo selecionado. Trocar grava a pref e abre um diálogo: "Restart now" reinicia o navegador; "Later" deixa o tema para o próximo início (aplicar tema continua exigindo reiniciar). Se um tema de extensão estiver ativo, a página avisa que ele substitui o tema escolhido e oferece "Reset to default" (volta ao tema padrão do Chromium). Os textos estão só em inglês (o projeto não traz tradução das strings de configurações).
+
+o seletor grava a pref de perfil `aerographene.theme`, que guarda o nome do tema: `"default"` (padrão), `"pixelized"` ou o nome de uma pasta do repositório. Nome inexistente ou inválido cai em `default`. Sem a interface (ou para scripts), edite a pref à mão:
 
 1. feche o navegador.
 2. abra `~/.config/aerographene/Default/Preferences` (JSON numa linha só).
@@ -42,7 +44,7 @@ f=~/.config/aerographene/Default/Preferences
 jq '.aerographene.theme = "pixelized"' "$f" > "$f.new" && mv "$f.new" "$f"
 ```
 
-4. abra o navegador. Toda troca de tema exige reiniciar.
+4. abra o navegador.
 
 ## trocar só as cores (`theme.json`)
 
@@ -145,7 +147,7 @@ desde a v0.2 (patch `theme-repo`) o navegador lê temas de `${XDG_CONFIG_HOME:-~
 
 desempenho: tema embutido não lê disco no início; um tema do repositório custa uma leitura pequena de `theme.json` em `ThemeService::Init` (já era assim com o `theme.json` de tokens). A varredura da pasta inteira só roda quando alguém lista os temas (seletor), numa tarefa de background.
 
-API para o seletor e a importação (`chrome/browser/themes/aerographene_theme_repo.h`): `ListThemes(callback)` devolve `default`, `pixelized` e os temas válidos do repositório com seus metadados; `InstallTheme(json, replace, callback)` valida e grava `themes/<nome>/theme.json` de forma atômica (`kConflict` se já existe, sem diferenciar caixa, até `replace`).
+API do seletor e da importação (`chrome/browser/themes/aerographene_theme_repo.h`; o seletor de configurações usa `ListThemes` pelas mensagens `getAerographeneThemes`/`setAerographeneTheme` do `AppearanceHandler`, e só aceita nomes que `ListThemes` devolve): `ListThemes(callback)` devolve `default`, `pixelized` e os temas válidos do repositório com seus metadados; `InstallTheme(json, replace, callback)` valida e grava `themes/<nome>/theme.json` de forma atômica (`kConflict` se já existe, sem diferenciar caixa, até `replace`).
 
 ## criar um tema embutido novo
 
@@ -174,6 +176,7 @@ Browser: aerographene, Chromium 154 fork. Themes are dark by nature; no light/da
 LAYERS (applied in order, last wins):
 1. builtin theme, profile pref "aerographene.theme" = "default" | "pixelized".
    Controls colors + corner radius + font + icons. Needs restart.
+   UI: chrome://settings/appearance "Browser theme" picker (lists builtin + repository themes; asks restart now/later).
    Set it with the browser CLOSED, in ~/.config/aerographene/Default/Preferences (single-line JSON):
    jq '.aerographene.theme = "pixelized"' Preferences > P.new && mv P.new Preferences
 2. tokens file: ${XDG_CONFIG_HOME:-~/.config}/aerographene/theme.json
