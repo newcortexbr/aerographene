@@ -6,7 +6,7 @@ Estado em 12/10/2026. Fontes: README (roadmap), `docs/SCOPE.md`, `docs/NOITE-202
 
 1. páginas internas seguem o tema: feito (PR #41); falta aprovação visual do dono (não há mockup).
 2. storage de sites: sem dado frio (ADR 0007, 11/10/2026). Cache de sites apagado após 30 dias (`cold-data-cache-expire`, PR #16); cookies nunca frios; histórico, favicons e downloads vão para o frio. Não há reidratação nem exceções de frio.
-3. seletor de tema na UI: patch `settings-theme-picker` escrito (fatia 3); handler C++ compila isolado; TS sem erro novo; falta build_ts real, smoke e aprovação visual.
+3. seletor de tema na UI: fatias 1–5 (`theme-builtin` refeito, `theme-repo`, `settings-theme-picker`, `settings-theme-import`, `theme-import-cli` + MIME) entraram na main em 12/10; build completa run 38293664167 verde com smoke. Falta aprovação visual, teste de uso real e baseline (pendente: máquina ocupada; script em /tmp/bench02/run.sh, fora do git).
    - entrega: escolha do tema na página de configurações, aplicada na hora e guardada em pref. Cada tema define o próprio esquema (sem alternância claro/escuro).
    - hoje: pref `aerographene.theme` lida em `ThemeService::Init`; trocar exige reiniciar (`theme-builtin.patch`).
    - decisões do dono (12/10/2026):

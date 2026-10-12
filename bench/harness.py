@@ -56,6 +56,7 @@ FIREFOX_PREFS = {
 
 def browser_defs() -> dict[str, dict]:
     return {
+        "aerographene": {"kind": "chromium", "bin": BROWSERS / "aerographene" / "chrome"},
         "ungoogled": {"kind": "chromium", "bin": BROWSERS / "ungoogled" / "chrome"},
         "helium": {"kind": "chromium", "bin": BROWSERS / "helium" / "chrome"},
         "thorium": {"kind": "chromium", "bin": BROWSERS / "thorium" / "AppRun"},
