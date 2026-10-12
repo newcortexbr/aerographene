@@ -3,9 +3,13 @@ aerographene: fonte do tema pixelized (JetBrains Mono 12px).
 Origem: aerographene (original). Licença: GPL-3.0.
 Depende de: aerographene/theme-radius.patch.
 Propósito: só no pixelized, uma vez por processo, em ThemeService::Init:
-gfx::FontList::SetDefaultFontDescription("JetBrains Mono, 12px") +
-ResourceBundle::ReloadFonts(); se a família não existir no fontconfig, usa
-"Monospace, 12px". O default não carrega fonte e mantém a fonte do sistema.
+ResourceBundle::ReloadFonts() e depois
+gfx::FontList::SetDefaultFontDescription("JetBrains Mono, 12px"). A ordem
+importa: ReloadFonts chama InitDefaultFontList, que zera a descrição (fonte do
+sistema) e limpa o cache; antes a descrição era definida antes e nunca valia
+(causa do pixelized "só parcial" em runtime). Se a família não existir no
+fontconfig, usa "Monospace, 12px". O default não carrega fonte e mantém a
+fonte do sistema.
 
 
 --- a/chrome/browser/themes/theme_service.cc

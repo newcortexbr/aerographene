@@ -18,7 +18,14 @@ troca; copia GetVirtualURL da aba). Tooltips reutilizam IDS_TOOLTIP_LOCATION_ICO
 e IDS_TAB_CXMENU_COPY_URL (sem IDs novos). Sem mudança no clique do mouse:
 OmniboxViewViews::OnMousePressed/OnMouseReleased já selecionam toda a URL e
 abrem o popup de sugestões (a command bar com ícones por tipo) com a barra
-sem foco; Ctrl+L segue por SetFocus. Pendente: fonte 12/13 px da barra e
+sem foco; Ctrl+L segue por SetFocus. (6) anel de foco (pílula) desligado nos
+temas aerographene: a barra é um retângulo com o raio do tema e o estado de
+foco é a cor da borda (menus-command-bar); o anel pílula aparecia como um
+retângulo mais um contorno arredondado, em branco no pixelized.
+(7) texto da omnibox vazia: "Pesquisar ou digitar endereço" (mockup) sempre que
+há mecanismo padrão, em vez de "Pesquise no <nome> ou digite o URL" ("Pesquise no
+No Search" com o mecanismo do ungoogled); texto fixo pt-BR em
+omnibox_placeholder_util.cc, como os rótulos de tipo da command bar. Pendente: fonte 12/13 px da barra e
 ícone de ajustes no estilo do tema (kTuneIcon usa o traço upstream).
 Depende de: aerographene/omnibox-centered.patch, theme-radius, theme-icons-*.
 

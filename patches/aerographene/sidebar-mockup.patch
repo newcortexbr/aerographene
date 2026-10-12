@@ -45,10 +45,13 @@ a cor text2 (antes esmaecido).
 (6) pt-BR: build/branding_strings.py troca "Nova guia"/"nova guia" por "Nova
 aba"/"nova aba" nas traduções pt-BR de cada grd processado (menus, atalhos,
 botão da sidebar); aplicado no inner.sh com o resto do branding.
-Não feito: fonte mono/caixa alta do pixelized nas linhas e abas (CHECKLIST 27,
-75), "+" em accent no "+ Nova aba" (a cor do ícone segue o rótulo), largura
-do rodapé (12 px de margem), modo recolhido (kCollapsedWidth 42 não foi
-mexido: células de 40 px não cabem nele).
+(7) Modo recolhido: kCollapsedWidth 42 -> 56 (conteúdo de 32 px entre os 12 px
+de padding; com 42 sobravam 18 px e as células de 40 sobrepunham). Recolhido,
+a grade de pinned tem 1 coluna com célula de TabView::CollapsedWidth() (32) e a
+linha de pasta desenha só o ícone, centrado.
+Não feito: "+" em accent no "+ Nova aba" (a cor do ícone segue o rótulo),
+largura do rodapé (12 px de margem). Fonte mono e caixa alta do pixelized:
+theme-font e pixelized-type.
 
 --- a/chrome/browser/ui/layout_constants.cc
 +++ b/chrome/browser/ui/layout_constants.cc

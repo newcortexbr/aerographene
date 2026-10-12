@@ -16,17 +16,26 @@ extensões fica no rodapé da sidebar (sidebar-footer) e no menu. O escudo do
 uBlock não foi movido ao rodapé: o rodapé usa chrome::ExecuteCommand e as ações
 de extensão exigem ExtensionsToolbarDesktop como âncora do popup.
 (3) Avatar: AvatarToolbarButton usa ícone de 28 px com insets de 1 px (botão
-30x30) e o recorte do avatar vira quadrado com o raio do tema
+30x30); a imagem é um quadrado com o raio do tema
 (LayoutProvider::GetAerographeneControlRadius; 4 default, 0 pixelized; 4 se o
-tema ainda não definiu) em vez de círculo, nos dois StateProvider que cortavam
-SHAPE_CIRCLE. Sem contorno 1 px --line (não feito).
+tema ainda não definiu) e contorno de 1 px na cor line (kColorToolbarSeparator),
+em vez de círculo, nos dois StateProvider que cortavam SHAPE_CIRCLE. O avatar
+sem foto (placeholder) é o ícone vetorial upstream "account circle", um círculo
+em si: o recorte não o muda; ele é desenhado como no mockup (cabeça e ombros em
+kColorSysOnSurface sobre kColorSysSurface) por AerographeneAvatarSource.
 (4) Página: kHeliumRoundedFrame passa a false por padrão; MultiContentsView sem
 moldura/margem usa os separadores de 1 px (já existentes) e
 kColorToolbarContentAreaSeparator entra no token "separator" (aerographene_theme_tokens).
 (5) Barra de favoritos: IsAppsShortcutEnabled sempre false (sem página de apps)
 e a barra solta da NTP (aparecia com a pasta de pinned, que é um favorito) só
-aparece com kShowBookmarkBar explícito (BookmarkBarController).
-Causa provável da faixa com ícone de grade; não confirmada em runtime.
+aparece com kShowBookmarkBar (BookmarkBarController). A faixa de ~34 px com um
+ícone de grade sob a toolbar, vista em runtime mesmo com isso, é a barra de
+favoritos anexa: nesta árvore kShowBookmarkBar e kShowTabGroupsInBookmarkBar
+nascem true (components/bookmarks/browser/bookmark_utils.cc) e o
+BookmarkBarController mostra a barra por esse pref, sem exigir favoritos; o
+ícone é provavelmente o botão de grupos de abas salvos (não confirmado em
+runtime). Agora os dois prefs nascem false (a barra continua no menu "Mostrar
+barra de favoritos"; perfis que já a ligaram a mantêm).
 (6) Fonte do texto da URL: CONTEXT_OMNIBOX_PRIMARY pede 13 px (default) / 12 px
 (pixelized) em vez de 14.
 

@@ -11,11 +11,13 @@ Menus (views::MenuConfig/MenuItemView/SubmenuView/MenuScrollViewContainer):
 padding do contêiner 6 px, itens de 32 px (minimum_text_item_height), padding
 de item 8 px e espaço ícone-rótulo 8 px, separador de 1 px com 4 px de margem
 (altura 9), contorno de 1 px (use_outer_border; cor = token menu_border em
-ui::kColorBubbleBorder/kColorMenuBorder), largura presa a 247-254 px (rótulos
-maiores sofrem elipse; combobox e ash intactos), atalho em cor secundária
+ui::kColorBubbleBorder/kColorMenuBorder), largura mínima 247 px e máxima 320 px
+(rótulos maiores que isso sofrem elipse; combobox e ash intactos), atalho em cor secundária
 (token menu_text_dim em kColorMenuItemForegroundSecondary), item focado com
 raio interno do tema e barra accent de 2 px no início (tema default);
-pixelized usa só o bloco de seleção e elevação de sombra 0 (sem sombra).
+pixelized usa só o bloco de seleção. Sem sombra nos dois temas (elevação 0): a
+margem da sombra fazia o widget maior que o painel e, sem canal alfa na janela
+(sem compositor), aparecia como um bloco preto opaco atrás do menu.
 Fundo vem do token menu já existente (opaco; "quase opaco" do SCOPE).
 
 Command bar (OmniboxPopupViewViews, RoundedOmniboxResultsFrame, linhas):
