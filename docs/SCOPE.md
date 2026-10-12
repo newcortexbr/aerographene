@@ -48,6 +48,7 @@ Regra de desempenho: nenhuma mudança piora mais de 2% a linha de base; uma muda
 - botões de janela (minimizar, maximizar/restaurar, fechar) ficam na própria toolbar, sem barra extra vazia, com glifos do pacote de ícones do tema ativo.
 - página de nova aba: HTML e CSS puros, wallpaper estático (sem animação); clima opt-in, desligado por padrão.
 - modo topbar na v0.1: abas normais com uma linha acima para pinned e pastas; o resto do R-r01b é refinamento.
+- sem linha de space com ícone de pasta no topo da sidebar/topbar (diverge do mockup, decisão do dono 11/10): space é perfil do Chrome e se troca só pelo avatar/seletor de perfil. Pastas da linha do topbar e gavetas da sidebar são a mesma pasta de pinned (menu de contexto), com o mesmo estado aberto/fechado.
 
 ## em aberto
 
