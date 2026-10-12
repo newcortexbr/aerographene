@@ -1,6 +1,6 @@
 # aerographene: escopo
 
-Estado: fechado no grilling de 04/10/2026; aguardando confirmação do dono para começar a implementação. Glossário em `../CONTEXT.md`; decisões em `adr/`.
+Estado: v0.1 implementada (ver "estado em 12/10/2026"). Glossário em `../CONTEXT.md`; decisões em `adr/`.
 
 ## v0.1 (Linux, x86-64-v3)
 
@@ -21,14 +21,24 @@ Ordem de construção:
 
 Regra de desempenho: nenhuma mudança piora mais de 2% a linha de base; uma mudança por vez.
 
-## estado em 05/10/2026 01:50
+## estado em 12/10/2026 05:30
 
-1. feito (docs/BASELINE.md).
-2. parcial: infra e workflow prontos; primeiro build compilando (run 37263759580), não concluído.
-3. parcial: 40 patches do Helium ativos e aplicando; compilação não verificada.
-4. a 10: não iniciados (sidebar/grade parcialmente coberta pelos patches de layout do Helium, sem a grade de pinned própria).
-11. parcial: MV2 vem do ungoogled; uBlock embutido desativado (faltam fontes third_party/ublock); importador do Arc portado.
-12. parcial: build gera .tar.zst como artifact; sem release nem PKGBUILD.
+v0.1 implementada e empacotada; build do CI verde em d83fc39 (run 38195073580), release v0.1.0 em draft com o `.tar.zst` e SHA256SUMS.
+
+1. feito; baseline da v0.1 (n=30, warm, perfil novo, 10 abas, PSS) em docs/BASELINE.md: aerographene 3,1 a 5,6% melhor que Helium em abertura e -1,6% de PSS; PSS +9,6% vs ungoogled (ponto de atenção). Speedometer não automatizado; perfil novo não equivale a disco frio.
+2. feito: runner self-hosted, ThinLTO e PGO conforme ADR 0003/0004.
+3. feito: patches do Helium ativos e compilando (110 entradas em patches/series).
+4. feito: sidebar com grade de pinned, pastas com gaveta, menus de contexto e arrastar para pasta; modo topbar com linha de pinned e pastas.
+5. feito (ADR 0005): space = perfil, uma janela por space, troca pelo avatar.
+6. feito: command bar com ícones por tipo; clique na URL e Ctrl+L abrem o painel.
+7. feito: peek com tamanho próprio e split view do Helium.
+8. feito: temas default e pixelized seguindo os mockups com as exceções registradas abaixo; NTP em HTML/CSS. Fidelidade conferida por captura e diff (theming/fidelity/).
+9. feito: process-names.
+10. feito: dado frio de histórico, favicons, sessões e downloads (ADR 0007).
+11. feito: uBlock embutido e ligado por padrão; MV2 do ungoogled; importador do Arc para pinned.
+12. feito: PKGBUILD validado com makepkg contra o tarball de d83fc39; release em draft (publicar é decisão do dono).
+
+Não verificado: uso real por clique e teclado de spaces, command bar, peek, split, menus de contexto e arrasto (fica para v0.2, roteiro de teste a preparar).
 
 ## depois
 
