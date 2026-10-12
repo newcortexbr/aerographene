@@ -67,8 +67,8 @@ I IMMENSELY thank projects such as Ungoogled-Chromium, Helium, Thorium and Brave
 - 🚧 v0.2
   - ✅ internal pages (history, settings, security) follow the theme
   - ⬜ real-use test of spaces, command bar, peek and split view
-  - ⬜ cold data for site storage (plan: [PLANO-V0.2](docs/PLANO-V0.2.md))
-  - ⬜ theme picker in the UI
+  - ✅ site cache deleted after 30 days, cookies kept ([ADR 0007](docs/adr/0007-dado-frio.md))
+  - ⬜ theme picker in the UI ([plan](docs/PLANO-V0.2.md))
 - ⬜ v0.3
   - ⬜ Windows 11 ([ADR 0008](docs/adr/0008-windows-11.md))
   - ⬜ x86-64-v2 + AVX build for CPUs without AVX2 ([ADR 0009](docs/adr/0009-build-ivy-bridge.md))

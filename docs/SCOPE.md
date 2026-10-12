@@ -42,7 +42,7 @@ Não verificado: uso real por clique e teclado de spaces, command bar, peek, spl
 
 ## depois
 
-- v0.2: teste de uso real de spaces, command bar, peek e split view; reescrita das páginas internas (histórico, configurações, segurança); dado frio do storage de sites, com reidratação na navegação, exceções de frio e cookies nunca frios.
+- v0.2: teste de uso real de spaces, command bar, peek e split view; reescrita das páginas internas (histórico, configurações, segurança); seletor de tema na UI. Storage de sites não esfria (ADR 0007, 11/10/2026): cache de sites apagado após 30 dias, cookies nunca frios; revoga "dado frio do storage de sites, com reidratação na navegação e exceções de frio".
 - v0.3: Windows 11 e build v2+AVX para a Ivy Bridge; Obsidian e terminais nos workspaces; Google Sync com chaves próprias (ADR 0006, decisão do dono em 12/10/2026, antes "depois da v0.3"); antes, testar o login sobre o ungoogled.
 - fora: boosts (usar Stylus), anti-fingerprinting `noise/*`, zen-mode.
 
