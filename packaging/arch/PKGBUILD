@@ -17,11 +17,13 @@ options=('!strip' '!debug')
 # release.yml publica o tarball com este nome (renomeado do artifact do build)
 source=("${pkgname}-${pkgver}-x86_64_linux.tar.zst::${url}/releases/download/v${pkgver}/${pkgname}-${pkgver}-x86_64_linux.tar.zst"
         "${pkgname}.desktop"
+        "${pkgname}-theme-import.desktop"
+        "${pkgname}-mime.xml"
         "${pkgname}-wrapper"
         "initial_preferences"
         "LICENSE")
 # SKIP até existir release publicada (repo privado: baixar exige token); trocar por updpkgsums
-sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
 noextract=("${pkgname}-${pkgver}-x86_64_linux.tar.zst")
 
 prepare() {
@@ -41,10 +43,18 @@ package() {
   install -Dm755 "$pkgname-wrapper" "$pkgdir/usr/bin/aerographene"
   install -Dm644 initial_preferences "$pkgdir/opt/$pkgname/initial_preferences"
   install -Dm644 "$pkgname.desktop" "$pkgdir/usr/share/applications/$pkgname.desktop"
+  # .aerotheme: tipo MIME + entry oculta que chama --import-theme=%f (theme-import-cli.patch);
+  # hooks do pacman rodam update-mime-database e update-desktop-database
+  install -Dm644 "$pkgname-theme-import.desktop" \
+    "$pkgdir/usr/share/applications/$pkgname-theme-import.desktop"
+  install -Dm644 "$pkgname-mime.xml" "$pkgdir/usr/share/mime/packages/$pkgname.xml"
   # ícones hicolor gerados de branding/ (build/inner.sh os põe em icons/ no tarball)
   for n in 16 24 32 48 64 128 256; do
     install -Dm644 "app/icons/hicolor/${n}x${n}/apps/aerographene.png" \
       "$pkgdir/usr/share/icons/hicolor/${n}x${n}/apps/$pkgname.png"
+    # ícone do tipo .aerotheme = ícone do aerographene
+    install -Dm644 "app/icons/hicolor/${n}x${n}/apps/aerographene.png" \
+      "$pkgdir/usr/share/icons/hicolor/${n}x${n}/mimetypes/application-x-aerotheme.png"
   done
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
