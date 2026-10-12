@@ -1,0 +1,140 @@
+aerographene: cores dos temas default e pixelized nas páginas internas (chrome://history, chrome://settings e chrome://settings/security|privacy).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/theme-tokens.patch, theme-builtin.patch (tabelas de
+tokens). Independe de webui-theme-shape.patch.
+Propósito: as páginas WebUI leem cores de chrome://theme/colors.css, gerado do
+ColorProvider. Os tokens atuais só cobriam kColorSysBase/Surface/OnSurface/
+Primary/OnPrimary; os ids derivados (fundo de página e de card, texto
+secundário, link, controles, borda, seleção, hover, divisor) foram resolvidos
+pelos mixers Material ANTES do mixer do tema e por isso ficavam com o tom do
+Chrome. Aqui os ids derivados entram nas listas dos tokens existentes
+(base, surface, text, accent, on_accent, focus_ring, selection, selection_text,
+hover, separator, omnibox_border, omnibox_results_hover) e dois tokens novos,
+`text_dim` (texto secundário, --text2) e `outline` (contorno de checkbox,
+radio e thumb do toggle), com valores nos dois temas e no theme.json.
+`TokenSpec::ids` passa de 6 para 16 posições.
+
+--- a/chrome/browser/ui/color/aerographene_theme_tokens.cc
++++ b/chrome/browser/ui/color/aerographene_theme_tokens.cc
+@@ -47,7 +47,7 @@
+ 
+ struct TokenSpec {
+   const char* name;
+-  ui::ColorId ids[6];
++  ui::ColorId ids[16];
+ };
+ 
+ // Curated token -> ColorId mapping. Unused slots are 0 (kUiColorsStart, never
+@@ -71,29 +71,41 @@
+       kColorTabBackgroundInactiveFrameInactive}},
+     {"omnibox", {kColorLocationBarBackground}},
+     {"omnibox_hover", {kColorLocationBarBackgroundHovered}},
+-    {"omnibox_border", {kColorLocationBarBorder}},
++    {"omnibox_border",
++     {kColorLocationBarBorder, ui::kColorSysTonalOutline,
++      ui::kColorButtonBorder, ui::kColorChipBorder,
++      ui::kColorSegmentedButtonBorder, ui::kColorSuggestionChipBorder}},
+     {"omnibox_text", {kColorOmniboxText}},
+     {"omnibox_text_dim", {kColorOmniboxTextDimmed}},
+     {"omnibox_results", {kColorOmniboxResultsBackground}},
+-    {"omnibox_results_hover", {kColorOmniboxResultsBackgroundHovered}},
+-    {"focus_ring", {ui::kColorFocusableBorderFocused}},
++    {"omnibox_results_hover",
++     {kColorOmniboxResultsBackgroundHovered, ui::kColorSysSurfaceVariant,
++      ui::kColorSysNeutralContainer, ui::kColorToggleButtonTrackOff,
++      ui::kColorTextfieldFilledBackground}},
++    {"focus_ring", {ui::kColorFocusableBorderFocused, ui::kColorSysStateFocusRing}},
+     // Selection, hover, separators and menus.
+     {"selection",
+      {ui::kColorTextSelectionBackground, kColorOmniboxSelectionBackground,
+       kColorOmniboxResultsBackgroundSelected,
+-      ui::kColorMenuItemBackgroundSelected}},
++      ui::kColorMenuItemBackgroundSelected, ui::kColorSysTonalContainer,
++      ui::kColorChipBackgroundSelected}},
+     {"selection_text",
+      {ui::kColorTextSelectionForeground, kColorOmniboxSelectionForeground,
+-      kColorOmniboxResultsTextSelected, ui::kColorMenuItemForegroundSelected}},
++      kColorOmniboxResultsTextSelected, ui::kColorMenuItemForegroundSelected,
++      ui::kColorSysOnTonalContainer, ui::kColorChipForegroundSelected,
++      ui::kColorChipIconSelected}},
+     {"selection_text_dim",
+      {kColorOmniboxResultsTextDimmedSelected, kColorOmniboxResultsUrlSelected,
+       kColorOmniboxResultsIconSelected}},
+-    {"hover", {kColorToolbarInkDropHover}},
++    {"hover",
++     {kColorToolbarInkDropHover, ui::kColorSysStateHover,
++      ui::kColorSysStateHoverOnSubtle}},
+     {"tab_hover", {kColorTabBackgroundInactiveHoverFrameActive}},
+     {"separator",
+      {ui::kColorSeparator, ui::kColorMenuSeparator, kColorToolbarSeparator,
+       kColorToolbarContentAreaSeparator, kColorTabDividerFrameActive,
+-      kColorTabDividerFrameInactive}},
++      kColorTabDividerFrameInactive, ui::kColorSysDivider,
++      kColorHistoryPageSeparator}},
+     {"menu", {ui::kColorMenuBackground}},
+     {"menu_text", {ui::kColorMenuItemForeground}},
+     // Menu stroke (also the bubble stroke) and secondary text (accelerators).
+@@ -102,11 +114,39 @@
+     {"ntp", {kColorNewTabPageBackground}},
+     {"ntp_text", {kColorNewTabPageText}},
+     // System tokens: also reach WebUI through chrome://theme/colors.css.
+-    {"base", {ui::kColorSysBase}},
+-    {"surface", {ui::kColorSysSurface}},
+-    {"text", {ui::kColorSysOnSurface}},
+-    {"accent", {ui::kColorSysPrimary, kColorOmniboxResultsFocusIndicator}},
+-    {"on_accent", {ui::kColorSysOnPrimary}},
++    {"base",
++     {ui::kColorSysBase, kColorWebuiPageBackground,
++      kColorSettingsWebuiPageBackground}},
++    {"surface",
++     {ui::kColorSysSurface, kColorWebuiCardBackground,
++      kColorWebuiDialogBackground, kColorSettingsInfoCardBackground,
++      ui::kColorSysBaseContainer}},
++    {"text", {ui::kColorSysOnSurface, ui::kColorPrimaryForeground}},
++    // Secondary text and field labels (--text2) and control outlines of the
++    // WebUI pages (chrome://history, chrome://settings). Derived ids are
++    // listed explicitly: the Material mixers resolved them before this mixer.
++    {"text_dim",
++     {ui::kColorSecondaryForeground, ui::kColorSysOnSurfaceSubtle,
++      ui::kColorSysOnSurfaceVariant, kColorHistoryPageText,
++      ui::kColorTextfieldForegroundLabel,
++      ui::kColorTextfieldForegroundPlaceholder,
++      ui::kColorTextfieldForegroundIcon}},
++    {"outline",
++     {ui::kColorSysOutline, ui::kColorCheckboxOutline,
++      ui::kColorRadioButtonForegroundUnchecked,
++      ui::kColorToggleButtonThumbOff}},
++    {"accent",
++     {ui::kColorSysPrimary, kColorOmniboxResultsFocusIndicator,
++      ui::kColorLinkForegroundDefault, kColorHistoryPageBookmarkStar,
++      ui::kColorCheckboxContainer, ui::kColorRadioButtonForegroundChecked,
++      ui::kColorToggleButtonTrackOn, ui::kColorButtonBackgroundProminent,
++      ui::kColorButtonForeground, ui::kColorSegmentedButtonChecked,
++      ui::kColorProgressBar, ui::kColorTextfieldFilledUnderlineFocused,
++      ui::kColorThrobber}},
++    {"on_accent",
++     {ui::kColorSysOnPrimary, ui::kColorButtonForegroundProminent,
++      ui::kColorCheckboxCheck, ui::kColorToggleButtonThumbOn,
++      ui::kColorSegmentedButtonForegroundChecked}},
+ };
+ 
+ // Built-in themes (theming/design-language/default.md and pixelized.md).
+@@ -155,6 +195,8 @@
+     {"base", SkColorSetRGB(0x04, 0x07, 0x0E)},
+     {"surface", SkColorSetRGB(0x07, 0x0C, 0x18)},
+     {"text", SkColorSetRGB(0xEA, 0xF2, 0xFF)},
++    {"text_dim", SkColorSetRGB(0xA9, 0xB8, 0xD0)},
++    {"outline", SkColorSetRGB(0x6B, 0x77, 0x90)},
+     {"accent", SkColorSetRGB(0x6C, 0xB6, 0xFF)},
+     {"on_accent", SkColorSetRGB(0x04, 0x07, 0x0E)},
+ };
+@@ -195,6 +237,8 @@
+     {"base", SkColorSetRGB(0x0A, 0x0A, 0x0A)},
+     {"surface", SkColorSetRGB(0x11, 0x11, 0x11)},
+     {"text", SkColorSetRGB(0xF2, 0xF2, 0xF2)},
++    {"text_dim", SkColorSetRGB(0x8C, 0x8C, 0x8C)},
++    {"outline", SkColorSetRGB(0x8C, 0x8C, 0x8C)},
+     {"accent", SkColorSetRGB(0xF2, 0xF2, 0xF2)},
+     {"on_accent", SkColorSetRGB(0x0B, 0x0B, 0x0B)},
+ };
