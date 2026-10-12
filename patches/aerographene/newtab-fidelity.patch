@@ -1,0 +1,321 @@
+aerographene: nova aba segue os mockups R-r01a (default e pixelized).
+
+Origem: aerographene (original); fonte 7-Segment de Jan Bobrowski (SIL OFL 1.1,
+subset WOFF2 embutido; ver theming/fonts/7segment/OFL.txt). Licença: GPL-3.0.
+Depende de: aerographene/newtab-home.patch, aerographene/theme-builtin.patch.
+Propósito: refaz aero_newtab.html (HTML+CSS puros, um script inline curto):
+relógio 7-Segment (minuto alinhado), saudação por hora, clima opt-in oculto,
+mensagem do dia (lista fixa local, pt-BR), campo "Buscar ou abrir um endereço"
+com chip Ctrl+K e botão Personalizar (link para chrome://settings/appearance).
+Tema pela pref aerographene.theme: o controller grava "pz" (pixelized) ou ""
+em $i18n{aeroTheme} e a pref bool nova aerographene.ntp.weather (padrão false)
+em $i18n{aeroWeather}, ambos na própria HTML (classe e data- no <html>); sem
+strings.js, sem loadTimeData, sem chrome://theme/colors.css, sem ThemeSource.
+Wallpaper default: SVG estático (gradientes, ondas, estrelas), sem animação;
+pixelized: PNG Bayer 1-bit 720x450 (2 px por ponto) em data: URI, cover e
+image-rendering:pixelated. O campo de busca vira botão: o clique envia
+chrome.send("focusOmnibox"), tratado por AeroNewTabHandler com
+search::FocusOmnibox (handoff do fakebox); a lógica de busca da página
+(searchUrl, GetSearchUrl) é removida. Ctrl+K é o atalho nativo IDC_FOCUS_SEARCH.
+Compilado (alvos tocados); runtime não verificado.
+
+--- a/chrome/browser/ui/webui/new_tab_page_third_party/new_tab_page_third_party_ui.cc
++++ b/chrome/browser/ui/webui/new_tab_page_third_party/new_tab_page_third_party_ui.cc
+@@ -8,14 +8,16 @@
+ #include <string>
+ #include <utility>
+ 
++#include "base/functional/bind.h"
+ #include "base/strings/utf_string_conversions.h"
++#include "base/values.h"
+ #include "chrome/browser/browser_features.h"
+ #include "chrome/browser/profiles/profile.h"
+-#include "chrome/browser/search_engines/template_url_service_factory.h"
+-#include "chrome/browser/search_engines/ui_thread_search_terms_data.h"
++#include "chrome/browser/themes/aerographene_theme.h"
+ #include "chrome/browser/themes/theme_properties.h"
+ #include "chrome/browser/themes/theme_service.h"
+ #include "chrome/browser/ui/color/chrome_color_id.h"
++#include "chrome/browser/ui/search/omnibox_utils.h"
+ #include "chrome/browser/ui/search/ntp_user_data_logger.h"
+ #include "chrome/browser/ui/webui/cr_components/most_visited/most_visited_handler.h"
+ #include "chrome/browser/ui/webui/favicon_source.h"
+@@ -35,12 +37,11 @@
+ #include "components/favicon_base/favicon_url_parser.h"
+ #include "components/prefs/pref_service.h"
+ #include "components/search/ntp_features.h"
+-#include "components/search_engines/template_url.h"
+-#include "components/search_engines/template_url_service.h"
+ #include "components/strings/grit/components_strings.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/browser/web_ui_controller.h"
+ #include "content/public/browser/web_ui_data_source.h"
++#include "content/public/browser/web_ui_message_handler.h"
+ #include "services/network/public/mojom/content_security_policy.mojom.h"
+ #include "ui/base/accelerators/accelerator.h"
+ #include "ui/base/l10n/l10n_util.h"
+@@ -55,11 +56,30 @@
+ 
+ namespace {
+ 
+-// aerographene: static home page (aero_newtab.html), no Mojo, no WebUI
+-// bindings, no JS bundle. Replaces NewTabPageThirdPartyUI as the controller
+-// behind chrome://new-tab-page-third-party/, the URL that ungoogled-chromium
+-// (inox restore-classic-ntp) always maps chrome://newtab to outside incognito,
+-// so omnibox display, focus and NTP detection keep working unchanged.
++// aerographene: static home page (aero_newtab.html), no Mojo, no JS bundle.
++// Replaces NewTabPageThirdPartyUI as the controller behind
++// chrome://new-tab-page-third-party/, the URL that ungoogled-chromium (inox
++// restore-classic-ntp) always maps chrome://newtab to outside incognito, so
++// omnibox display, focus and NTP detection keep working unchanged.
++
++// The only message the page sends: the search field hands focus to the
++// omnibox, the same "fakebox" handoff the upstream NTP uses
++// (search::FocusOmnibox). The page has no search logic of its own.
++class AeroNewTabHandler : public content::WebUIMessageHandler {
++ public:
++  void RegisterMessages() override {
++    web_ui()->RegisterMessageCallback(
++        "focusOmnibox",
++        base::BindRepeating(&AeroNewTabHandler::HandleFocusOmnibox,
++                            base::Unretained(this)));
++  }
++
++ private:
++  void HandleFocusOmnibox(const base::ListValue&) {
++    search::FocusOmnibox(/*focus=*/true, web_ui()->GetWebContents());
++  }
++};
++
+ class AeroNewTabUI : public content::WebUIController {
+  public:
+   explicit AeroNewTabUI(content::WebUI* web_ui)
+@@ -68,45 +88,25 @@
+     content::WebUIDataSource* source = content::WebUIDataSource::CreateAndAdd(
+         profile, chrome::kChromeUINewTabPageThirdPartyHost);
+     source->SetDefaultResource(IDR_AERO_NEWTAB_HTML);
+-    source->UseStringsJs();
+-    source->AddString("searchUrl", GetSearchUrl(profile));
+-    // The page is static and ships one inline script; it loads nothing from
+-    // the network (strings.js and chrome://theme/colors.css are local).
++    // Theme and weather opt-in reach the page as $i18n{} replacements in the
++    // HTML itself (class on <html>, data attribute): no strings.js request,
++    // no loadTimeData, no chrome://theme/colors.css.
++    PrefService* prefs = profile->GetPrefs();
++    const bool pixelized = prefs->GetString(aerographene::kThemePref) ==
++                           aerographene::kThemePixelized;
++    source->AddString("aeroTheme", pixelized ? "pz" : "");
++    source->AddString("aeroWeather",
++                      prefs->GetBoolean(aerographene::kNtpWeatherPref) ? "1"
++                                                                       : "");
++    // The page ships one inline script; it loads nothing from the network.
+     source->OverrideContentSecurityPolicy(
+         network::mojom::CSPDirectiveName::ScriptSrc,
+         "script-src 'self' 'unsafe-inline';");
+-    content::URLDataSource::Add(profile,
+-                                std::make_unique<ThemeSource>(profile));
++    web_ui->AddMessageHandler(std::make_unique<AeroNewTabHandler>());
+   }
+ 
+   AeroNewTabUI(const AeroNewTabUI&) = delete;
+   AeroNewTabUI& operator=(const AeroNewTabUI&) = delete;
+-
+- private:
+-  // Default search engine URL with a marker where the query goes. Empty when
+-  // there is no usable engine (ungoogled "No Search", POST-only, non-http).
+-  static std::string GetSearchUrl(Profile* profile) {
+-    constexpr char kMarker[] = "aeroq9x";
+-    TemplateURLService* service =
+-        TemplateURLServiceFactory::GetForProfile(profile);
+-    const TemplateURL* provider =
+-        service ? service->GetDefaultSearchProvider() : nullptr;
+-    if (!provider || !provider->search_url_post_params().empty()) {
+-      return std::string();
+-    }
+-    UIThreadSearchTermsData search_terms_data;
+-    if (!provider->SupportsReplacement(search_terms_data)) {
+-      return std::string();
+-    }
+-    GURL url(provider->url_ref().ReplaceSearchTerms(
+-        TemplateURLRef::SearchTermsArgs(u"aeroq9x"),
+-        search_terms_data));
+-    if (!url.is_valid() || !url.SchemeIsHTTPOrHTTPS() ||
+-        url.host().find(kMarker) != std::string::npos) {
+-      return std::string();
+-    }
+-    return url.spec();
+-  }
+ };
+ 
+ }  // namespace
+--- a/chrome/browser/themes/aerographene_theme.h
++++ b/chrome/browser/themes/aerographene_theme.h
+@@ -14,6 +14,11 @@
+ inline constexpr char kThemeDefault[] = "default";
+ inline constexpr char kThemePixelized[] = "pixelized";
+ 
++// Profile pref (bool, default false): opt-in weather block on the new tab
++// page. No network request is made while it is off (nor in this version when
++// on: the block is a placeholder until a data source is chosen).
++inline constexpr char kNtpWeatherPref[] = "aerographene.ntp.weather";
++
+ enum class BuiltinTheme { kDefault, kPixelized };
+ 
+ // Every built-in theme is dark or light by nature; the browser color scheme
+--- a/chrome/browser/themes/theme_service.cc
++++ b/chrome/browser/themes/theme_service.cc
+@@ -326,6 +326,7 @@
+       std::to_underlying(ThemeService::BrowserColorScheme::kDark));
+   registry->RegisterStringPref(aerographene::kThemePref,
+                                aerographene::kThemeDefault);
++  registry->RegisterBooleanPref(aerographene::kNtpWeatherPref, false);
+   registry->RegisterIntegerPref(
+       prefs::kDeprecatedUserColorDoNotUse, SK_ColorTRANSPARENT,
+       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+--- a/chrome/browser/resources/aero_newtab/aero_newtab.html
++++ b/chrome/browser/resources/aero_newtab/aero_newtab.html
+@@ -1,88 +1,97 @@
+ <!doctype html>
+-<html lang="en">
++<html lang="en" class="$i18n{aeroTheme}" data-wx="$i18n{aeroWeather}">
+ <head>
+ <meta charset="utf-8">
+ <title>New Tab</title>
+ <meta name="viewport" content="width=device-width,initial-scale=1">
+-<meta name="color-scheme" content="dark light">
+-<link rel="stylesheet" href="chrome://theme/colors.css?sets=ui,chrome">
++<meta name="color-scheme" content="dark">
+ <style>
+-:root{--fb-text:#EAF2FF;--fb-accent:#6cb6ff;--bg0:#03060d;--bg1:#050b19;--bg2:#02040a;--n1:#1b4fa8;--n2:#4a2fa0;--n3:#0e7a9c;--ln1:#6cb6ff;--ln2:#7fd8ff;--ln3:#8b7bff;--star:#cfe3ff;--star-o:1;--scrim:2,5,12}
+-@media (prefers-color-scheme:light){:root{--fb-text:#0B1220;--fb-accent:#1f6feb;--bg0:#eef3fb;--bg1:#e6edf8;--bg2:#dfe8f6;--n1:#7aa8ff;--n2:#b3a4ff;--n3:#7fd6ea;--ln1:#3b82f6;--ln2:#0ea5c6;--ln3:#6d5bff;--star-o:0;--scrim:244,248,255}}
+-:root{--text:var(--color-new-tab-page-text,var(--fb-text));--accent:var(--color-sys-primary,var(--fb-accent));--text2:color-mix(in srgb,var(--text) 68%,transparent);--line:color-mix(in srgb,var(--accent) 24%,transparent)}
++@font-face{font-family:Seg7;src:url(data:font/woff2;base64,d09GMgABAAAAAAJ8AAoAAAAABdAAAAIyAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAABlYATAqFWIUEATYCJAMwCywABCAFgS4HIBudBCAuC8zD8cIrYHTYLTvNRet8ZLQxLPXOEB4iiNay6tndIFl0QCjZhY1HHxYuwqJ/x8Y86xfqz6cfV2/l6eY1iB8nqUTAzVGlOZTLS4C7LpE4SRJqq8wSjCHygLLgvwkUwfOBQ25+umUWYfVAGu6zRLG7njpVMyblQgH687iNMcFD2ZyOqa1gxaqhDtCm5xUpaKmqZ7oIFxZYi8e0IB4VJAn/24WJ0D5ticWz6JEK2SmeQQBCpgo1asASgBwd6EALhjCNSswYCDz/UzNoBT2oxBQOIBbAIYAk8vGSleS5zCtSzlWkapinW8lOVDi7+WsiMUXt3Es2cxhXUYfSwsmxmccXVhMf3/DTaq4qJMqog2INKc4r7jNg4Oly5N7ZPzpx+ehvmwjpzjqXU8N/da+1t2G1/lJfZ/noXvHQU5Qba4uIHHr3XmAHKi/Qf1XDqw9DjS5JQTM0R4thGZJyAprGkjH5xAoHqoRxiCuHSc5V4HgZbflTNyRf9xmHMjxz9Y9+4lcmDiGLz/S2UptTdy0Ed/ib2w/rDHlGQqzFUYJXBILrl3O9LuEfAD62tQB/71F+nQoJBN/jLfFdsPSHk7MEAMjAO4Yj0zEoqEGRoDUDgks2aBPKoJ3Ba00ItF7CDinf4erWVLl9IpErEJpYgqRO024W2s0BCm06QJkGE7fXqrMhWr89rdr1atVnRFnhj+rRaAj73pBhnfr1sRg1YEj0U9H25CpgsSVLARGlbxbZLBwA) format("woff2")}
++:root{--bg:#04070e;--text:#EAF2FF;--text2:#A9B8D0;--accent:#6cb6ff;--line:rgba(140,180,255,.16);--r:4px;--r2:3px;--mono:"JetBrainsMono Nerd Font Mono","JetBrains Mono","DejaVu Sans Mono",monospace}
+ *{box-sizing:border-box;margin:0}
+-html,body{height:100%;overflow:hidden;background:var(--bg0)}
+-body{font:13px/1.2 "Noto Sans","DejaVu Sans",Inter,system-ui,sans-serif;color:var(--text)}
++html,body{height:100%;overflow:hidden;background:var(--bg)}
++body{font:13px/1.2 "Noto Sans","DejaVu Sans",Inter,system-ui,sans-serif;color:var(--text);user-select:none}
+ .wp{position:fixed;inset:0;width:100%;height:100%;display:block}
+-.scrim{position:fixed;inset:0;background:radial-gradient(ellipse at 50% 46%,rgba(var(--scrim),.38),rgba(var(--scrim),.12) 60%,transparent),linear-gradient(180deg,rgba(var(--scrim),.55),transparent 30%)}
++.scrim{position:fixed;inset:0;background:radial-gradient(ellipse at 50% 46%,rgba(2,5,12,.38),rgba(2,5,12,.12) 60%,transparent),linear-gradient(180deg,rgba(2,5,12,.55),transparent 30%)}
+ main{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding-bottom:40px}
+-.clock{font-size:13px;letter-spacing:.32em;color:var(--text2);margin-bottom:10px}
+-h1{font-weight:200;font-size:76px;line-height:1;letter-spacing:-.02em;text-shadow:0 0 40px color-mix(in srgb,var(--accent) 35%,transparent)}
+-.date{margin-top:22px;color:var(--text2);font-size:14px;letter-spacing:.14em;text-transform:uppercase}
+-form{margin-top:36px;width:420px;max-width:calc(100vw - 48px);height:44px;display:flex;align-items:center;gap:12px;padding:0 20px;border-radius:4px;background:color-mix(in srgb,var(--bg1) 60%,transparent);box-shadow:inset 0 0 0 1px var(--line);color:var(--text2)}
+-form:hover{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 50%,transparent)}
+-form:focus-within{box-shadow:inset 0 0 0 2px var(--accent)}
+-svg.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;flex:none}
+-input{flex:1;min-width:0;height:100%;background:none;border:0;outline:0;color:var(--text);font-size:14px;font-family:inherit}
+-input::placeholder{color:var(--text2);opacity:1}
++.clock{font:18px Seg7,"Noto Sans",monospace;letter-spacing:.24em;color:var(--text2);margin-bottom:10px}
++h1{font-weight:200;font-size:76px;line-height:1;letter-spacing:-.02em;text-shadow:0 0 40px rgba(108,182,255,.35)}
++.wx{display:none;margin-top:22px;align-items:center;gap:10px;color:var(--text2);font-size:14px}
++html[data-wx="1"] .wx{display:flex}
++.wx b{font-weight:300;font-size:22px;color:var(--text)}
++.msg{margin-top:26px;max-width:460px;text-align:center;color:var(--text2);font-size:15px;line-height:1.6;font-weight:300}
++.msg small{display:block;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#8fa3c4;margin-bottom:6px}
++.go{margin-top:36px;width:420px;max-width:90%;height:44px;display:flex;align-items:center;gap:12px;padding:0 20px;border:0;border-radius:var(--r);font:inherit;color:var(--text2);background:rgba(8,14,28,.55);box-shadow:inset 0 0 0 1px var(--line);cursor:text}
++.go:hover{box-shadow:inset 0 0 0 1px rgba(108,182,255,.5)}
++.go span{flex:1;text-align:left;font-size:14px}
++kbd{font:12px inherit;font-family:inherit;color:var(--text);border:1px solid var(--line);border-radius:var(--r2);padding:2px 7px}
++.cz{position:fixed;right:18px;bottom:18px;height:32px;display:flex;align-items:center;gap:8px;padding:0 14px;border-radius:var(--r);background:rgba(8,14,28,.6);color:var(--text2);text-decoration:none;box-shadow:inset 0 0 0 1px var(--line)}
++.cz:hover{color:var(--text)}
++.go:focus-visible,.cz:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
++svg.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:butt;stroke-linejoin:miter;flex:none}
+ @media (max-width:560px){h1{font-size:48px}}
++html.pz{--bg:#0a0a0a;--text:#f2f2f2;--text2:#8c8c8c;--accent:#f2f2f2;--line:rgba(255,255,255,.14);--r:0px;--r2:0px}
++.pz body{background:#0a0a0a url(data:image/png;base64,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) center/cover no-repeat;image-rendering:pixelated}
++.pz .wp,.pz .scrim{display:none}
++.pz .clock{font-family:Seg7,var(--mono);color:#f2f2f2}
++.pz h1{text-shadow:none}
++.pz .clock,.pz h1,.pz .wx,.pz .msg{background:#0a0a0a}
++.pz .wx,.pz .msg{padding:2px 8px;font-family:var(--mono)}.pz .clock{padding:2px 10px}.pz h1{padding:0 12px 6px}
++.pz .wx b{font-family:var(--mono)}
++.pz .msg small{font-family:var(--mono);color:#8c8c8c}
++.pz .go{background:#181818;font-family:var(--mono)}.pz .go:hover{box-shadow:inset 0 0 0 1px #f2f2f2}.pz .go span{font-size:13px}
++.pz kbd{font-family:var(--mono);font-size:11px}
++.pz .cz{background:#111;font-family:var(--mono);font-size:12px;text-transform:uppercase;letter-spacing:.08em}
+ </style>
+ </head>
+ <body>
+ <svg class="wp" viewBox="0 0 1440 800" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+ <defs>
+-<radialGradient id="n1"><stop offset="0" stop-color="var(--n1)" stop-opacity=".75"/><stop offset="1" stop-color="var(--n1)" stop-opacity="0"/></radialGradient>
+-<radialGradient id="n2"><stop offset="0" stop-color="var(--n2)" stop-opacity=".55"/><stop offset="1" stop-color="var(--n2)" stop-opacity="0"/></radialGradient>
+-<radialGradient id="n3"><stop offset="0" stop-color="var(--n3)" stop-opacity=".45"/><stop offset="1" stop-color="var(--n3)" stop-opacity="0"/></radialGradient>
+-<linearGradient id="l1" x1="0" x2="1"><stop offset="0" stop-color="var(--ln1)" stop-opacity="0"/><stop offset=".5" stop-color="var(--ln2)" stop-opacity=".55"/><stop offset="1" stop-color="var(--ln3)" stop-opacity="0"/></linearGradient>
+-<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--bg0)"/><stop offset=".6" stop-color="var(--bg1)"/><stop offset="1" stop-color="var(--bg2)"/></linearGradient>
++<radialGradient id="n1"><stop offset="0" stop-color="#1b4fa8" stop-opacity=".75"/><stop offset="1" stop-color="#1b4fa8" stop-opacity="0"/></radialGradient>
++<radialGradient id="n2"><stop offset="0" stop-color="#4a2fa0" stop-opacity=".55"/><stop offset="1" stop-color="#4a2fa0" stop-opacity="0"/></radialGradient>
++<radialGradient id="n3"><stop offset="0" stop-color="#0e7a9c" stop-opacity=".45"/><stop offset="1" stop-color="#0e7a9c" stop-opacity="0"/></radialGradient>
++<linearGradient id="l1" x1="0" x2="1"><stop offset="0" stop-color="#6cb6ff" stop-opacity="0"/><stop offset=".5" stop-color="#7fd8ff" stop-opacity=".55"/><stop offset="1" stop-color="#8b7bff" stop-opacity="0"/></linearGradient>
++<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#03060d"/><stop offset=".6" stop-color="#050b19"/><stop offset="1" stop-color="#02040a"/></linearGradient>
+ </defs>
+ <rect width="1440" height="800" fill="url(#bg)"/>
+ <ellipse cx="420" cy="360" rx="620" ry="300" fill="url(#n1)" transform="rotate(-14 420 360)"/>
+ <ellipse cx="1040" cy="300" rx="520" ry="270" fill="url(#n2)" transform="rotate(12 1040 300)"/>
+ <ellipse cx="760" cy="640" rx="660" ry="220" fill="url(#n3)"/>
+ <g fill="none" stroke="url(#l1)" stroke-linecap="round"><path d="M-40 520C260 380 480 600 760 440S1200 300 1480 420" stroke-width="1.4"/><path d="M-40 560C240 430 500 640 780 490S1220 350 1480 470" stroke-width=".9" opacity=".7"/><path d="M-40 480C300 330 520 560 740 390S1180 250 1480 360" stroke-width=".7" opacity=".5"/><path d="M200 700C480 600 800 700 1100 580" stroke-width="5" opacity=".14"/></g>
+-<g fill="var(--star)" opacity="var(--star-o)"><circle cx="180" cy="150" r="1.2" opacity=".8"/><circle cx="520" cy="90" r=".9" opacity=".6"/><circle cx="930" cy="130" r="1.4" opacity=".85"/><circle cx="1260" cy="210" r="1" opacity=".6"/><circle cx="1360" cy="90" r=".8" opacity=".5"/><circle cx="330" cy="650" r="1" opacity=".5"/><circle cx="1120" cy="700" r="1.1" opacity=".6"/></g>
++<g fill="#cfe3ff"><circle cx="180" cy="150" r="1.2" opacity=".8"/><circle cx="520" cy="90" r=".9" opacity=".6"/><circle cx="930" cy="130" r="1.4" opacity=".85"/><circle cx="1260" cy="210" r="1" opacity=".6"/><circle cx="1360" cy="90" r=".8" opacity=".5"/><circle cx="330" cy="650" r="1" opacity=".5"/><circle cx="1120" cy="700" r="1.1" opacity=".6"/></g>
+ </svg>
+ <div class="scrim"></div>
+ <main>
+ <div class="clock" id="clk"></div>
+ <h1 id="hi"></h1>
+-<div class="date" id="dt"></div>
+-<form id="f" role="search">
+-<svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 2.5h4l2 2v4l-2 2h-4l-2-2v-4zM10.5 10.5l3 3"/></svg>
+-<input id="q" type="text" autocomplete="off" spellcheck="false">
+-</form>
++<div class="wx"><b>--&deg;</b><span id="wxt"></span></div>
++<p class="msg" id="mg"><small id="mgl"></small><span id="mgt"></span></p>
++<button class="go" id="go" type="button"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 2.5h4l2 2v4l-2 2h-4l-2-2v-4zM10.5 10.5l3 3"/></svg><span id="gos"></span><kbd>Ctrl+K</kbd></button>
+ </main>
+-<script>var loadTimeData={};</script>
+-<script src="strings.js"></script>
++<a class="cz" id="cz" href="chrome://settings/appearance"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4.5h4L11.5 6v4L10 11.5H6L4.5 10V6zM8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.5 3.5 5 5M11 11l1.5 1.5M12.5 3.5 11 5M5 11l-1.5 1.5"/></svg><span id="czt"></span></a>
+ <script>
+ (function(){
+ var $=function(i){return document.getElementById(i)};
+ var pt=(navigator.language||'en').toLowerCase().indexOf('pt')==0;
+-var L=pt?{lang:'pt-BR',title:'Nova aba',hi:['bom dia.','boa tarde.','boa noite.'],ph:'Buscar ou abrir um endereço',nos:'Abrir um endereço'}
+-        :{lang:'en',title:'New Tab',hi:['good morning.','good afternoon.','good evening.'],ph:'Search or enter an address',nos:'Enter an address'};
+-var tpl=(loadTimeData.data&&loadTimeData.data.searchUrl)||'';
+-var q=$('q');
++var L=pt?{lang:'pt-BR',title:'Nova aba',hi:['bom dia.','boa tarde.','boa noite.'],go:'Buscar ou abrir um endereço',cz:'Personalizar',ml:'mensagem do dia',wx:'clima indisponível'}
++        :{lang:'en',title:'New Tab',hi:['good morning.','good afternoon.','good evening.'],go:'Search or enter an address',cz:'Customize',ml:'',wx:'weather unavailable'};
++// Mensagens do dia: lista fixa local (pt-BR), uma por dia do calendário local.
++var M=["uma pequena pausa também faz parte do trabalho.","comece pelo passo menor; o resto vem depois.","uma coisa de cada vez, bem feita.","o que importa hoje cabe numa linha.","respire fundo antes de abrir a próxima aba.","feito é melhor que perfeito.","fechar uma aba também é concluir algo.","hoje, escolha uma prioridade só.","a pressa raramente ajuda a pensar.","beba água e alongue os ombros.","terminar cedo vale mais que começar tarde.","anote a ideia antes que ela vá embora.","um bom começo já é metade do caminho.","descanso é parte do ritmo.","pergunte primeiro: isso precisa mesmo ser feito?","pouco a pouco, o trabalho aparece.","olhe para longe por vinte segundos.","a clareza vem de escrever o problema.","menos abas, mais foco.","devagar também é uma forma de avançar.","revise com calma o que já está pronto.","hoje é um bom dia para simplificar.","pequenas rotinas sustentam grandes projetos.","dê um passo, depois decida o próximo.","silêncio também ajuda a concentrar.","errar cedo custa menos.","separe o urgente do importante.","um intervalo curto renova a atenção.","o melhor momento para organizar é agora.","continue: já passou da parte mais difícil."];
+ document.documentElement.lang=L.lang;document.title=L.title;
+-q.placeholder=tpl?L.ph:L.nos;q.setAttribute('aria-label',q.placeholder);
++$('gos').textContent=L.go;$('czt').textContent=L.cz;$('wxt').textContent=L.wx;
++if(pt){$('mgl').textContent=L.ml}else{$('mg').hidden=true}
++function p2(n){return n<10?'0'+n:''+n}
+ function tick(){
+  var d=new Date(),h=d.getHours();
+- $('clk').textContent=d.toLocaleTimeString(L.lang,{hour:'2-digit',minute:'2-digit'});
++ $('clk').textContent=p2(h)+':'+p2(d.getMinutes());
+  $('hi').textContent=L.hi[h<5||h>=18?2:h<12?0:1];
+- $('dt').textContent=d.toLocaleDateString(L.lang,{weekday:'long',day:'numeric',month:'long'});
++ $('mgt').textContent=M[Math.floor((d.getTime()-d.getTimezoneOffset()*6e4)/864e5)%M.length];
+  setTimeout(tick,60050-(d.getSeconds()*1000+d.getMilliseconds()));
+ }
+ tick();
+-$('f').addEventListener('submit',function(e){
+- e.preventDefault();
+- var s=q.value.trim(),u='';
+- if(!s)return;
+- if(/^https?:\/\/\S+$/i.test(s))u=s;
+- else if(/^[^\s\/:]+\.[a-z]{2,}(:\d+)?([\/?#]\S*)?$/i.test(s))u='https://'+s;
+- else if(tpl)u=tpl.split('aeroq9x').join(encodeURIComponent(s));
+- if(u)location.assign(u);
+-});
++// Campo de busca: entrega o foco à omnibox do navegador (mesmo handoff do
++// fakebox da NTP). Ctrl+K segue como atalho nativo do navegador.
++$('go').addEventListener('click',function(){if(window.chrome&&chrome.send)chrome.send('focusOmnibox')});
+ })();
+ </script>
+ </body>
