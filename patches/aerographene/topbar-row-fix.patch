@@ -1,21 +1,10 @@
-Aerographene topbar fidelity fix (GPL-3.0): space name keeps its width and is
-elided only above 160px (also in the sidebar row); pinned open in the topbar
-get the 1px outline and a globe when there is no favicon.
+Aerographene topbar fidelity fix (GPL-3.0): pinned open in the topbar get the
+1px outline and a globe when there is no favicon.
 Depends on: aerographene/topbar-mockup.patch, aerographene/pixelized-type.patch.
 
 --- a/chrome/browser/ui/views/frame/aerographene_topbar_row.cc
 +++ b/chrome/browser/ui/views/frame/aerographene_topbar_row.cc
-@@ -49,6 +49,9 @@
- constexpr int kLeadingPadding = 8;
- constexpr int kSpaceRowWidth = 148;
- constexpr int kSpaceRowHeight = 32;
-+// Space row: padding 8 + icon 16 + gap 8 + text + gap 8 + chevron 16 + 8.
-+constexpr int kSpaceRowChrome = 64;
-+constexpr int kSpaceNameMaxWidth = 160;
- constexpr int kPinSize = 30;
- constexpr int kPinGap = 2;
- constexpr int kGroupGap = 8;
-@@ -156,7 +159,15 @@
+@@ -153,7 +153,15 @@
        stroke.setStrokeWidth(1);
        stroke.setColor(accent);
        canvas->DrawRoundRect(outline_bounds, radius, stroke);
@@ -32,7 +21,7 @@ Depends on: aerographene/topbar-mockup.patch, aerographene/pixelized-type.patch.
        cc::PaintFlags stroke;
        stroke.setAntiAlias(true);
        stroke.setStyle(cc::PaintFlags::kStroke_Style);
-@@ -173,10 +184,12 @@
+@@ -170,10 +178,12 @@
        canvas->DrawImageInt(favicon_, center.x() - favicon_.width() / 2,
                             center.y() - favicon_.height() / 2, alpha);
      } else {
@@ -49,68 +38,3 @@ Depends on: aerographene/topbar-mockup.patch, aerographene/pixelized-type.patch.
      }
  
      if (open_) {
-@@ -329,7 +342,10 @@
-   const int height = this->height();
-   int x = kLeadingPadding;
-   if (space_row_->GetVisible()) {
--    const int width = std::min(kSpaceRowWidth, std::max(0, this->width() - x));
-+    const int name_width = space_row_->GetNameWidth(kSpaceNameMaxWidth);
-+    const int wanted =
-+        name_width > 0 ? kSpaceRowChrome + name_width : kSpaceRowWidth;
-+    const int width = std::min(wanted, std::max(0, this->width() - x));
-     space_row_->SetBounds(x, (height - kSpaceRowHeight) / 2, width,
-                           kSpaceRowHeight);
-     x += width + kGroupGap;
---- a/chrome/browser/ui/views/tabs/vertical/aerographene_space_row.cc
-+++ b/chrome/browser/ui/views/tabs/vertical/aerographene_space_row.cc
-@@ -29,6 +29,8 @@
- #include "ui/gfx/geometry/rect.h"
- #include "ui/gfx/image/image_skia.h"
- #include "ui/gfx/paint_vector_icon.h"
-+#include "ui/gfx/text_elider.h"
-+#include "ui/gfx/text_utils.h"
- #include "ui/views/accessibility/view_accessibility.h"
- #include "ui/views/layout/layout_provider.h"
- 
-@@ -90,6 +92,11 @@
-   SchedulePaint();
- }
- 
-+int AerographeneSpaceRow::GetNameWidth(int max_width) const {
-+  return std::min(max_width,
-+                  gfx::GetStringWidth(display_name_, gfx::FontList()));
-+}
-+
- void AerographeneSpaceRow::PaintButtonContents(gfx::Canvas* canvas) {
-   const ui::ColorProvider* const colors = GetColorProvider();
-   // Not drawn in the collapsed (narrow) strip.
-@@ -121,11 +128,13 @@
-                             text_color),
-       GetMirroredXWithWidthInView(chevron_x, kIconSize), icon_y);
-   const int text_x = icon_x + kIconSize + kIconGap;
-+  const int text_width = std::max(0, chevron_x - kIconGap - text_x);
-   canvas->DrawStringRect(
--      display_name_, gfx::FontList(), text_color,
--      GetMirroredRect(gfx::Rect(text_x, bounds.y(),
--                                std::max(0, chevron_x - kIconGap - text_x),
--                                bounds.height())));
-+      gfx::ElideText(display_name_, gfx::FontList(), text_width,
-+                     gfx::ELIDE_TAIL),
-+      gfx::FontList(), text_color,
-+      GetMirroredRect(
-+          gfx::Rect(text_x, bounds.y(), text_width, bounds.height())));
- }
- 
- BEGIN_METADATA(AerographeneSpaceRow)
---- a/chrome/browser/ui/views/tabs/vertical/aerographene_space_row.h
-+++ b/chrome/browser/ui/views/tabs/vertical/aerographene_space_row.h
-@@ -33,6 +33,9 @@
-   void AddedToWidget() override;
-   void PaintButtonContents(gfx::Canvas* canvas) override;
- 
-+  // Width of the (display) name, capped at `max_width`; 0 without a name.
-+  int GetNameWidth(int max_width) const;
-+
-  private:
-   void RefreshName();
- 
