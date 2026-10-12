@@ -38,6 +38,17 @@ Feito por dashwr, com ajuda gigante de Sonnet 5.5, Opus 5.5, 6.1 Sol e 6 Luna. N
 I IMMENSELY thank projects such as Ungoogled-Chromium, Helium, Thorium and Brave. This browser is based on Ungoogled, with the genius patches provided with Helium, and using some Thorium and Brave tricks. Without these cool projects and their amazing contributors, aerographene would be either stuck in ideation or take much longer to get usable. A full inventory and a thank-you from my agent are at the bottom of this document.
 
 
+<p align="center">
+  <img src="branding/loves/aerographene-loves.gif" alt="aerographene loves" width="420">
+</p>
+
+<p align="center">
+  <a href="https://github.com/ungoogled-software/ungoogled-chromium"><img src="docs/img/thanks/ungoogled-chromium.png" alt="ungoogled-chromium" title="ungoogled-chromium" width="56"></a>&nbsp;&nbsp;
+  <a href="https://github.com/imputnet/helium"><img src="docs/img/thanks/helium.png" alt="Helium" title="Helium" width="56"></a>&nbsp;&nbsp;
+  <a href="https://github.com/Alex313031/thorium"><img src="docs/img/thanks/thorium.png" alt="Thorium" title="Thorium" width="56"></a>&nbsp;&nbsp;
+  <a href="https://github.com/brave/brave-browser"><img src="docs/img/thanks/brave.png" alt="Brave" title="Brave" width="56"></a>
+</p>
+
 > ### Content above was 100% human-written. Content below will be updated constantly by AI to reflect the browser's real roadmap and current capabilities, together with instructions and documentation links.
 
 ## roadmap
