@@ -1,0 +1,261 @@
+aerographene: pasta do topbar abre/fecha os pinned na própria linha (correção de runtime do pacote 237ca1a).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/topbar-mockup.patch, aerographene/pixelized-type.patch,
+aerographene/topbar-row-fix.patch, aerographene/pinned-folder.patch.
+Propósito: clicar na pasta da linha 1 do topbar não mostrava nem escondia os
+pinned de dentro (menu simples não confiável). Agora o clique alterna
+aerographene.expanded via PinnedModel::SetExpanded (estado da gaveta da
+sidebar); aberta, os filhos viram células 30x30 logo depois da pasta e o
+chevron é ⌄; fechada, somem e o chevron é ›. A linha já observa o PinnedModel,
+então mudanças da sidebar ou do sync refletem aqui. O menu simples
+(SimpleMenuModel/MenuRunner) foi removido.
+
+--- a/chrome/browser/ui/views/frame/aerographene_topbar_row.cc
++++ b/chrome/browser/ui/views/frame/aerographene_topbar_row.cc
+@@ -25,7 +25,6 @@
+ #include "components/tabs/public/tab_interface.h"
+ #include "components/vector_icons/vector_icons.h"
+ #include "ui/base/metadata/metadata_impl_macros.h"
+-#include "ui/base/models/image_model.h"
+ #include "ui/base/mojom/menu_source_type.mojom.h"
+ #include "ui/color/color_id.h"
+ #include "ui/color/color_provider.h"
+@@ -39,7 +38,6 @@
+ #include "ui/views/accessibility/view_accessibility.h"
+ #include "ui/views/context_menu_controller.h"
+ #include "ui/views/controls/button/button.h"
+-#include "ui/views/controls/menu/menu_runner.h"
+ #include "ui/views/layout/layout_provider.h"
+ #include "ui/views/view_utils.h"
+ #include "ui/views/widget/widget.h"
+@@ -221,7 +219,8 @@
+ BEGIN_METADATA(TopbarPinButton)
+ END_METADATA
+ 
+-// Drawer folder: theme folder glyph in the accent, name, chevron › at the end.
++// Drawer folder: theme folder glyph in the accent, name, chevron at the end
++// (› closed, ⌄ open).
+ class TopbarFolderButton : public views::Button {
+   METADATA_HEADER(TopbarFolderButton, views::Button)
+ 
+@@ -233,6 +232,7 @@
+   ~TopbarFolderButton() override = default;
+ 
+   void Update(const aerographene::PinnedItem& item) {
++    expanded_ = item.expanded;
+     const std::u16string name = GetDisplayName(item);
+     // Mockup pixelized `.row`: upper case, converted once here, not per paint.
+     text_ = IsPixelized() ? base::i18n::ToUpper(name) : name;
+@@ -240,7 +240,11 @@
+                            gfx::GetStringWidth(text_, gfx::FontList()));
+     SetTooltipText(name);
+     GetViewAccessibility().SetName(name);
+-    GetViewAccessibility().SetIsCollapsed();
++    if (expanded_) {
++      GetViewAccessibility().SetIsExpanded();
++    } else {
++      GetViewAccessibility().SetIsCollapsed();
++    }
+     PreferredSizeChanged();
+     SchedulePaint();
+   }
+@@ -279,8 +283,10 @@
+         GetMirroredXWithWidthInView(icon_x, kFolderIconSize), icon_y);
+     const int chevron_x = bounds.right() - kFolderPadding - kFolderIconSize;
+     canvas->DrawImageInt(
+-        gfx::CreateVectorIcon(vector_icons::kKeyboardArrowRightFlippableIcon,
+-                              kFolderIconSize, text_color),
++        gfx::CreateVectorIcon(
++            expanded_ ? vector_icons::kKeyboardArrowDownIcon
++                      : vector_icons::kKeyboardArrowRightFlippableIcon,
++            kFolderIconSize, text_color),
+         GetMirroredXWithWidthInView(chevron_x, kFolderIconSize), icon_y);
+     const int text_x = icon_x + kFolderIconSize + kFolderIconGap;
+     canvas->DrawStringRect(
+@@ -294,6 +300,7 @@
+  private:
+   std::u16string text_;
+   int text_width_ = 0;
++  bool expanded_ = false;
+ };
+ 
+ BEGIN_METADATA(TopbarFolderButton)
+@@ -396,13 +403,6 @@
+   RefreshActive();
+ }
+ 
+-void AerographeneTopbarRow::ExecuteCommand(int command_id, int event_flags) {
+-  const size_t index = static_cast<size_t>(command_id - 1);
+-  if (index < menu_entries_.size()) {
+-    ActivateEntry(menu_entries_[index]);
+-  }
+-}
+-
+ void AerographeneTopbarRow::Rebuild(bool notify) {
+   for (views::View* view : item_views_) {
+     RemoveChildViewT(view);
+@@ -414,10 +414,7 @@
+     items = model_->GetPinned();
+   }
+   const base::Uuid active = GetActiveEntry();
+-  for (const aerographene::PinnedItem& item : items) {
+-    if (item.is_folder || !item.url.is_valid()) {
+-      continue;
+-    }
++  auto add_pin = [&](const aerographene::PinnedItem& item) {
+     auto* const pin = AddChildView(std::make_unique<TopbarPinButton>(
+         base::BindRepeating(
+             [](AerographeneTopbarRow* row, base::Uuid uuid,
+@@ -427,6 +424,11 @@
+                             base::Unretained(this), item.uuid)));
+     pin->Update(item, model_->GetFavicon(item.uuid), item.uuid == active);
+     item_views_.push_back(pin);
++  };
++  for (const aerographene::PinnedItem& item : items) {
++    if (!item.is_folder && item.url.is_valid()) {
++      add_pin(item);
++    }
+   }
+   pin_count_ = item_views_.size();
+   for (const aerographene::PinnedItem& item : items) {
+@@ -434,13 +436,19 @@
+       continue;
+     }
+     auto* const folder = AddChildView(std::make_unique<TopbarFolderButton>(
+-        views::Button::PressedCallback()));
+-    folder->SetCallback(base::BindRepeating(
+-        [](AerographeneTopbarRow* row, base::Uuid uuid, views::View* anchor,
+-           const ui::Event&) { row->ShowFolderMenu(uuid, anchor); },
+-        base::Unretained(this), item.uuid, base::Unretained(folder)));
++        base::BindRepeating(&AerographeneTopbarRow::ToggleFolder,
++                            base::Unretained(this), item.uuid)));
+     folder->Update(item);
+     item_views_.push_back(folder);
++    // Open drawer: the children follow the folder as 30x30 cells (same state
++    // as the sidebar drawer).
++    if (item.expanded) {
++      for (const aerographene::PinnedItem& child : item.children) {
++        if (child.url.is_valid()) {
++          add_pin(child);
++        }
++      }
++    }
+   }
+ 
+   const bool has_content = !items.empty();
+@@ -519,34 +527,14 @@
+   }
+ }
+ 
+-void AerographeneTopbarRow::ShowFolderMenu(const base::Uuid& uuid,
+-                                           views::View* anchor) {
+-  if (!model_ || !anchor || !GetWidget()) {
+-    return;
+-  }
+-  const std::optional<aerographene::PinnedItem> folder = model_->Find(uuid);
+-  if (!folder || folder->children.empty()) {
+-    return;
++void AerographeneTopbarRow::ToggleFolder(const base::Uuid& uuid) {
++  // Same state as the sidebar drawer (aerographene.expanded); the observer
++  // rebuilds the row when the model changes.
++  const std::optional<aerographene::PinnedItem> folder =
++      model_ ? model_->Find(uuid) : std::nullopt;
++  if (folder && folder->is_folder) {
++    model_->SetExpanded(uuid, !folder->expanded);
+   }
+-  menu_entries_.clear();
+-  menu_model_ = std::make_unique<ui::SimpleMenuModel>(this);
+-  for (const aerographene::PinnedItem& child : folder->children) {
+-    menu_model_->AddItem(static_cast<int>(menu_entries_.size()) + 1,
+-                         GetDisplayName(child));
+-    const gfx::Image favicon = model_->GetFavicon(child.uuid);
+-    if (!favicon.IsEmpty()) {
+-      menu_model_->SetIcon(menu_model_->GetItemCount() - 1,
+-                           ui::ImageModel::FromImage(favicon));
+-    }
+-    menu_entries_.push_back(child.uuid);
+-  }
+-  // Below the folder button.
+-  const gfx::Rect anchor_rect = anchor->GetBoundsInScreen();
+-  menu_runner_ = std::make_unique<views::MenuRunner>(
+-      menu_model_.get(), views::MenuRunner::NO_FLAGS);
+-  menu_runner_->RunMenuAt(GetWidget(), nullptr, anchor_rect,
+-                          views::MenuAnchorPosition::kTopLeft,
+-                          ui::mojom::MenuSourceType::kMouse);
+ }
+ 
+ BEGIN_METADATA(AerographeneTopbarRow)
+--- a/chrome/browser/ui/views/frame/aerographene_topbar_row.h
++++ b/chrome/browser/ui/views/frame/aerographene_topbar_row.h
+@@ -17,7 +17,6 @@
+ #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
+ #include "ui/base/metadata/metadata_header_macros.h"
+ #include "ui/base/mojom/menu_source_type.mojom-forward.h"
+-#include "ui/menus/simple_menu_model.h"
+ #include "ui/views/view.h"
+ 
+ class AerographeneSpaceRow;
+@@ -25,20 +24,16 @@
+ class TabStrip;
+ class TabStripModel;
+ 
+-namespace views {
+-class MenuRunner;
+-}  // namespace views
+-
+ // First row of the topbar mode (horizontal tabs), mockup R-r01b: space row,
+ // pinned entries as 30x30 buttons and drawer folders as "icon name ›" buttons
+-// that open the drawer as a menu. Reads the same PinnedModel and tab mirror
+-// as the sidebar (no model of its own); the pinned tabs themselves are hidden
++// that open/close the drawer in the row itself (the children follow the
++// folder as 30x30 cells; same aerographene.expanded state as the sidebar).
++// Reads the same PinnedModel and tab mirror as the sidebar (no model of its own); the pinned tabs themselves are hidden
+ // in the tab strip. The row has no content (and the owner collapses it) when
+ // the model has no entries.
+ class AerographeneTopbarRow : public views::View,
+                               public aerographene::PinnedModel::Observer,
+-                              public TabStripModelObserver,
+-                              public ui::SimpleMenuModel::Delegate {
++                              public TabStripModelObserver {
+   METADATA_HEADER(AerographeneTopbarRow, views::View)
+ 
+  public:
+@@ -73,9 +68,6 @@
+       const TabStripModelChange& change,
+       const TabStripSelectionChange& selection) override;
+ 
+-  // ui::SimpleMenuModel::Delegate:
+-  void ExecuteCommand(int command_id, int event_flags) override;
+-
+  private:
+   void Rebuild(bool notify);
+   void RebuildDeferred();
+@@ -86,23 +78,21 @@
+   void ShowPinContextMenu(const base::Uuid& uuid,
+                           const gfx::Point& screen_point,
+                           ui::mojom::MenuSourceType source_type);
+-  void ShowFolderMenu(const base::Uuid& uuid, views::View* anchor);
++  // Click on a folder: toggles aerographene.expanded in the model.
++  void ToggleFolder(const base::Uuid& uuid);
+ 
+   const raw_ptr<BrowserWindowInterface> browser_;
+   const raw_ptr<TabStrip> tab_strip_;
+   raw_ptr<aerographene::PinnedModel> model_ = nullptr;
+   raw_ptr<AerographeneSpaceRow> space_row_ = nullptr;
+-  // Pin buttons first, then folder buttons; owned by the view hierarchy.
++  // Pin buttons first, then each folder button followed by its children when
++  // open; owned by the view hierarchy.
+   std::vector<raw_ptr<views::View>> item_views_;
+   size_t pin_count_ = 0;
+   bool has_content_ = false;
+   bool rebuild_pending_ = false;
+   base::RepeatingClosure on_content_changed_;
+ 
+-  std::unique_ptr<ui::SimpleMenuModel> menu_model_;
+-  std::unique_ptr<views::MenuRunner> menu_runner_;
+-  std::vector<base::Uuid> menu_entries_;
+-
+   base::ScopedObservation<aerographene::PinnedModel,
+                           aerographene::PinnedModel::Observer>
+       model_observation_{this};
