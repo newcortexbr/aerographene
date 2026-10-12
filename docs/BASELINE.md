@@ -101,3 +101,50 @@ Dados em `bench/out/qa-layout/bench/` (fora do git). Medianas; razão pareada po
 
 - pasta raiz de pinned sob demanda (`EnsureRoot` só no primeiro pin): descartada pelo dono. Ganho só para perfil que nunca fixa aba (um nó e uma gravação no primeiro startup), abaixo do ruído. Risco: `PinnedModel::IsLoaded()` depende de `root_`, o que afetaria `OnPinnedModelLoaded`/`AdoptStartupTabs` (#4), exigiria null checks em barra, menu e `RefreshClosedPinned` e abriria janela para raiz duplicada via sync.
 - leitura assíncrona do `theme.json`: descartada pelo dono. Leitura síncrona de arquivo pequeno, abaixo do ruído no warm; disco frio não medido. Risco: flash do tema padrão no primeiro frame ou, para evitá-lo, segurar o paint (ganho zero) e corrida com troca de tema. Reconsiderar só com medição em disco frio mostrando custo real.
+
+# linha de base v0.1 (12/10/2026, aerographene d83fc39)
+
+Harness: `bench/harness.py`, copiado de `/home/dasher/projects/browser` (working tree, sem edição) para `/tmp/bench01`, com o binário aerographene apontado para o pacote `pkg-d83fc39` (`0.1.0-154.0.8037.97-1-d83fc39-x86_64_linux`). Versões: aerographene d83fc39 (Chromium 154.0.8037.97), Helium 0.18.3.1, ungoogled 154.0.8037.97-1. Máquina: Comet Lake i3-10110U. Energia: `power_profile=performance`, governor `powersave`, EPP `performance`; `on_ac` não detectado.
+
+Condições: cada uma das 30 rodadas por configuração começou com `load1 < 1.0` e sem processos de teste ativos (checagem por `/proc`, `fd`, `cwd`, `cmdline` e `SingletonLock`). A ordem dos três navegadores foi rotacionada a cada rodada (`aerographene, helium, ungoogled`; `helium, ungoogled, aerographene`; `ungoogled, aerographene, helium`). Cada chamada do harness fez uma rodada com `--repeat 1`, então n=30 é por navegador e por configuração. `loaded` foi completo em todas as execuções (1 ou 10 de 10).
+
+Pacote de dados: `/tmp/bench01-out` (fora do git).
+
+## abertura, perfil já criado (warm, n=30, ms)
+
+| navegador | first_ms mediana | p10 | p90 | delta vs helium | delta vs ungoogled |
+|---|---|---|---|---|---|
+| aerographene | 474,1 | 391,7 | 502,6 | -3,3% | -10,8% |
+| helium | 490,1 | 404,4 | 507,5 | - | -7,8% |
+| ungoogled | 531,6 | 514,8 | 546,2 | +8,5% | - |
+
+## abertura, perfil novo (first, n=30, ms)
+
+| navegador | first_ms mediana | p10 | p90 | delta vs helium | delta vs ungoogled |
+|---|---|---|---|---|---|
+| aerographene | 506,4 | 499,4 | 534,4 | -3,1% | -8,6% |
+| helium | 522,7 | 504,8 | 547,1 | - | -5,6% |
+| ungoogled | 554,1 | 542,1 | 572,1 | +6,0% | - |
+
+## 10 abas sintéticas (warm, n=30)
+
+| navegador | first_ms mediana | all_ms mediana | all_ms p10 | all_ms p90 | PSS MiB mediana | PSS p10 | PSS p90 | procs |
+|---|---|---|---|---|---|---|---|---|
+| aerographene | 743,9 | 877,5 | 798,9 | 902,6 | 725,0 | 722,0 | 726,4 | 19 |
+| helium | 787,9 | 912,3 | 818,8 | 973,7 | 736,6 | 729,4 | 739,5 | 19 |
+| ungoogled | 728,2 | 1073,0 | 1039,2 | 1173,0 | 661,5 | 659,6 | 663,1 | 19 |
+
+Deltas do aerographene: `all_ms` -3,8% vs helium e -18,2% vs ungoogled; `PSS` -1,6% vs helium e +9,6% vs ungoogled; `first_ms` -5,6% vs helium e +2,2% vs ungoogled.
+
+## regra do produto
+
+Regra: aerographene não piora mais de 10% vs Helium (meta: 2%). Resultado nesta rodada: nenhuma métrica medida piora vs Helium (todas os deltas ficam entre -1,6% e -5,6%). Vs ungoogled (piso informativo, não regra): o PSS fica +9,6%, abaixo do limite de 10%, mas acima da meta de 2%; isso fica registrado como ponto de atenção, a ser atribuído (ver limites).
+
+## limites
+
+- "perfil novo" aqui é `first` (perfil recriado a cada execução), não disco frio: sem `--drop-caches` (exige sudo, não disponível sem senha).
+- PSS com 10 abas só em modo warm; não foi medido em modo first.
+- Speedometer não está automatizado.
+- Idle de input não tem fonte confiável nesta máquina (`GetSessionIdleTime` do KWin retorna NotSupported); a condição de "sem uso" foi load1 < 1.0 mais ausência de processos de teste, não idle de input.
+- Medições feitas em janelas de baixa carga após uma espera de cerca de 3h para o portão; houve rodadas com load até 0,98 e pausas longas entre execuções. Não controlado: temperatura e throttling.
+- Os dados de Helium e ungoogled desta rodada não são comparáveis diretamente à rodada de 08/10 (`46f2308`), que usou outro pacote.
