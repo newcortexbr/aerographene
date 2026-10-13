@@ -1,6 +1,6 @@
 # plano da v0.3
 
-Status: proposto em 13/10/2026. Nada implementado. Escopo decidido pelo dono em 13/10/2026: A (build avx1), B (notas), C (terminal), D (Windows 11 por cross-compile), E (pacotes nativos). Google Sync (ADR 0006) fica fora da v0.3.
+Status: proposto em 13/10/2026; B e C em andamento na branch `v0.3-ui` (ver status nas seções). Escopo decidido pelo dono em 13/10/2026: A (build avx1), B (notas), C (terminal), D (Windows 11 por cross-compile), E (pacotes nativos). Google Sync (ADR 0006) fica fora da v0.3.
 
 Fontes: `docs/SCOPE.md`, `CONTEXT.md`, ADRs 0004/0008/0009, `docs/BUILD.md`, `build/`, `.github/workflows/{build,release}.yml`, `patches/series`, `theming/1/DECISIONS.md` e mockups C-r02/D-r02/G-r01, nota do vault `agents/projetos/navegador-fork-contexto-e-decisoes`. APIs do upstream conferidas por leitura (ssh, só leitura) na árvore do Chromium 154 do Cezanne (`~/aerographene-build/portablelinux/build/src`); caminhos citados abaixo como `src/...`.
 
@@ -49,6 +49,8 @@ Arquitetura recomendada:
 - editor v1: `textarea` com pré-visualização lado a lado (como C-r02); CodeMirror 6 (MIT) fica para depois se o dono quiser.
 - uma aba só: abrir `chrome://notes` quando já existe uma no space ativa a existente (lookup no `TabStripModel`).
 
+Status em 13/10/2026 (branch `v0.3-ui`, sem merge): B1 feito sem a entrada `-o` na command bar nem ícone (`notes-webui.patch`); B2 só o backend (`notes-vault-reader.patch`: `ResolveInVault`/`ListVaultDir`/`ReadVaultNote` + `vault_reader_unittest.cc`), sem Mojo, sem seletor de pasta e sem árvore na página. Validação no overlay `/tmp/aero-st8` do Cezanne (árvore somente leitura com a série v0.3 já aplicada, patches com `--fuzz=0`): `aero_notes_ui.o`, `chrome_web_ui_configs.o`, `vault_reader.o` e `vault_reader_unittest.o` compilam; `gn check` OK em `aero_notes:*` e `chrome/test:unit_tests` (em `webui:configs` só um erro anterior, `autofill_ml_internals`); grit de `browser_resources` gerado. Não verificado: testes executados (o link exigiria 1001 passos com o CI reconstruindo o lower), link do `chrome`, página aberta no navegador, custo no startup medido.
+
 Fatias:
 
 1. B1 esqueleto: WebUI vazia `chrome://notes` registrada, `.grd`, ícone, entrada na command bar (`-o`). Aceite: compila (alvo `chrome/browser/ui:ui` objeto + recursos), página abre, nada carregado no startup (sem registro além do config).
@@ -84,6 +86,8 @@ O pty dá execução de código arbitrário como o usuário. Toda falha aqui é 
 6. limites: no máximo N sessões por aba (ex.: 16), tamanho de mensagem limitado, `mojo::ReportBadMessage` para id desconhecido ou tamanho inválido.
 7. fds: `O_CLOEXEC` no mestre, `fds_to_remap` só com o escravo; nenhum fd do browser vaza para o shell (LaunchProcess fecha o resto).
 8. review de segurança dedicado (opus) antes do merge, mais teste com página web tentando `chrome://terminal` (window.open, link, iframe, `location`) e extensão de teste.
+
+Status em 13/10/2026 (branch `v0.3-ui`, sem merge): C1 feito sem a entrada `-t` na command bar (`terminal-webui.patch`); C2 escrito (`terminal-pty.patch`: `TerminalSession` + `terminal_session_unittest.cc` com eco, líder de sessão/tty, tamanho inicial e resize, tamanhos inválidos, ambiente limpo, morte do grupo e idempotência). Compilam no overlay: `aero_terminal_ui.o`, `terminal_session.o`, `terminal_session_unittest.o`; `gn check` OK em `aero_terminal:*`. Não verificado: execução dos testes (mesmo bloqueio do link da B2), página no navegador. C3+ (Mojo, xterm.js) não começadas.
 
 Fatias:
 
