@@ -1,0 +1,280 @@
+aerographene: terminal, fatia C5 (hardening: perfis, origem, links OSC 8).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/terminal-c4.patch (e, por ele, terminal-webui,
+terminal-pty, terminal-xterm, terminal-bridge).
+Propósito: (1) chrome://terminal só em perfil normal: o config e cada
+mensagem do handler exigem BrowserProfileType kRegular (antes só
+!IsOffTheRecord, que deixava passar o perfil de sistema e o original do
+convidado). (2) A checagem de frame/origem vira o helper puro
+aero_terminal:access (IsTerminalFrame: frame principal e origem exatamente
+chrome://terminal; aerographene://, chrome-untrusted://, outros hosts e
+origens opacas recusados). (3) Links OSC 8: linkHandler próprio, só
+http(s), window.open com noopener,noreferrer; o padrão do xterm.js abria
+about:blank herdando a origem chrome://terminal e depois trocava location.
+Testes: TerminalAccessTest.{OnlyRegularProfile,OnlyChromeTerminalMainFrame}.
+
+--- a/chrome/browser/ui/webui/aero_terminal/BUILD.gn
++++ b/chrome/browser/ui/webui/aero_terminal/BUILD.gn
+@@ -15,6 +15,7 @@
+     "//content/public/common",
+   ]
+   deps = [
++    ":access",
+     ":host",
+     "//base",
+     "//chrome/browser:resources",
+@@ -24,6 +25,20 @@
+   ]
+ }
+ 
++# Who may use the terminal (fatia C5): regular profile, chrome://terminal
++# main frame. Pure, so the negative cases are unit-tested.
++source_set("access") {
++  sources = [
++    "terminal_access.cc",
++    "terminal_access.h",
++  ]
++  deps = [
++    "//base",
++    "//components/profile_metrics",
++    "//url",
++  ]
++}
++
+ # pty session (fatia C2), used by TerminalHost (C3).
+ source_set("session") {
+   sources = [
+@@ -48,13 +63,17 @@
+ source_set("unit_tests") {
+   testonly = true
+   sources = [
++    "terminal_access_unittest.cc",
+     "terminal_host_unittest.cc",
+     "terminal_session_unittest.cc",
+   ]
+   deps = [
++    ":access",
+     ":host",
+     ":session",
+     "//base",
++    "//components/profile_metrics",
+     "//testing/gtest",
++    "//url",
+   ]
+ }
+--- a/chrome/browser/ui/webui/aero_terminal/aero_terminal_ui.cc
++++ b/chrome/browser/ui/webui/aero_terminal/aero_terminal_ui.cc
+@@ -4,6 +4,7 @@
+ #include "chrome/browser/ui/webui/aero_terminal/aero_terminal_ui.h"
+ 
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/webui/aero_terminal/terminal_access.h"
+ #include "chrome/browser/ui/webui/aero_terminal/terminal_handler.h"
+ #include "chrome/grit/browser_resources.h"
+ #include "content/public/browser/browser_context.h"
+@@ -13,7 +14,8 @@
+ 
+ bool AeroTerminalUIConfig::IsWebUIEnabled(
+     content::BrowserContext* browser_context) {
+-  return !browser_context->IsOffTheRecord();
++  // Regular profiles only: no incognito, guest or system profile.
++  return aerographene::TerminalAllowedForContext(browser_context);
+ }
+ 
+ AeroTerminalUI::AeroTerminalUI(content::WebUI* web_ui)
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_access.cc
+@@ -0,0 +1,24 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "chrome/browser/ui/webui/aero_terminal/terminal_access.h"
++
++#include "components/profile_metrics/browser_profile_type.h"
++#include "url/gurl.h"
++#include "url/origin.h"
++
++namespace aerographene {
++
++bool TerminalAllowedForContext(const base::SupportsUserData* browser_context) {
++  return browser_context &&
++         profile_metrics::GetBrowserProfileType(browser_context) ==
++             profile_metrics::BrowserProfileType::kRegular;
++}
++
++bool IsTerminalFrame(bool is_primary_main_frame, const url::Origin& origin) {
++  static const char kTerminalUrl[] = "chrome://terminal/";
++  return is_primary_main_frame && !origin.opaque() &&
++         origin.IsSameOriginWith(GURL(kTerminalUrl));
++}
++
++}  // namespace aerographene
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_access.h
+@@ -0,0 +1,29 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_AERO_TERMINAL_TERMINAL_ACCESS_H_
++#define CHROME_BROWSER_UI_WEBUI_AERO_TERMINAL_TERMINAL_ACCESS_H_
++
++namespace base {
++class SupportsUserData;
++}
++
++namespace url {
++class Origin;
++}
++
++namespace aerographene {
++
++// chrome://terminal only exists for regular profiles: never incognito,
++// guest, system, other off-the-record or enterprise-isolated profiles
++// (item 3 of the terminal security list in docs/PLANO-V0.3.md).
++bool TerminalAllowedForContext(const base::SupportsUserData* browser_context);
++
++// A pty message is accepted only from the primary main frame whose committed
++// origin is exactly chrome://terminal (not aerographene://, chrome-untrusted://
++// or any other host).
++bool IsTerminalFrame(bool is_primary_main_frame, const url::Origin& origin);
++
++}  // namespace aerographene
++
++#endif  // CHROME_BROWSER_UI_WEBUI_AERO_TERMINAL_TERMINAL_ACCESS_H_
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_access_unittest.cc
+@@ -0,0 +1,68 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "chrome/browser/ui/webui/aero_terminal/terminal_access.h"
++
++#include "base/supports_user_data.h"
++#include "components/profile_metrics/browser_profile_type.h"
++#include "testing/gtest/include/gtest/gtest.h"
++#include "url/gurl.h"
++#include "url/origin.h"
++#include "url/url_util.h"
++
++namespace aerographene {
++namespace {
++
++using profile_metrics::BrowserProfileType;
++
++// Stands in for a BrowserContext: the profile type is user data on it.
++class FakeContext : public base::SupportsUserData {};
++
++bool AllowedFor(BrowserProfileType type) {
++  FakeContext context;
++  profile_metrics::SetBrowserProfileType(&context, type);
++  return TerminalAllowedForContext(&context);
++}
++
++TEST(TerminalAccessTest, OnlyRegularProfile) {
++  EXPECT_TRUE(AllowedFor(BrowserProfileType::kRegular));
++  EXPECT_FALSE(AllowedFor(BrowserProfileType::kIncognito));
++  EXPECT_FALSE(AllowedFor(BrowserProfileType::kGuest));
++  EXPECT_FALSE(AllowedFor(BrowserProfileType::kSystem));
++  EXPECT_FALSE(AllowedFor(BrowserProfileType::kOtherOffTheRecordProfile));
++  EXPECT_FALSE(AllowedFor(BrowserProfileType::kEnterpriseIsolated));
++  EXPECT_FALSE(TerminalAllowedForContext(nullptr));
++}
++
++url::Origin O(const char* url) {
++  return url::Origin::Create(GURL(url));
++}
++
++TEST(TerminalAccessTest, OnlyChromeTerminalMainFrame) {
++  // As registered by content in the browser (aerographene comes from the
++  // Helium override-chrome-protocol patch).
++  url::ScopedSchemeRegistryForTests registry;
++  url::AddStandardScheme("chrome", url::SCHEME_WITH_HOST);
++  url::AddStandardScheme("chrome-untrusted", url::SCHEME_WITH_HOST);
++  url::AddStandardScheme("aerographene", url::SCHEME_WITH_HOST);
++  url::AddStandardScheme("chrome-extension", url::SCHEME_WITH_HOST);
++  EXPECT_TRUE(IsTerminalFrame(true, O("chrome://terminal/")));
++  EXPECT_TRUE(IsTerminalFrame(true, O("chrome://terminal/?w=3")));
++  // Subframe or non-primary frame (prerender, fenced frame, bfcache).
++  EXPECT_FALSE(IsTerminalFrame(false, O("chrome://terminal/")));
++  // Web pages, other WebUIs and look-alike schemes/hosts.
++  EXPECT_FALSE(IsTerminalFrame(true, O("https://example.com/")));
++  EXPECT_FALSE(IsTerminalFrame(true, O("http://terminal/")));
++  EXPECT_FALSE(IsTerminalFrame(true, O("chrome://notes/")));
++  EXPECT_FALSE(IsTerminalFrame(true, O("chrome://terminal.evil/")));
++  EXPECT_FALSE(IsTerminalFrame(true, O("chrome-untrusted://terminal/")));
++  EXPECT_FALSE(IsTerminalFrame(true, O("aerographene://terminal/")));
++  EXPECT_FALSE(IsTerminalFrame(true, O("chrome-extension://abc/")));
++  EXPECT_FALSE(IsTerminalFrame(true, O("file:///")));
++  EXPECT_FALSE(IsTerminalFrame(true, O("data:text/html,x")));
++  EXPECT_FALSE(IsTerminalFrame(true, O("about:blank")));
++  EXPECT_FALSE(IsTerminalFrame(true, url::Origin()));
++}
++
++}  // namespace
++}  // namespace aerographene
+--- a/chrome/browser/ui/webui/aero_terminal/terminal_handler.cc
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_handler.cc
+@@ -10,6 +10,8 @@
+ #include "base/functional/bind.h"
+ #include "base/task/bind_post_task.h"
+ #include "base/task/thread_pool.h"
++#include "chrome/browser/ui/webui/aero_terminal/terminal_access.h"
++#include "content/public/browser/browser_context.h"
+ #include "content/public/browser/render_frame_host.h"
+ #include "content/public/browser/web_ui.h"
+ #include "content/public/common/url_constants.h"
+@@ -84,9 +86,11 @@
+ 
+ bool TerminalHandler::FromTerminalPage() {
+   content::RenderFrameHost* rfh = web_ui()->GetRenderFrameHost();
+-  static const char kTerminalUrl[] = "chrome://terminal/";
+-  return rfh && rfh->IsInPrimaryMainFrame() &&
+-         rfh->GetLastCommittedOrigin().IsSameOriginWith(GURL(kTerminalUrl));
++  // Defense in depth: the config already refuses non-regular profiles.
++  return rfh &&
++         IsTerminalFrame(rfh->IsInPrimaryMainFrame(),
++                         rfh->GetLastCommittedOrigin()) &&
++         TerminalAllowedForContext(rfh->GetBrowserContext());
+ }
+ 
+ void TerminalHandler::HandleOpen(const base::ListValue& args) {
+--- a/chrome/browser/resources/aero_terminal/terminal.js
++++ b/chrome/browser/resources/aero_terminal/terminal.js
+@@ -225,6 +225,28 @@
+   handle.addEventListener('pointercancel', stop);
+ }
+ 
++// OSC 8 links (C5). xterm.js' default opens an empty window (about:blank,
++// which inherits the chrome://terminal origin) and then sets its location;
++// instead only http(s) links open, in a new tab with no opener and no
++// referrer, so the WebUI itself is never navigated.
++const LINK_HANDLER = {
++  allowNonHttpProtocols: false,
++  activate(event, uri) {
++    let url;
++    try {
++      url = new URL(uri);
++    } catch {
++      return;
++    }
++    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
++      return;
++    }
++    if (confirm(`Open ${url.href}?`)) {
++      window.open(url.href, '_blank', 'noopener,noreferrer');
++    }
++  },
++};
++
+ function addWindow(saved) {
+   if (wins.size >= MAX_WINDOWS) {
+     return;
+@@ -281,6 +303,7 @@
+   const body = win.querySelector('.win-body');
+   const term = new Terminal({
+     allowProposedApi: false,
++    linkHandler: LINK_HANDLER,
+     cursorBlink: true,
+     fontFamily: '"JetBrains Mono", "DejaVu Sans Mono", monospace',
+     fontSize: 13,
