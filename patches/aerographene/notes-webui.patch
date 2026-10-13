@@ -215,8 +215,8 @@ editor e aba única ficam para B2-B6.
 +      <span class="note-title" id="noteTitle">sem nota aberta</span>
 +    </header>
 +    <div class="editor" id="editor" aria-readonly="true">
-+      <p class="hint">esqueleto da página de notas: leitura e edição da vault
-+        chegam nas próximas fatias.</p>
++      <p class="hint">Pick a vault folder to start.</p>
++      <button class="vault-pick empty-pick" id="emptyPick" type="button">Choose folder</button>
 +    </div>
 +  </main>
 +</div>
