@@ -427,6 +427,10 @@ v0.3, fatia B4. Escrita na vault do `chrome://notes`: `OpenVaultFileNoFollow` (o
 
 v0.3, fatia C3. `chrome/browser/resources/aero_terminal/xterm.{mjs,css}` e `XTERM_LICENSE` do pacote npm `@xterm/xterm` 6.0.0 (sha256 do tgz `908e66e04af6c8dc6b00dd3b54de088e2e81e5ed866284fd6c2fb3c2d1c7a3f6`), sem a linha `sourceMappingURL`. Só arquivos novos; ligado ao grd em `terminal-bridge`.
 
+### `aerographene/terminal-c4.patch` (GPL-3.0)
+
+v0.3, fatia C4. Pan/zoom do quadro, layout em `localStorage` por workspace, título da aba `t: workspace N` (o processo em primeiro plano só no tooltip: `TerminalSession::ForegroundProcessName`, `TerminalHost::Foreground`, mensagem `foreground`), e `-t`/`-t N` na command bar (`aero_terminal_command.*` em `components/omnibox/browser` + gancho em `BuiltinProvider::Start`). Depende de `terminal-bridge` e `branding-scheme` (hunk vizinho em `builtin_provider.cc`).
+
 ### `aerographene/terminal-bridge.patch` (GPL-3.0)
 
 v0.3, fatia C3. `aerographene::TerminalHandler` (`aero_terminal/terminal_handler.*`, só no `AeroTerminalUI`, confere frame principal e origem `chrome://terminal` em cada mensagem) e `TerminalHost` (alvo `aero_terminal:host`, sessões de uma aba em sequência ThreadPool `BLOCK_SHUTDOWN`, leitura com `FileDescriptorWatcher`). `open(cols, rows)` sem comando nem cwd, até 16 sessões, escrita até 64 KiB, saída em base64; recarregar ou fechar a página mata as sessões. Página com xterm.js por janela; `style-src 'unsafe-inline'` só nesta página (xterm cria `<style>`). Teste `terminal_host_unittest.cc`. Depende de `terminal-webui`, `terminal-pty`, `terminal-xterm` e `notes-render`; fim da série.
