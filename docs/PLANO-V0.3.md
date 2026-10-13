@@ -2,6 +2,8 @@
 
 Status: proposto em 13/10/2026; B e C em andamento na branch `v0.3-ui` (ver status nas seções). Escopo decidido pelo dono em 13/10/2026: A (build avx1), B (notas), C (terminal), D (Windows 11 por cross-compile), E (pacotes nativos). Google Sync (ADR 0006) fica fora da v0.3.
 
+Status em 13/10/2026, manhã (branch `v0.3`, HEAD `95eafb8`): `v0.3-ui` mergeada na `v0.3` (sem merge na `main`). Build avx2 38392093934 verde; smoke 38399339291 verde; build avx1 38399420162 verde (agora com notas e terminal). Releases para o draft `v0.3.0`: avx2 38402316949 e avx1 38402602679, ambos success; o draft segue não publicado. Smoke CDP headless (contêiner `aerographene-builder:v2`, launcher `aerographene`): `chrome://notes` mostra "Pick a vault folder to start." e o botão "Choose folder"; `chrome://terminal` abre o shell; num contexto anônimo real (`Target.createBrowserContext`) as duas páginas recusam com `ERR_INVALID_URL`. Continua não testado à mão; falta smoke dedicado e verificação de ISA do avx1.
+
 Fontes: `docs/SCOPE.md`, `CONTEXT.md`, ADRs 0004/0008/0009, `docs/BUILD.md`, `build/`, `.github/workflows/{build,release}.yml`, `patches/series`, `theming/1/DECISIONS.md` e mockups C-r02/D-r02/G-r01, nota do vault `agents/projetos/navegador-fork-contexto-e-decisoes`. APIs do upstream conferidas por leitura (ssh, só leitura) na árvore do Chromium 154 do Cezanne (`~/aerographene-build/portablelinux/build/src`); caminhos citados abaixo como `src/...`.
 
 ## regras que valem para todos os itens
