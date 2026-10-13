@@ -148,3 +148,61 @@ Regra: aerographene não piora mais de 10% vs Helium (meta: 2%). Resultado nesta
 - Idle de input não tem fonte confiável nesta máquina (`GetSessionIdleTime` do KWin retorna NotSupported); a condição de "sem uso" foi load1 < 1.0 mais ausência de processos de teste, não idle de input.
 - Medições feitas em janelas de baixa carga após uma espera de cerca de 3h para o portão; houve rodadas com load até 0,98 e pausas longas entre execuções. Não controlado: temperatura e throttling.
 - Os dados de Helium e ungoogled desta rodada não são comparáveis diretamente à rodada de 08/10 (`46f2308`), que usou outro pacote.
+
+# linha de base v0.2 (13/10/2026, aerographene 3bb3c2f, build 38293664167)
+
+Máquina: Comet Lake i3-10110U, ociosa (load1 0,5 a 0,9 no início, gate load1 < 1,0 antes de cada chamada, 0 esperas estouradas, 0 falhas), nenhum outro navegador aberto. Início 00:51, fim 02:32 de 13/10. Energia: `power_profile=performance` (confirmado com `powerprofilesctl get`), governor `powersave`, EPP `performance`; `on_ac` não detectado pelo harness (a fonte é `ADP1`, em 1). Sem comparação com medições do Cezanne.
+
+Uma primeira rodada (00:29 a 00:48) foi descartada: o Zen estava aberto na máquina. Tudo abaixo é da rodada limpa; a contaminada fica em `/tmp/bench02b-out.contaminado` (fora do git).
+
+Versões: aerographene 154.0.8037.97 (pacote `...-3bb3c2f`), Helium 0.18.3.1, Thorium 154.0.8037.45 AVX2, ungoogled 154.0.8037.97-1, Google Chrome 155.0.8059.39 estável (o Chromium oficial não tem build estável para Linux; o `.deb` foi extraído em `/tmp/chrome-off/x`, sem instalar). O Chrome é uma versão acima das demais.
+
+Comandos (harness `bench/harness.py` sem edição; orquestração em `bench/ab.py`, resumo e gráficos em `bench/charts.py`):
+
+```bash
+python3 bench/ab.py --browsers aerographene,helium,thorium,chrome,ungoogled --bin aerographene=<pacote>/chrome \
+  --bin chrome=<chrome>/opt/google/chrome/chrome --out /tmp/bench02b-out --block warm --laps 10      # 2 execuções por chamada
+python3 bench/ab.py ... --block tabs --laps 10     # 10 abas, 2 execuções por chamada
+python3 bench/ab.py ... --block first --laps 6 --repeat 1
+python3 bench/charts.py --data /tmp/bench02b-out --json docs/img/bench/v02.json --out docs/img/bench \
+  --title "aerographene v0.2" --note "..."
+```
+
+Ordem: uma chamada do harness por navegador por volta, ordem rotacionada a cada volta (5 navegadores). warm e tabs: 10 voltas, n=20 por navegador; first: 6 voltas, n=6. Razão pareada = mediana das razões das medianas por volta contra o Helium. IC95 = bootstrap percentil da mediana (2000 reamostragens). Dados resumidos em `docs/img/bench/v02.json`; os `results-*.jsonl` brutos ficam fora do git.
+
+| medição | aero | Helium | Thorium | Chrome 155 | ungoogled | aero vs Helium (pareada) | aero IC95 |
+|---|---|---|---|---|---|---|---|
+| warm first_ms | 476,4 | 484,9 | 435,9 | 496,3 | 523,4 | -1,7% (+0,2%; abaixo em 5/10) | 465,8–482,5 |
+| perfil novo first_ms (n=6) | 494,4 | 506,5 | 460,1 | 542,5 | 543,5 | -2,4% (-1,7%; 6/6) | 488,1–518,9 |
+| 10 abas all_ms | 875,2 | 898,0 | 837,2 | 912,5 | 1044,3 | -2,5% (-3,0%; 7/10) | 863,4–886,7 |
+| 10 abas PSS MiB | 635,3 | 662,0 | 627,5 | 686,7 | 634,6 | -4,0% (-2,0%; 9/10) | 628,8–712,4 |
+
+Processos com 10 abas: 19 em todos os Chromium testados (aero, Helium, ungoogled).
+
+## regra do produto
+
+Nenhuma métrica do aerographene fica mais de 2% pior que o Helium (maior valor: +0,2% pareado em warm, dentro do ruído; IC95 do aero e do Helium se sobrepõem em warm). Meta "passar também o Thorium": não atingida em abertura (Thorium 8 a 9% mais rápido em warm e perfil novo, 6,8% em all_ms) nem em memória (-1,2% contra o aero, dentro do IC). Thorium ficou estável nesta rodada (all_ms IQR 800,8–863,9), ao contrário de 05/10.
+
+## PSS: o +9,6% contra o ungoogled
+
+A mediana de PSS com 10 abas é bimodal em aero e Helium, não no ungoogled (IQR 632,0–637,5). A posição da execução dentro da chamada explica: a primeira execução depois da criação do perfil (`i=0`) é alta; a segunda, no mesmo perfil (`i=1`), é baixa.
+
+| navegador | PSS i=0 | PSS i=1 |
+|---|---|---|
+| aerographene | 712,7 | 622,0 |
+| Helium | 722,5 | 644,0 |
+| ungoogled | 637,5 | 632,0 |
+| Thorium | 628,7 | 618,5 |
+| Chrome 155 | 688,5 | 685,2 |
+
+- Em `i=0` o aero fica +11,8% sobre o ungoogled (o +9,6% da v0.1 se reproduz); em `i=1`, -1,6%. O Helium tem o mesmo padrão, então o excedente vem do que ele e o aero compartilham.
+- PSS por processo (`bench/pss_proc.py`, uma execução em perfil novo, 19 processos cada, PSS MiB): aero 712,3 vs ungoogled 638,7 (+73,6). Processo do navegador: 118,2 vs 156,2 (-38,0; menos arquivo mapeado, 63,6 vs 97,4). Dois renderers a mais pesados no aero: um com 150,3 (anon 129,7) e outro com 44,3, contra 46,4 + 46,4 no ungoogled (+101,8 nos renderers de abas/páginas). GPU (59,7 vs 59,3), rede (30,0 vs 32,5 utilitário) e os 10 renderers de aba (~29,6 vs 28,4) são equivalentes.
+- Hipótese (não verificada): o renderer de 150 MiB é o contexto do uBlock Origin built-in (filtros carregados na criação do perfil), que o ungoogled não tem; some nas execuções seguintes do mesmo perfil, mas só se confirma identificando o processo (URL/tipo via CDP). Concorda com a nota de 08/10 (excesso herdado do Helium, provavelmente uBlock). Não é corrigido aqui.
+- Na prática: em perfil já usado a memória do aero é igual à do ungoogled (-1,6%) e menor que a do Helium (-3,4%); em perfil recém-criado é +11,8% sobre o ungoogled e -1,4% sobre o Helium.
+
+## limites
+
+- Mediana de PSS agrega as duas posições; o gráfico de memória mostra essa mediana (aero 635,3, mas IC95 de 628,8 a 712,4).
+- A atribuição de PSS por processo é de uma execução por navegador; uma repetição (3 execuções, só pelo total) deu 713,0 / 721,8 / 637,6.
+- Sem drop de page cache (exige sudo), Speedometer não automatizado, sem controle de temperatura/throttling; perfil novo não é disco frio.
+- Chrome é 155; first (n=6) tem IC largo.

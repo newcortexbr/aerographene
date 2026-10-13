@@ -1,3 +1,14 @@
+<!-- bench-charts: autorizado pelo dono; gerado por bench/charts.py -->
+<p align="center">
+  <img src="docs/img/bench/warm.svg" alt="startup, existing profile" width="440">
+  <img src="docs/img/bench/first.svg" alt="startup, new profile" width="440">
+</p>
+<p align="center">
+  <img src="docs/img/bench/tabs_all.svg" alt="10 tabs load time" width="440">
+  <img src="docs/img/bench/tabs_pss.svg" alt="10 tabs memory" width="440">
+</p>
+<p align="center"><sub>v0.2 baseline, Comet Lake i3-10110U, interleaved runs, median, lower is better. Details and limits: <a href="docs/BASELINE.md">BASELINE</a>.</sub></p>
+
 <p align="center">
   <img src="branding/ascii/wordmark-simple.svg" alt="aerographene" width="720">
 </p>
@@ -69,7 +80,12 @@ I IMMENSELY thank projects such as Ungoogled-Chromium, Helium, Thorium and Brave
   - ⬜ real-use test of spaces, command bar, peek and split view
   - ✅ site cache deleted after 30 days, cookies kept ([ADR 0007](docs/adr/0007-dado-frio.md))
   - ✅ theme picker in settings, local theme folder and `.aerotheme` import (opening the file imports it too) ([temas](docs/wiki/temas.md)); built and smoke-tested, not yet tested by hand
-  - 🚧 v0.2 baseline against Helium: pending
+  - ✅ v0.2 baseline against Helium, Thorium, Chrome and ungoogled: no metric worse than Helium; Thorium still faster at startup ([BASELINE](docs/BASELINE.md#linha-de-base-v02-13102026-aerographene-3bb3c2f-build-38293664167))
+- 🚧 v0.2.1
+  - ✅ orphaned `.install-*` folders in the theme folder are removed at startup, off the UI thread
+  - ✅ pixelized: square checkbox and radio on internal pages
+  - ✅ theme folder names read as raw bytes (non-ASCII names now work under a `C` locale); unit tests for the theme repository and `.aerotheme` import ran for the first time: 18 of 18 pass
+  - ✅ built and smoke-tested ([build 38346594627](https://github.com/newcortexbr/aerographene/actions/runs/38346594627)); known gaps: sidebar live tabs are not a drag source and drag has no image; no runtime check of internal pages
 - ⬜ v0.3
   - ⬜ Windows 11 ([ADR 0008](docs/adr/0008-windows-11.md))
   - 🚧 x86-64-v2 + AVX build for CPUs without AVX2 ([ADR 0009](docs/adr/0009-build-ivy-bridge.md)): build input `cpu=avx1` (separate `out/` and ccache) written; the first avx1 build has not run
@@ -82,6 +98,7 @@ I IMMENSELY thank projects such as Ungoogled-Chromium, Helium, Thorium and Brave
 the wiki lives in [`docs/wiki/`](docs/wiki/), in pt-BR.
 
 - [temas](docs/wiki/temas.md): how themes load (built-in theme, `theme.json` tokens, extension themes), where to change them and how to make your own. Ends with a dense spec you can paste into your AI agent so it writes a valid theme for you.
+- [benchmark](docs/wiki/benchmark.md): how the startup/memory baseline is measured and charted.
 
 - [pacotes](docs/wiki/pacotes.md): release assets (`tar.zst`, `pkg.tar.zst`, `deb`, `rpm`, per CPU target), how to install and remove, what gets installed, how the packages are built. Ends with a summary for agents.
 
