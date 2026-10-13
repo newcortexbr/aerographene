@@ -1,0 +1,347 @@
+aerographene: notas — aba única por janela e entrada -o na command bar (v0.3, fatia B6).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/notes-b5.patch (e, por ele, a cadeia notes-*),
+aerographene/terminal-c4.patch (hunks vizinhos em builtin_provider.cc e
+BUILD.gn do omnibox) e helium/core/override-chrome-protocol.patch (hunk em
+browser_navigator.cc).
+Propósito: (1) command bar: "o:" ou "o: <termo>" (o espaço depois dos dois
+pontos é opcional, "o" sem distinção de caixa) vira uma sugestão padrão
+(BuiltinProvider::Start, logo após o "-t" do terminal-c4; o texto é QUERY).
+Com termo: chrome://notes/?q=<termo em percent-encoding>; sozinho:
+chrome://notes/?new=1. Termo aparado, até 256 unidades, sem caracteres de
+controle. Nenhum dos dois abre documento. (2) a página lê "q" depois de
+carregar a vault: a barra lateral mantém a árvore com todos os documentos e o
+centro mostra os resultados da busca B5 (nome e conteúdo); sem termo o centro
+mostra a dica de sempre. O trecho de renderização das linhas de resultado
+virou renderHits(), compartilhado com a busca da barra lateral. (3) aba única:
+em chrome::Navigate, abrir chrome://notes (CURRENT_TAB, NEW_FOREGROUND_TAB ou
+SINGLETON_TAB) quando a janela já tem uma aba de notas vira SINGLETON_TAB com
+IGNORE_AND_NAVIGATE: foca a existente e a leva à URL pedida; sem aba
+existente, a disposição original é mantida; NEW_BACKGROUND_TAB não é tocada.
+Exceção pedida pelo dono: "?new=1" (o: sozinho) não é dobrado, abre outra
+aba de notas. (4) O título da aba continua sempre "o: <nome da vault>".
+Testes: AeroNotesCommandTest.*.
+
+--- a/components/omnibox/browser/BUILD.gn
++++ b/components/omnibox/browser/BUILD.gn
+@@ -228,6 +228,8 @@
+     "builtin_provider.h",
+     "aero_terminal_command.cc",
+     "aero_terminal_command.h",
++    "aero_notes_command.cc",
++    "aero_notes_command.h",
+     "calculator_provider.cc",
+     "calculator_provider.h",
+     "clipboard_provider.cc",
+@@ -917,6 +919,7 @@
+     "brave_search_suggestion_parser_unittest.cc",
+     "builtin_provider_unittest.cc",
+     "aero_terminal_command_unittest.cc",
++    "aero_notes_command_unittest.cc",
+     "calculator_provider_unittest.cc",
+     "clipboard_provider_unittest.cc",
+     "contextual_search_provider_unittest.cc",
+--- a/components/omnibox/browser/builtin_provider.cc
++++ b/components/omnibox/browser/builtin_provider.cc
+@@ -13,6 +13,7 @@
+ #include "base/strings/string_number_conversions.h"
+ #include "base/strings/string_util.h"
+ #include "base/strings/utf_string_conversions.h"
++#include "components/omnibox/browser/aero_notes_command.h"
+ #include "components/omnibox/browser/aero_terminal_command.h"
+ #include "components/omnibox/browser/autocomplete_input.h"
+ #include "components/omnibox/browser/autocomplete_match.h"
+@@ -54,6 +55,23 @@
+     match.contents_class = {{0, ACMatchClassification::URL}};
+     match.allowed_to_be_default_match = true;
+     matches_.push_back(match);
++    return;
++  }
++
++  // "o:" / "o: <term>" opens the notes tab with no document: with a term it
++  // runs the vault search, bare it opens a new tab (see browser_navigator.cc).
++  // Same QUERY caveat as above.
++  if (std::optional<std::u16string> note =
++          aerographene::ParseNotesCommand(input.text())) {
++    AutocompleteMatch match(this, 1300, false,
++                            AutocompleteMatchType::NAVSUGGEST);
++    match.suggest_type = omnibox::TYPE_NAVIGATION;
++    match.destination_url = GURL(aerographene::NotesCommandUrl(*note));
++    match.fill_into_edit = input.text();
++    match.contents = note->empty() ? u"notas" : u"notas: " + *note;
++    match.contents_class = {{0, ACMatchClassification::URL}};
++    match.allowed_to_be_default_match = true;
++    matches_.push_back(match);
+     return;
+   }
+ 
+--- a/chrome/browser/ui/navigator/browser_navigator.cc
++++ b/chrome/browser/ui/navigator/browser_navigator.cc
+@@ -645,6 +645,27 @@
+     params->url = params->url.ReplaceComponents(replacements);
+   }
+ 
++  // aerographene: one notes tab per window. Opening chrome://notes again
++  // (command bar "o: term", links) switches to the existing tab; if the URL
++  // differs (e.g. "?q=term"), that tab navigates to it. Only for dispositions
++  // that already put the page in the foreground. "?new=1" (bare "o:") opts
++  // out on purpose: the owner wants a new notes tab there.
++  if (source_browser && params->url.SchemeIs(content::kChromeUIScheme) &&
++      params->url.host() == "notes" && params->url.query() != "new=1" &&
++      (params->disposition == WindowOpenDisposition::CURRENT_TAB ||
++       params->disposition == WindowOpenDisposition::NEW_FOREGROUND_TAB ||
++       params->disposition == WindowOpenDisposition::SINGLETON_TAB)) {
++    const WindowOpenDisposition original_disposition = params->disposition;
++    const NavigateParams::PathBehavior original_behavior =
++        params->path_behavior;
++    params->disposition = WindowOpenDisposition::SINGLETON_TAB;
++    params->path_behavior = NavigateParams::IGNORE_AND_NAVIGATE;
++    if (GetIndexOfExistingTabMatchingURL(source_browser, *params) < 0) {
++      params->disposition = original_disposition;
++      params->path_behavior = original_behavior;
++    }
++  }
++
+   // Open System Apps in their standalone window if necessary.
+   // TODO(crbug.com/40136163): Remove this code after we integrate with intent
+   // handling.
+--- a/chrome/browser/resources/aero_notes/notes.js
++++ b/chrome/browser/resources/aero_notes/notes.js
+@@ -636,30 +636,9 @@
+ let searchSeq = 0;
+ let searchTimer = 0;
+ 
+-async function runSearch() {
+-  clearTimeout(searchTimer);
+-  const q = search.value.trim();
+-  const seq = ++searchSeq;
+-  if (q.length < 2) {
+-    results.hidden = true;
+-    tree.hidden = false;
+-    return;
+-  }
+-  tree.hidden = true;
+-  results.hidden = false;
+-  let r;
+-  try {
+-    r = await send('searchVault', q);
+-  } catch (e) {
+-    if (seq === searchSeq) {
+-      message(results, 'busca indisponível');
+-    }
+-    return;
+-  }
+-  if (seq !== searchSeq) {
+-    return;
+-  }
+-  results.replaceChildren();
++// Hit rows (shared by the sidebar search and the centre pane of "o: term").
++function renderHits(target, r) {
++  target.replaceChildren();
+   for (const hit of r.hits) {
+     const row = document.createElement('div');
+     row.className = 'hit';
+@@ -692,16 +671,42 @@
+     } else {
+       row.classList.add('muted');
+     }
+-    results.append(row);
++    target.append(row);
+   }
+   if (!r.hits.length) {
+-    message(results, 'nada encontrado');
++    message(target, 'nada encontrado');
+   } else if (r.truncated) {
+     const p = document.createElement('p');
+     p.className = 'empty';
+     p.textContent = 'resultado parcial: a busca tem limite de itens e de tamanho';
+-    results.append(p);
++    target.append(p);
++  }
++}
++
++async function runSearch() {
++  clearTimeout(searchTimer);
++  const q = search.value.trim();
++  const seq = ++searchSeq;
++  if (q.length < 2) {
++    results.hidden = true;
++    tree.hidden = false;
++    return;
++  }
++  tree.hidden = true;
++  results.hidden = false;
++  let r;
++  try {
++    r = await send('searchVault', q);
++  } catch (e) {
++    if (seq === searchSeq) {
++      message(results, 'busca indisponível');
++    }
++    return;
+   }
++  if (seq !== searchSeq) {
++    return;
++  }
++  renderHits(results, r);
+ }
+ 
+ search.addEventListener('input', () => {
+@@ -891,4 +896,36 @@
+ vaultPick.addEventListener('click', pickVault);
+ emptyPick.addEventListener('click', pickVault);
+ 
+-send('getVault').then(showVault);
++// "?q=<term>" (command bar "o: term"): no document open, the sidebar keeps
++// the whole tree and the centre pane shows the search results. The term is
++// untrusted URL input: it only goes through the same searchVault message.
++async function openFromQuery() {
++  const q = (new URLSearchParams(location.search).get('q') || '').trim();
++  if (!vaultTitle || q.length < 2 || q.length > 256 ||
++      /[\u0000-\u001f\u007f]/.test(q)) {
++    return;
++  }
++  search.value = q;
++  const pane = document.createElement('div');
++  pane.className = 'center-results';
++  const head = document.createElement('p');
++  head.className = 'hint';
++  head.textContent = `Resultados para "${q}"`;
++  const list = document.createElement('nav');
++  list.className = 'results';
++  list.setAttribute('aria-label', 'resultados da busca');
++  pane.append(head, list);
++  if (!current) {
++    editor.replaceChildren(pane);
++  }
++  try {
++    renderHits(list, await send('searchVault', q));
++  } catch (e) {
++    message(list, 'busca indisponível');
++  }
++}
++
++send('getVault').then((info) => {
++  showVault(info);
++  openFromQuery();
++});
+--- /dev/null
++++ b/components/omnibox/browser/aero_notes_command.h
+@@ -0,0 +1,31 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#ifndef COMPONENTS_OMNIBOX_BROWSER_AERO_NOTES_COMMAND_H_
++#define COMPONENTS_OMNIBOX_BROWSER_AERO_NOTES_COMMAND_H_
++
++#include <cstddef>
++#include <optional>
++#include <string>
++#include <string_view>
++
++namespace aerographene {
++
++// Command bar entry `o:` (notes tab). Accepts "o:" or "o: <term>" (the space
++// after the colon is optional, "o" is case-insensitive, surrounding whitespace
++// is ignored) and returns the search term ("" for a bare "o:"). The term is
++// taken as typed (trimmed, at most kMaxNotesCommandTerm UTF-16 units, no
++// control characters); the page runs the vault search with it. Anything else
++// ("o", "ox:", "o :", "-o") returns nullopt.
++inline constexpr size_t kMaxNotesCommandTerm = 256;
++std::optional<std::u16string> ParseNotesCommand(std::u16string_view text);
++
++// The page the command opens. With a term: "chrome://notes/?q=<term>"
++// (percent-encoded UTF-8), reusing the window's notes tab. Bare "o:":
++// "chrome://notes/?new=1", which chrome::Navigate does not fold into an
++// existing notes tab (the owner wants a new one). Neither opens a document.
++std::string NotesCommandUrl(const std::u16string& term);
++
++}  // namespace aerographene
++
++#endif  // COMPONENTS_OMNIBOX_BROWSER_AERO_NOTES_COMMAND_H_
+--- /dev/null
++++ b/components/omnibox/browser/aero_notes_command.cc
+@@ -0,0 +1,38 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "components/omnibox/browser/aero_notes_command.h"
++
++#include "base/strings/escape.h"
++#include "base/strings/string_util.h"
++#include "base/strings/utf_string_conversions.h"
++
++namespace aerographene {
++
++std::optional<std::u16string> ParseNotesCommand(std::u16string_view text) {
++  std::u16string_view t = base::TrimWhitespace(text, base::TRIM_ALL);
++  if (t.size() < 2 || (t[0] != u'o' && t[0] != u'O') || t[1] != u':') {
++    return std::nullopt;
++  }
++  std::u16string_view rest = base::TrimWhitespace(t.substr(2), base::TRIM_ALL);
++  if (rest.size() > kMaxNotesCommandTerm) {
++    return std::nullopt;
++  }
++  for (char16_t c : rest) {
++    if (c < 0x20 || c == 0x7f) {
++      return std::nullopt;
++    }
++  }
++  return std::u16string(rest);
++}
++
++std::string NotesCommandUrl(const std::u16string& term) {
++  if (term.empty()) {
++    return "chrome://notes/?new=1";
++  }
++  return "chrome://notes/?q=" +
++         base::EscapeQueryParamValue(base::UTF16ToUTF8(term),
++                                     /*use_plus=*/false);
++}
++
++}  // namespace aerographene
+--- /dev/null
++++ b/components/omnibox/browser/aero_notes_command_unittest.cc
+@@ -0,0 +1,41 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "components/omnibox/browser/aero_notes_command.h"
++
++#include "base/strings/utf_string_conversions.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace aerographene {
++
++TEST(AeroNotesCommandTest, Accepts) {
++  EXPECT_EQ(ParseNotesCommand(u"o:"), u"");
++  EXPECT_EQ(ParseNotesCommand(u"  O:  "), u"");
++  EXPECT_EQ(ParseNotesCommand(u"o: ideias"), u"ideias");
++  EXPECT_EQ(ParseNotesCommand(u"o:ideias"), u"ideias");
++  EXPECT_EQ(ParseNotesCommand(u"O:   dia 2026-10-13 "), u"dia 2026-10-13");
++  EXPECT_EQ(ParseNotesCommand(u"o: pasta/nota"), u"pasta/nota");
++  EXPECT_EQ(ParseNotesCommand(u"o: \u00e7\u00e3o"), u"\u00e7\u00e3o");
++  EXPECT_EQ(ParseNotesCommand(u"o: a: b"), u"a: b");
++}
++
++TEST(AeroNotesCommandTest, Rejects) {
++  for (const char16_t* s : {u"", u"o", u":", u"ox:", u"o :", u"-o", u"-o x",
++                            u"oo:", u"a o:", u"o: a\x01", u"o: a\x7f",
++                            u"o: a\tb"}) {
++    EXPECT_FALSE(ParseNotesCommand(s)) << base::UTF16ToUTF8(s);
++  }
++  EXPECT_FALSE(ParseNotesCommand(u"o: " + std::u16string(257, u'a')));
++  EXPECT_TRUE(ParseNotesCommand(u"o: " + std::u16string(256, u'a')));
++}
++
++TEST(AeroNotesCommandTest, Url) {
++  EXPECT_EQ(NotesCommandUrl(u""), "chrome://notes/?new=1");
++  EXPECT_EQ(NotesCommandUrl(u"ideias"), "chrome://notes/?q=ideias");
++  EXPECT_EQ(NotesCommandUrl(u"a b/c#d&e=f"),
++            "chrome://notes/?q=a%20b%2Fc%23d%26e%3Df");
++  EXPECT_EQ(NotesCommandUrl(u"\u00e7\u00e3o"),
++            "chrome://notes/?q=%C3%A7%C3%A3o");
++}
++
++}  // namespace aerographene
