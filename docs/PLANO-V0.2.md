@@ -19,6 +19,8 @@ Estado em 12/10/2026. Fontes: README (roadmap), `docs/SCOPE.md`, `docs/NOITE-202
      - formato: `"icons": {"base": "<pacote>"}` desde a v0.2, para aceitar `"overrides": {"<ícone>": "<pacote>"}` depois sem quebrar temas existentes.
      - desejável: importar tema arrastando um arquivo para um modal de importar tema, ou instalar via extensões. Viabilidade a investigar.
    - verificação: compilar só o alvo afetado no runner; smoke no pacote nos 4 combos.
+   - v0.2.1 (13/10/2026): limpeza de `.install-*` órfãs no início; deps de `themes` em ordem; radio/checkbox quadrados no pixelized (lacuna do PR #41); `AsUTF8Unsafe` trocado por `value()` nos nomes de pasta (falhava sob locale `C`, achado ao rodar os testes pela primeira vez). Testes `aerographene_theme_{repo,archive}_unittest`: 18 de 18 em binário temporário (executável só com esses fontes, overlay no runner; o alvo `themes:unit_tests` inteiro não foi linkado). Build 38346594627 e smoke 38347869352 verdes.
+   - lacunas do PR #38 que seguem abertas (exigem verificação de runtime): aba viva da sidebar não é origem de arrasto; sem imagem de arrasto.
 4. teste de uso real: roteiro em `docs/TESTE-USO-REAL.md`; execução do dono, com clique e teclado. Falhas viram entrada em `docs/NOITE-*.md`.
 
 ## ordem

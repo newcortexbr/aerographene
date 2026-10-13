@@ -144,10 +144,13 @@ desde a v0.2 (patch `theme-repo`) o navegador lê temas de `${XDG_CONFIG_HOME:-~
 - `radius`/`radius_small` 0 a 32; `font.size_px` 8 a 32 (obrigatório se houver `family`); cor em `#RRGGBB` ou `#RRGGBBAA`. Valor fora disso torna o tema inválido (ele some da lista e, se estava ativo, volta a `default`).
 - nome: 1 a 64 bytes, sem `/`, `\`, controle, nem começar com `.`; espaço e acento valem. `default` e `pixelized` são reservados; conflito entre nomes ignora a caixa e a forma Unicode (o nome é guardado em NFC: `é` composto ou decomposto é o mesmo tema).
 - arquivo acima de 64 KiB é rejeitado. Aplicar tema continua exigindo reiniciar.
+- páginas internas: no tema `pixelized` o checkbox e o radio ficam quadrados (`--aero-radius-check`/`--aero-radius-radio` = 0); no `default` seguem o desenho upstream.
 
 desempenho: tema embutido não lê disco no início; um tema do repositório custa uma leitura pequena de `theme.json` em `ThemeService::Init` (já era assim com o `theme.json` de tokens). A varredura da pasta inteira só roda quando alguém lista os temas (seletor), numa tarefa de background.
 
 API do seletor e da importação (`chrome/browser/themes/aerographene_theme_repo.h`; o seletor de configurações usa `ListThemes` pelas mensagens `getAerographeneThemes`/`setAerographeneTheme` do `AppearanceHandler`, e só aceita nomes que `ListThemes` devolve): `ListThemes(callback)` devolve `default`, `pixelized` e os temas válidos do repositório com seus metadados; `InstallTheme(json, replace, callback)` valida e grava `themes/<nome>/theme.json` (`kConflict` se já existe, sem diferenciar caixa, até `replace`). A gravação vai para uma pasta oculta temporária no mesmo diretório e é renomeada no lugar; ao substituir, a pasta antiga sai do caminho e só é apagada depois que a nova está no lugar (falha restaura a antiga). Se a substituição mudou a caixa do nome e a pref ainda aponta a grafia antiga, o próximo início segue a pasta nova e corrige a pref.
+
+limpeza (v0.2.1): a gravação usa uma pasta oculta `.install-*` (e `.install-*.old` ao substituir). Se o navegador cair no meio, ela sobra. No início, `ScheduleStagingCleanup()` (chamada em `ThemeService::Init`, uma vez por processo) apaga essas pastas numa tarefa de background (`MayBlock`, `BEST_EFFORT`), fora da UI thread. Só apaga diretórios reais com mtime de 60 s ou mais; symlink com esse nome não é seguido nem removido. Os nomes de pasta do repositório são lidos como bytes (`FilePath::value()`), sem depender do locale.
 
 ## importar tema (`.aerotheme`)
 

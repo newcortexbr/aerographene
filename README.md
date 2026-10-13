@@ -70,6 +70,11 @@ I IMMENSELY thank projects such as Ungoogled-Chromium, Helium, Thorium and Brave
   - ✅ site cache deleted after 30 days, cookies kept ([ADR 0007](docs/adr/0007-dado-frio.md))
   - ✅ theme picker in settings, local theme folder and `.aerotheme` import (opening the file imports it too) ([temas](docs/wiki/temas.md)); built and smoke-tested, not yet tested by hand
   - 🚧 v0.2 baseline against Helium: pending
+- 🚧 v0.2.1
+  - ✅ orphaned `.install-*` folders in the theme folder are removed at startup, off the UI thread
+  - ✅ pixelized: square checkbox and radio on internal pages
+  - ✅ theme folder names read as raw bytes (non-ASCII names now work under a `C` locale); unit tests for the theme repository and `.aerotheme` import ran for the first time: 18 of 18 pass
+  - ✅ built and smoke-tested ([build 38346594627](https://github.com/newcortexbr/aerographene/actions/runs/38346594627)); known gaps: sidebar live tabs are not a drag source and drag has no image; no runtime check of internal pages
 - ⬜ v0.3
   - ⬜ Windows 11 ([ADR 0008](docs/adr/0008-windows-11.md))
   - ⬜ x86-64-v2 + AVX build for CPUs without AVX2 ([ADR 0009](docs/adr/0009-build-ivy-bridge.md))
