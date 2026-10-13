@@ -13,6 +13,11 @@ on:
       pgo:
         description: "1 = perfil PGO oficial; 0 = sem PGO"
         default: "1"
+      cpu:
+        description: "alvo de CPU: avx2 = x86-64-v3 (out/Default); avx1 = -march=ivybridge (out/Avx1, ccache próprio)"
+        type: choice
+        options: [avx2, avx1]
+        default: avx2
   push:
     branches: [main]
     paths:
@@ -40,6 +45,7 @@ jobs:
           JOBS: ${{ inputs.jobs || 'auto' }}
           NINJA_TARGET: ${{ inputs.target || 'chrome' }}
           AEROGRAPHENE_PGO: ${{ inputs.pgo || '1' }}
+          AERO_CPU: ${{ inputs.cpu || 'avx2' }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           GOOGLE_DEFAULT_CLIENT_ID: ${{ secrets.GOOGLE_DEFAULT_CLIENT_ID }}
           GOOGLE_DEFAULT_CLIENT_SECRET: ${{ secrets.GOOGLE_DEFAULT_CLIENT_SECRET }}
@@ -48,14 +54,17 @@ jobs:
       - name: localizar artefato
         if: ${{ (inputs.target || 'chrome') == 'chrome' }}
         id: art
-        run: echo "path=$(ls -1 "${AEROGRAPHENE_WORKDIR:-$HOME/aerographene-build}"/dist/*.tar.zst | head -1)" >> "$GITHUB_OUTPUT"
+        env:
+          AERO_CPU: ${{ inputs.cpu || 'avx2' }}
+        run: echo "path=$(ls -1t "${AEROGRAPHENE_WORKDIR:-$HOME/aerographene-build}"/dist/*-${AERO_CPU}-x86_64_linux.tar.zst | head -1)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         if: ${{ (inputs.target || 'chrome') == 'chrome' }}
         # cota de artefatos cheia não invalida a build; o pacote fica em dist/ no runner
         continue-on-error: true
         with:
-          name: aerographene-linux-x86_64
+          # avx2 mantém o nome histórico (smoke.yml, release.yml); avx1 leva sufixo
+          name: ${{ inputs.cpu == 'avx1' && 'aerographene-linux-x86_64-avx1' || 'aerographene-linux-x86_64' }}
           path: ${{ steps.art.outputs.path }}
           compression-level: 0
           retention-days: 14

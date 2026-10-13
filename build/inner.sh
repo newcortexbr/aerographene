@@ -7,6 +7,8 @@ set -euo pipefail
 . /work/portablelinux/scripts/shared.sh   # funções oficiais do portablelinux
 
 setup_paths   # _root=/work/portablelinux, _src_dir=$_root/build/src, _out_dir=$_src_dir/out/Default
+# alvo de CPU (config.sh): saída em out/${AERO_OUT} (Default = avx2, preservado; Avx1 = avx1)
+_out_dir="${_src_dir}/out/${AERO_OUT}"
 AERO_PATCHES=/aero/patches
 
 AERO_STATE="${_src_dir}/.aero-applied"          # cópia da série aplicada + BUILD.gn pré-march
@@ -346,9 +348,10 @@ bash /aero/build/apply_branding_assets.sh "${_src_dir}" /aero/branding
 echo "== gn gen"
 cd "${_src_dir}"
 [ -x out/Default/gn ] || ./tools/gn/bootstrap/bootstrap.py -o out/Default/gn --skip-generate-buildfiles
-./out/Default/gn gen out/Default --fail-on-unused-args
+# o gn é compartilhado: sempre em out/Default/gn (não depende do alvo)
+./out/Default/gn gen "out/${AERO_OUT}" --fail-on-unused-args
 if [ "${AEROGRAPHENE_PGO:-1}" = 1 ]; then  # valor efetivo (no merge a última definição vence)
-    pgo_eff="$(./out/Default/gn args out/Default --list=chrome_pgo_phase --short)"
+    pgo_eff="$(./out/Default/gn args "out/${AERO_OUT}" --list=chrome_pgo_phase --short)"
     [ "${pgo_eff}" = "chrome_pgo_phase = 2" ] \
         || { echo "erro: PGO pedido mas o gn resolveu '${pgo_eff}'" >&2; exit 1; }
     echo "PGO: ${pgo_eff}"
@@ -368,7 +371,7 @@ target="${NINJA_TARGET:-chrome chrome_sandbox}"
 # "chrome" sozinho é a build completa com pacote: inclui chrome_sandbox (não é dependência do chrome)
 if [ "${target}" = chrome ]; then target="chrome chrome_sandbox"; fi
 read -r -a targets <<<"${target}"   # aceita vários alvos separados por espaço
-ninja -C out/Default -j "${JOBS}" "${targets[@]}"
+ninja -C "out/${AERO_OUT}" -j "${JOBS}" "${targets[@]}"
 kill "${_memmon}" 2>/dev/null || true
 _memmon=""
 
@@ -377,22 +380,22 @@ if [ "${target}" != "chrome chrome_sandbox" ]; then
     exit 0
 fi
 echo "== pacote"
-name="aerographene-${AERO_VERSION}-${UC_TAG}-${AERO_SHA:-local}-x86_64_linux"
+name="aerographene-${AERO_VERSION}-${UC_TAG}-${AERO_SHA:-local}-${AERO_CPU}-x86_64_linux"
 stage="/work/dist/${name}"
 rm -rf "$stage"; mkdir -p "$stage"
 for f in chrome chrome_100_percent.pak chrome_200_percent.pak chrome_crashpad_handler chrome-wrapper \
          icudtl.dat libEGL.so libGLESv2.so libqt5_shim.so libqt6_shim.so libvk_swiftshader.so \
          libvulkan.so.1 locales product_logo_48.png resources.pak v8_context_snapshot.bin \
          vk_swiftshader_icd.json xdg-mime xdg-settings; do
-    [ -e "out/Default/$f" ] && cp -r "out/Default/$f" "$stage/"
+    [ -e "out/${AERO_OUT}/$f" ] && cp -r "out/${AERO_OUT}/$f" "$stage/"
 done
 # sandbox setuid: alvo GN sandbox/linux:chrome_sandbox, data_dep do chrome. O Chromium procura
 # <dir do binário>/chrome-sandbox e só o usa se for root:root 4755 (o PKGBUILD instala assim);
 # sem ele vale o sandbox de user namespaces do kernel. O portablelinux não empacota.
-if [ -f out/Default/chrome_sandbox ]; then
-    cp out/Default/chrome_sandbox "$stage/chrome-sandbox"
+if [ -f "out/${AERO_OUT}/chrome_sandbox" ]; then
+    cp "out/${AERO_OUT}/chrome_sandbox" "$stage/chrome-sandbox"
 else
-    echo "== aviso: out/Default/chrome_sandbox ausente; pacote sem chrome-sandbox" >&2
+    echo "== aviso: out/${AERO_OUT}/chrome_sandbox ausente; pacote sem chrome-sandbox" >&2
 fi
 # ícones hicolor do tema do app (PKGBUILD instala em /usr/share/icons/hicolor/<n>x<n>/apps/aerographene.png)
 for n in 16 24 32 48 64 128 256; do
@@ -426,7 +429,8 @@ else
 fi
 # binário principal com nome do produto; branding completo fica para depois
 ln -sf chrome "$stage/aerographene"
-rm -f /work/dist/*.tar.zst
+# só remove o tarball do mesmo alvo (avx2 e avx1 convivem em dist/)
+rm -f "/work/dist/aerographene-"*"-${AERO_CPU}-x86_64_linux.tar.zst"
 tar -C /work/dist -cf - "$name" | zstd -T0 -19 -o "/work/dist/${name}.tar.zst"
 rm -rf "$stage"
 echo "ARTIFACT=/work/dist/${name}.tar.zst"
