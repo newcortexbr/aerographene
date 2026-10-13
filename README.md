@@ -104,6 +104,7 @@ the wiki lives in [`docs/wiki/`](docs/wiki/), in pt-BR.
 - [notas](docs/wiki/notas.md): the notes page (`aerographene://notes`), what exists today and how vault access is confined. Ends with a summary for agents.
 
 - [terminal](docs/wiki/terminal.md): the terminal board (`aerographene://terminal`), the pty session and its security rules. Ends with a summary for agents.
+
 - [windows](docs/wiki/windows.md): cross-compiling the Windows 11 build on the Linux runner, what works, what the source tarball lacks. Ends with a summary for agents.
 
 - [pacotes](docs/wiki/pacotes.md): release assets (`tar.zst`, `pkg.tar.zst`, `deb`, `rpm`, per CPU target), how to install and remove, what gets installed, how the packages are built. Ends with a summary for agents.
