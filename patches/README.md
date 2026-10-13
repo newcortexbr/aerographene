@@ -439,6 +439,10 @@ v0.3, fatia C6, depois de `terminal-c6`. Página do workspace: sem barra superio
 
 v0.3, fatia C6, fim da série. `OmniboxViewViews::AeroApplyCommandLook`: `t:` em fonte monoespaçada, `o:` em itálico, prefixo na cor `kColorOmniboxResultsUrl`. Só aparência. Mesmo arquivo de `urlbar-mockup`, hunks independentes.
 
+### `aerographene/terminal-c6b.patch` (GPL-3.0)
+
+v0.3, correção do review da C6, fim da série, depois de `terminal-c6` e `terminal-c6-page`. `t: <comando>` só roda sozinho quando digitado: `TypedInputTracker` (`aero_terminal_command.*`) no `OmniboxEditModel` (colar, soltar, colar e acessar, texto posto pelo navegador = não digitado), marca `aero_terminal_typed` no match, `run` no canal e `\r` na página só com `run`. Canal preso ao id da navegação (`terminal_launch_watcher.{h,cc}`, alvo `aero_terminal:launch_watcher`), limpo se ela falhar/for cancelada ou a aba navegar para outro lugar; `start` só entrega com a página em `?new=1`. Testes `AeroTerminalCommandTest.*`, `TerminalLaunchTest.*`, `tests/terminal-page/run.sh`.
+
 ### `aerographene/notes-b6.patch` (GPL-3.0)
 
 v0.3, fatia B6, no fim da série (depende de `notes-b5`, do contexto de `terminal-c4` em `builtin_provider.cc` e no `BUILD.gn` do omnibox, e do hunk de `helium/core/override-chrome-protocol.patch` em `browser_navigator.cc`). Command bar `o:`/`o: <termo>` (`aero_notes_command.{h,cc}` + teste; `BuiltinProvider::Start`): com termo abre `chrome://notes/?q=<termo>` (sem documento, árvore na lateral e resultados da busca no centro); sozinho abre `chrome://notes/?new=1` (aba nova de notas). Aba única por janela em `chrome::Navigate` (foca a aba de notas existente e a leva à URL; `?new=1` não é dobrado). Título da aba continua `o: <nome da vault>`.

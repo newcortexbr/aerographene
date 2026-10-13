@@ -18,6 +18,7 @@ function key(el, opts) {
   return e;
 }
 const isNew = new URLSearchParams(location.search).get('new') === '1';
+const isPasted = new URLSearchParams(location.search).get('pasted') === '1';
 try {
   await sleep(300);
   const w1 = $('.win');
@@ -27,7 +28,11 @@ try {
     check('comando ainda nao digitado antes de 0,5 s', performance.now() >= 500 || writes().length === 0);
     await sleep(600);
     const w = writes();
-    check('comando digitado uma vez com Enter', w.length === 1 && w[0][1] === 7 && w[0][2] === 'echo oi\r', JSON.stringify(w));
+    if (isPasted) {
+      check('colado: escrito no prompt sem Enter', w.length === 1 && w[0][1] === 7 && w[0][2] === 'echo oi', JSON.stringify(w));
+    } else {
+      check('comando digitado uma vez com Enter', w.length === 1 && w[0][1] === 7 && w[0][2] === 'echo oi\r', JSON.stringify(w));
+    }
     check('start chamado com 0 (novo)', calls.find((c) => c[0] === 'start')[2] === 0);
   } else {
     check('titulo t: workspace 2', document.title === 't: workspace 2', document.title);

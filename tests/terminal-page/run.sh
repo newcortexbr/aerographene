@@ -16,7 +16,7 @@ port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); p
 (cd "$tmp" && exec python3 -m http.server "$port" --bind 127.0.0.1 >/dev/null 2>&1) & srv=$!
 sleep 1
 ok=0
-for page in "index.html?w=2" "index.html?new=1"; do
+for page in "index.html?w=2" "index.html?new=1" "index.html?new=1&pasted=1"; do
   HOME="$tmp/h" timeout 100 "$chrome" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage \
     --disable-crash-reporter --disable-breakpad --no-first-run --user-data-dir="$tmp/prof" \
     --window-size=1280,800 --virtual-time-budget=10000 --dump-dom "http://127.0.0.1:$port/$page" 2>/dev/null > "$tmp/dom.html" || true

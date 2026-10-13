@@ -9,6 +9,8 @@ window.chrome = {send(name, args) {
   if (name === 'start') {
     return reply({workspace: new URLSearchParams(location.search).get('new') ? 3 : args[1],
       command: new URLSearchParams(location.search).get('new') ? 'echo oi' : null,
+      // C6b: "colado" (paste/drop/paste-and-go) never comes with run: true
+      run: !new URLSearchParams(location.search).get('pasted'),
       info: {chromium: '141.0.7390.0', aerographene: '0.3.0', cpu: 'Fake CPU', cores: 8, gpu: 'Fake GPU',
              ram: 16 * 1024 ** 3, disks: [{path: '/', total: 1e11, free: 4e10}, {path: '/home/u', total: 1e11, free: 4e10}]}});
   }
