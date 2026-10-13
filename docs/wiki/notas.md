@@ -22,7 +22,7 @@ validado até aqui (Chromium 154, Cezanne, overlay): os patches aplicam sem fuzz
 
 ## render do Markdown
 
-`markdown.js` é um renderizador próprio e pequeno (markdown-it exigiria mudar `build/inner.sh`). Ele nunca interpreta HTML: monta a nota criando elementos e texto, então HTML escrito na nota (`<script>`, `<img onerror=...>`) aparece como texto. Links só abrem se forem `http(s)` ou `mailto`; `javascript:`, `data:` e `chrome:` ficam como texto. Imagens aparecem como `[imagem: nome]` por enquanto. Suporta títulos, parágrafos, listas (inclusive tarefas `- [x]`), citações, blocos de código, linha horizontal, negrito, itálico, tachado, código inline, links e wikilinks; o front matter YAML é escondido.
+`markdown.js` é um renderizador próprio e pequeno (markdown-it exigiria mudar `build/inner.sh`). Ele nunca interpreta HTML: monta a nota criando elementos e texto, então HTML escrito na nota (`<script>`, `<img onerror=...>`) aparece como texto. Links só abrem se forem `http(s)` ou `mailto`; `javascript:`, `data:` e `chrome:` ficam como texto. Imagens aparecem como `[imagem: nome]` por enquanto. Suporta títulos, parágrafos, listas (inclusive tarefas `- [x]`), citações, blocos de código, linha horizontal, negrito, itálico, tachado, código inline, links e wikilinks; o front matter YAML é escondido. Para não travar com notas enormes, só os primeiros 64 KiB de cada linha recebem formatação; o resto aparece como texto.
 
 ## segurança da leitura da vault
 
@@ -31,7 +31,8 @@ o caminho de cada arquivo vem da página e é tratado como não confiável:
 - precisa ser relativo à vault, sem `..`, `.`, componentes vazios, NUL e com no máximo 4096 bytes;
 - depois de resolver symlinks, o arquivo tem de continuar dentro da pasta real da vault: symlink para fora é recusado, symlink para dentro funciona;
 - a listagem é por nível (árvore sob demanda), mostra pastas e arquivos `.md` e de imagem, esconde ocultos e para em 5000 itens;
-- só `.md` é lido como nota, até 4 MiB.
+- só `.md` é lido como nota, até 4 MiB, e só se for arquivo comum: o arquivo é aberto sem seguir symlink e sem esperar (um FIFO chamado `x.md` não trava a leitura); FIFOs, sockets e dispositivos não aparecem na lista;
+- as mensagens só são aceitas do frame principal com origem `chrome://notes`, e o seletor de pasta só abre a partir de um clique do usuário.
 
 limite conhecido: entre conferir o caminho e abrir o arquivo, alguém com acesso à pasta poderia trocar um componente por symlink. Fica para resolver junto com a escrita (B4).
 
