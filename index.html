@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aerographene: a fast Chromium browser for Linux, no account required</title>
+<meta name="description" content="aerographene is a free, open source Chromium-based browser for Linux. Fast startup, spaces, built-in markdown notes and terminal workspaces, themes, AVX2 and AVX1 builds. Never asks you to sign in.">
+<link rel="canonical" href="https://newcortexbr.github.io/aerographene/">
+<meta name="theme-color" content="#05070c">
+<meta property="og:type" content="website">
+<meta property="og:title" content="aerographene: a fast Chromium browser for Linux">
+<meta property="og:description" content="Spaces, markdown notes, terminal workspaces and themes in a tuned Chromium. No account required.">
+<meta property="og:url" content="https://newcortexbr.github.io/aerographene/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"aerographene","applicationCategory":"BrowserApplication","operatingSystem":"Linux","license":"https://www.gnu.org/licenses/gpl-3.0.html","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"url":"https://newcortexbr.github.io/aerographene/","codeRepository":"https://github.com/newcortexbr/aerographene"}
+</script>
+</head>
+<body>
+<div class="shell">
+<aside class="rail">
+  <a class="logo" href="#top" aria-label="aerographene"><img src="assets/wordmark.svg" alt="aerographene" width="210"></a>
+  <p class="ver">v0.3 · linux x86-64</p>
+  <nav class="idx">
+    <a href="#top"><span>00</span> hello</a>
+    <a href="#themes"><span>01</span> themes</a>
+    <a href="#what"><span>02</span> features</a>
+    <a href="#t"><span>03</span> t: terminal</a>
+    <a href="#o"><span>04</span> o: notes</a>
+    <a href="#bench"><span>05</span> numbers</a>
+    <a href="#get"><span>06</span> get it</a>
+  </nav>
+  <div class="ext">
+    <a href="https://github.com/newcortexbr/aerographene">github ↗</a>
+    <a href="https://github.com/newcortexbr/aerographene/tree/main/docs/wiki">wiki ↗</a>
+  </div>
+  <p class="keys"><kbd>j</kbd><kbd>k</kbd> move</p>
+</aside>
+
+<main>
+<section class="pane hero" id="top" data-title="hello">
+  <h1>a fast browser<br><em>that stays out of your way.</em></h1>
+  <p class="lede">A Chromium fork for Linux, tuned for startup and memory, with spaces, markdown notes and terminal workspaces built in. No account needed, nothing asks you to sign in. Free, GPL-3.0, made for fun.</p>
+  <div class="install">
+    <div class="tabs" role="tablist">
+      <button class="on" data-k="curl">curl</button><button data-k="wget">wget</button><button data-k="man">manual</button>
+    </div>
+    <div class="cmd"><span class="ps">$</span><code id="cmd"></code><button id="copy" aria-label="copy command">[copy]</button></div>
+  </div>
+</section>
+
+<section class="pane wide" id="themes" data-title="themes">
+  <div class="browser" id="browser">
+    <div class="tb">
+      <span class="hot"><svg viewBox="0 0 16 16" class="ic"><path d="M2 3h12v10H2zM6 3v10"/></svg></span><span class="hot dim"><svg viewBox="0 0 16 16" class="ic"><path d="M10 3L5 8l5 5"/></svg></span><span class="hot dim"><svg viewBox="0 0 16 16" class="ic"><path d="M6 3l5 5-5 5"/></svg></span><span class="hot"><svg viewBox="0 0 16 16" class="ic"><path d="M13 8a5 5 0 1 1-1.5-3.5M13 2v3h-3"/></svg></span>
+      <div class="omni hot">Search or enter address<span class="oi"><svg viewBox="0 0 16 16" class="ic"><path d="M2 5h12M2 11h12M5 3v4M11 9v4"/></svg><svg viewBox="0 0 16 16" class="ic"><path d="M6 10l4-4M5 7l-2 2a2 2 0 0 0 3 3l2-2M11 9l2-2a2 2 0 0 0-3-3L8 6"/></svg></span></div>
+      <span class="hot"><svg viewBox="0 0 16 16" class="ic"><path d="M8 1.5l5.5 2v4c0 3.5-2.5 6-5.5 7c-3-1-5.5-3.5-5.5-7v-4z"/></svg></span><span class="av hot"><svg viewBox="0 0 16 16" class="ic"><path d="M8 8a3 3 0 1 0 0-6a3 3 0 0 0 0 6M2.5 15c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/></svg></span><span class="hot"><svg viewBox="0 0 16 16" class="ic"><path d="M8 3v.5M8 8v.5M8 13v.5"/></svg></span>
+    </div>
+    <span class="wc"><svg viewBox="0 0 16 16" class="ic"><path d="M4 8h8"/></svg><svg viewBox="0 0 16 16" class="ic"><path d="M5 5h6v6H5z"/></svg><svg viewBox="0 0 16 16" class="ic"><path d="M4 4l8 8M12 4l-8 8"/></svg></span>
+    <aside class="side">
+      <div class="pins">
+        <span class="hot dot"><svg viewBox="0 0 16 16" class="ic"><path d="M8 1.5a6.5 6.5 0 1 0 0 13a6.5 6.5 0 0 0 0-13M1.5 8h13M8 1.5c2 2 2 11 0 13M8 1.5c-2 2-2 11 0 13"/></svg></span><span class="hot dot"><svg viewBox="0 0 16 16" class="ic"><path d="M8 1.5a6.5 6.5 0 1 0 0 13a6.5 6.5 0 0 0 0-13M1.5 8h13M8 1.5c2 2 2 11 0 13M8 1.5c-2 2-2 11 0 13"/></svg></span><span class="hot"><i class="fav">N</i></span><span class="hot empty">•</span>
+        <span class="hot empty">•</span><span class="hot empty">•</span>
+      </div>
+      <div class="folder hot"><svg viewBox="0 0 16 16" class="ic"><path d="M1.5 4h5l1.5 1.5h6.5v8h-13z"/></svg><span>Work</span><b>›</b></div>
+      <div class="drawer"><span class="hot"><i class="fav">G</i></span><span class="hot"><i class="fav w">N</i></span><span class="hot wide2"><i class="fav">D</i></span></div>
+      <hr>
+      <div class="newtab hot">+ <span>New tab</span></div>
+      <div class="tabl"><div class="tab hot"><svg viewBox="0 0 16 16" class="ic"><path d="M8 1.5a6.5 6.5 0 1 0 0 13a6.5 6.5 0 0 0 0-13M1.5 8h13M8 1.5c2 2 2 11 0 13M8 1.5c-2 2-2 11 0 13"/></svg><span>New tab</span><svg viewBox="0 0 16 16" class="ic"><path d="M4 4l8 8M12 4l-8 8"/></svg></div>
+      <div class="tab hot"><i class="fav">G</i><span>GitHub</span><svg viewBox="0 0 16 16" class="ic"><path d="M4 4l8 8M12 4l-8 8"/></svg></div>
+      <div class="tab hot"><i class="fav w">N</i><span>Notion</span><svg viewBox="0 0 16 16" class="ic"><path d="M4 4l8 8M12 4l-8 8"/></svg></div>
+      <div class="tab hot on"><svg viewBox="0 0 16 16" class="ic"><path d="M8 1.5a6.5 6.5 0 1 0 0 13a6.5 6.5 0 0 0 0-13M1.5 8h13M8 1.5c2 2 2 11 0 13M8 1.5c-2 2-2 11 0 13"/></svg><span>New tab</span><canvas class="dz" id="ramp" data-px="2"></canvas><svg viewBox="0 0 16 16" class="ic"><path d="M4 4l8 8M12 4l-8 8"/></svg></div><span class="plus hot">+</span></div>
+      <div class="foot"><span class="hot"><svg viewBox="0 0 16 16" class="ic"><path d="M8 2v8M4.5 7L8 10.5L11.5 7M2.5 13.5h11"/></svg></span><span class="hot"><svg viewBox="0 0 16 16" class="ic"><path d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z"/></svg></span></div>
+    </aside>
+    <div class="page">
+      <canvas class="dither" id="dither" data-px="2"></canvas>
+      <svg class="waves" viewBox="0 0 800 500" preserveAspectRatio="none"><path d="M0 330C200 280 380 360 560 300S760 180 800 200"/><path d="M0 360C220 300 420 390 600 330S780 230 800 240"/><path d="M0 430C260 400 500 420 800 400"/></svg>
+      <div class="nt">
+        <div class="clock hot">23:49</div>
+        <div class="greet hot">good evening.</div>
+        <div class="motd"><small>MESSAGE OF THE DAY</small><span>pick one priority today.</span></div>
+        <div class="ntsearch hot"><svg viewBox="0 0 16 16" class="ic"><path d="M7 2.5a4.5 4.5 0 1 0 0 9a4.5 4.5 0 0 0 0-9M10.5 10.5L14 14"/></svg><span>Search or open an address</span><kbd>Ctrl+K</kbd></div>
+      </div>
+      <div class="cust hot"><svg viewBox="0 0 16 16" class="ic"><path d="M8 5.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 0 0 0-5M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.5 1.5M11.5 11.5L13 13M3 13l1.5-1.5M11.5 4.5L13 3"/></svg><span>Customize</span></div>
+    </div>
+    <svg class="cursor" id="cursor" viewBox="0 0 16 16" width="16" height="16"><path d="M1 1 L1 13 L4.5 10 L7 15 L9 14 L6.6 9.2 L11 9.2 Z"/></svg>
+  </div>
+  <div class="themebar">
+    <div class="lay" role="group" aria-label="tab layout"><button class="on" data-l="side">sidebar</button><button data-l="top">topbar</button></div>
+    <span class="tname" id="tname">default</span>
+    <div class="segs" id="segs"></div>
+  </div>
+  <div class="explain">
+    <p><b>pinned</b>the grid on top. Sites you keep for good: they survive restarts, reopen in the background without loading until you click them, and stay visible (dashed) even after you close them. A tile can span several cells.</p>
+    <p><b>folders</b>a full-width row in that grid. Click it and a drawer slides open with the pinned sites inside, so "work" or "reading" take one line until you need them.</p>
+  </div>
+</section>
+
+<section class="pane" id="what" data-title="features">
+  <ul class="feat">
+    <li><b>fast</b>x86-64-v3 build with ThinLTO and PGO; an AVX1 build for older CPUs.</li>
+    <li><b>spaces</b>separate tab sets for work and life, switched in place.</li>
+    <li><b>o: notes</b>your markdown vault in a tab, with live preview.</li>
+    <li><b>t: terminal</b>a canvas of real shells you can pan, zoom and rearrange.</li>
+    <li><b>themes</b>default and pixelized built in; import your own.</li>
+    <li><b>no account</b>works fully without signing in; nothing nags you to.</li>
+  </ul>
+</section>
+
+<div class="duo">
+<section class="pane" id="t" data-title="t: workspace">
+  <div class="ws" id="ws">
+    <div class="grid" id="wsgrid">
+      <div class="term" id="tA"><div class="bar">~/projects · bash</div><pre>$ make -j16
+[ 82%] linking…
+$ <span class="blink">▌</span></pre></div>
+      <div class="term" id="tB"><div class="bar">htop</div><pre>CPU ▮▮▮▮▮▯▯▯ 61%
+MEM ▮▮▮▯▯▯▯▯ 3.1G
+$ <span class="blink">▌</span></pre></div>
+    </div>
+    <span class="zoom" id="zoom">100%</span>
+    <svg class="cursor sm" id="tcur" viewBox="0 0 16 16" width="14" height="14"><path d="M1 1 L1 13 L4.5 10 L7 15 L9 14 L6.6 9.2 L11 9.2 Z"/></svg>
+  </div>
+</section>
+
+<section class="pane" id="o" data-title="o: vault">
+  <div class="vault">
+    <div class="tree">
+      <div class="fold"><span class="ch">v</span> vault</div>
+      <div><span class="ch">›</span> daily</div>
+      <div class="fold"><span class="ch">v</span> projects</div>
+      <div class="f on">ideas.md</div>
+      <div class="f">browser.md</div>
+      <div class="f">reading.md</div>
+      <div><span class="ch">›</span> attachments</div>
+    </div>
+    <div class="editor" id="editor"></div>
+  </div>
+</section>
+</div>
+
+<section class="pane" id="bench" data-title="numbers">
+  <p class="sub">Medians on one idle Comet Lake laptop, performance governor. Lower is better. Method and raw data in <a href="https://github.com/newcortexbr/aerographene/blob/main/docs/BASELINE.md">BASELINE.md</a>.</p>
+  <div class="charts">
+    <figure><canvas class="px" data-set="startup" width="300" height="150"></canvas><figcaption>startup, existing profile · ms</figcaption></figure>
+    <figure><canvas class="px" data-set="tabs" width="300" height="150"></canvas><figcaption>10 tabs fully loaded · ms</figcaption></figure>
+    <figure><canvas class="px" data-set="pss" width="300" height="150"></canvas><figcaption>10 tabs memory, PSS · MiB</figcaption></figure>
+  </div>
+</section>
+
+<section class="pane" id="get" data-title="get it">
+  <p class="sub">The script picks Arch, Debian, Fedora or a tarball for your system, AVX2 or AVX1 for your CPU, and checks SHA256SUMS before installing. <a href="install.sh">Read it first</a>, as you should.</p>
+  <div class="btns"><button class="btn solid" id="copy2">$ copy install command</button><a class="btn" href="https://github.com/newcortexbr/aerographene/releases/latest">→ latest release</a></div>
+</section>
+
+<footer>
+  <span>aerographene · GPL-3.0</span>
+  <span>built on ungoogled-chromium, with parts of Helium and Brave. thanks.</span>
+</footer>
+</main>
+</div>
+<script src="main.js"></script>
+</body>
+</html>
