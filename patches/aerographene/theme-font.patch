@@ -8,8 +8,9 @@ gfx::FontList::SetDefaultFontDescription("JetBrains Mono, 12px"). A ordem
 importa: ReloadFonts chama InitDefaultFontList, que zera a descrição (fonte do
 sistema) e limpa o cache; antes a descrição era definida antes e nunca valia
 (causa do pixelized "só parcial" em runtime). Se a família não existir no
-fontconfig, usa "Monospace, 12px". O default não carrega fonte e mantém a
-fonte do sistema.
+fontconfig, usa "Monospace, 12px" (no Windows, "Consolas, 12px"; JetBrains
+Mono embarcada fica para a D3d). O default não carrega fonte e mantém a
+fonte do sistema. Linux e Windows (D3b).
 
 
 --- a/chrome/browser/themes/theme_service.cc
@@ -38,12 +39,18 @@ fonte do sistema.
  #include "ui/native_theme/native_theme.h"
  
  #if BUILDFLAG(ENABLE_EXTENSIONS)
-@@ -357,6 +361,27 @@ ThemeService::ThemeService(Profile* profile, const ThemeHelper& theme_helper)
+@@ -360,6 +364,34 @@
  
  ThemeService::~ThemeService() = default;
  
-+#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
 +namespace {
++
++#if BUILDFLAG(IS_WIN)
++constexpr char kMonospaceFallback[] = "Consolas";
++#else
++constexpr char kMonospaceFallback[] = "Monospace";
++#endif
 +
 +// aerographene: UI font of the active theme (pixelized: JetBrains Mono 12px,
 +// mono size in the pixelized mockups); system monospace if the family is not
@@ -57,7 +64,8 @@ fonte do sistema.
 +  // description has to be set after it; the cache refills from it.
 +  ui::ResourceBundle::GetSharedInstance().ReloadFonts();
 +  gfx::FontList::SetDefaultFontDescription(base::StringPrintf(
-+      "%s, %dpx", installed ? family.c_str() : "Monospace", size_px));
++      "%s, %dpx", installed ? family.c_str() : kMonospaceFallback,
++      size_px));
 +}
 +
 +}  // namespace
@@ -66,7 +74,7 @@ fonte do sistema.
  void ThemeService::Init() {
    theme_helper_->DCheckCalledOnValidSequence();
  
-@@ -373,6 +398,12 @@ void ThemeService::Init() {
+@@ -376,6 +408,12 @@
      const aerographene::ThemeData& theme = aerographene::GetActiveTheme();
      views::LayoutProvider::SetAerographeneCornerRadii(theme.radius,
                                                        theme.radius_small);

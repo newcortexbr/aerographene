@@ -7,7 +7,7 @@ Propósito: em perfil normal (fora de incógnito/guest/OTR), NewEmptyWindow
 vez de criar outra; TabDragController não destaca abas de janela normal de
 perfil normal (a aba volta ao strip). O card do profile picker passa pelo
 mesmo embrulho de SwitchToProfile (AerographeneWrapSwitchInPlace, exposto em
-profile_window.h). Só Linux. Depende de aerographene/space-switch-in-place.
+profile_window.h). Linux e Windows (D3b). Depende de aerographene/space-switch-in-place.
 
 --- a/chrome/browser/profiles/profile_window.h
 +++ b/chrome/browser/profiles/profile_window.h
@@ -18,7 +18,7 @@ profile_window.h). Só Linux. Depende de aerographene/space-switch-in-place.
 +// aerographene: wraps |callback| so that, when the window of the profile at
 +// |target_path| is ready, it takes the place (bounds, maximized state) of the
 +// last active normal window of another profile, which is minimized. Returns
-+// |callback| unchanged when there is no such source window or off Linux.
++// |callback| unchanged without such a source window (or off Linux/Windows).
 +base::OnceCallback<void(BrowserWindowInterface*)>
 +AerographeneWrapSwitchInPlace(
 +    const base::FilePath& target_path,
@@ -37,7 +37,7 @@ profile_window.h). Só Linux. Depende de aerographene/space-switch-in-place.
 +AerographeneWrapSwitchInPlace(
 +    const base::FilePath& target_path,
 +    base::OnceCallback<void(BrowserWindowInterface*)> callback) {
-+#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
 +  BrowserWindowInterface* source =
 +      GlobalBrowserCollection::GetInstance()->GetLastActiveBrowser();
 +  if (source && source->GetType() == BrowserWindowInterface::TYPE_NORMAL &&
@@ -45,7 +45,7 @@ profile_window.h). Só Linux. Depende de aerographene/space-switch-in-place.
 +    return base::BindOnce(&AerographeneSwitchInPlace, source->GetWeakPtr(),
 +                          std::move(callback));
 +  }
-+#endif  // BUILDFLAG(IS_LINUX)
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
 +  return callback;
 +}
 +
@@ -53,7 +53,7 @@ profile_window.h). Só Linux. Depende de aerographene/space-switch-in-place.
                       bool always_create,
                       base::OnceCallback<void(BrowserWindowInterface*)> callback,
                       bool open_command_line_urls) {
--#if BUILDFLAG(IS_LINUX)
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
    if (!always_create) {
 -    BrowserWindowInterface* source =
 -        GlobalBrowserCollection::GetInstance()->GetLastActiveBrowser();
@@ -64,7 +64,7 @@ profile_window.h). Só Linux. Depende de aerographene/space-switch-in-place.
 -    }
 +    callback = AerographeneWrapSwitchInPlace(path, std::move(callback));
    }
--#endif  // BUILDFLAG(IS_LINUX)
+-#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
    base::OnceCallback<void(Profile*)> open_browser_callback =
        base::BindOnce(&profiles::OpenBrowserWindowForProfile,
                       std::move(callback), always_create,
@@ -74,7 +74,7 @@ profile_window.h). Só Linux. Depende de aerographene/space-switch-in-place.
      off_the_record = true;
    }
  
-+#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
 +  // aerographene: a space (normal profile) lives in at most one normal window.
 +  // If it already has one, open a new tab there and activate it instead of
 +  // creating a second window. Incognito/guest/OTR keep the upstream behavior.
@@ -88,7 +88,7 @@ profile_window.h). Só Linux. Depende de aerographene/space-switch-in-place.
 +      return;
 +    }
 +  }
-+#endif  // BUILDFLAG(IS_LINUX)
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
 +
    if (off_the_record) {
      Profile* otr_profile =
@@ -131,7 +131,7 @@ profile_window.h). Só Linux. Depende de aerographene/space-switch-in-place.
      ref->detach_behavior_ = DetachBehavior::kNotDetachable;
    }
  #endif  // BUILDFLAG(IS_CHROMEOS)
-+#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
 +  // aerographene: a space (normal profile) lives in at most one normal window,
 +  // so tabs of a normal window are not detached into a new window; a drag out
 +  // of the strip leaves the tab in place. Incognito/guest keep detaching.
@@ -147,7 +147,7 @@ profile_window.h). Só Linux. Depende de aerographene/space-switch-in-place.
 +      }
 +    }
 +  }
-+#endif  // BUILDFLAG(IS_LINUX)
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
    for (TabSlotView* dragging_view : dragging_views) {
      if (!source_context->IsTabDetachable(dragging_view)) {
        ref->detach_behavior_ = DetachBehavior::kNotDetachable;

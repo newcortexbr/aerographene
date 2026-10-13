@@ -17,6 +17,10 @@ chamador roda em sequência MayBlock. Testes em vault_reader_unittest.cc
 (alvo aero_notes:unit_tests, ligado a unit_tests no Linux). Limite
 conhecido: TOCTOU entre resolver e abrir (troca de componente por symlink
 depois da checagem) fica para quando a escrita (B4) existir.
+D3b (Windows): vault_reader compila no Windows, mas lá as três funções
+retornam nullopt e kVaultReadSupported é false (o NotesHandler responde
+"unsupported") até o leitor confinado da D3c; nunca há leitura sem
+confinamento. Os testes seguem só no Linux.
 
 --- a/chrome/browser/ui/webui/aero_notes/BUILD.gn
 +++ b/chrome/browser/ui/webui/aero_notes/BUILD.gn
@@ -45,11 +49,40 @@ depois da checagem) fica para quando a escrita (B4) existir.
 +}
 --- /dev/null
 +++ b/chrome/browser/ui/webui/aero_notes/vault_reader.cc
-@@ -0,0 +1,184 @@
+@@ -0,0 +1,215 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
 +#include "chrome/browser/ui/webui/aero_notes/vault_reader.h"
++
++#include "build/build_config.h"
++
++#if BUILDFLAG(IS_WIN)
++
++namespace aerographene::notes {
++
++// D3b: the confined reader for Windows (reparse points, reserved names, ADS,
++// 8.3 names, case-insensitive compare) is D3c. Until then every call is
++// refused (kVaultReadSupported is false); there is no unconfined fallback.
++std::optional<base::FilePath> ResolveInVault(const base::FilePath& root,
++                                             std::string_view relative) {
++  return std::nullopt;
++}
++
++std::optional<std::vector<VaultEntry>> ListVaultDir(
++    const base::FilePath& root,
++    std::string_view relative) {
++  return std::nullopt;
++}
++
++std::optional<std::string> ReadVaultNote(const base::FilePath& root,
++                                         std::string_view relative) {
++  return std::nullopt;
++}
++
++}  // namespace aerographene::notes
++
++#else  // BUILDFLAG(IS_WIN)
 +
 +#include <fcntl.h>
 +#include <sys/stat.h>
@@ -230,9 +263,11 @@ depois da checagem) fica para quando a escrita (B4) existir.
 +}
 +
 +}  // namespace aerographene::notes
++
++#endif  // BUILDFLAG(IS_WIN)
 --- /dev/null
 +++ b/chrome/browser/ui/webui/aero_notes/vault_reader.h
-@@ -0,0 +1,54 @@
+@@ -0,0 +1,63 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -248,6 +283,7 @@ depois da checagem) fica para quando a escrita (B4) existir.
 +#include <vector>
 +
 +#include "base/files/file_path.h"
++#include "build/build_config.h"
 +
 +// Read-only access to a notes vault (a local folder of Markdown files),
 +// confined to the vault root. Paths coming from the page are untrusted:
@@ -259,6 +295,14 @@ depois da checagem) fica para quando a escrita (B4) existir.
 +inline constexpr size_t kMaxRelativePathLength = 4096;
 +inline constexpr size_t kMaxNoteBytes = 4 * 1024 * 1024;
 +inline constexpr size_t kMaxListEntries = 5000;
++
++// False on Windows until the confined reader of D3c: there every function
++// below returns nullopt (no unconfined fallback).
++#if BUILDFLAG(IS_WIN)
++inline constexpr bool kVaultReadSupported = false;
++#else
++inline constexpr bool kVaultReadSupported = true;
++#endif
 +
 +struct VaultEntry {
 +  std::string path;  // relative to the vault root, '/'-separated

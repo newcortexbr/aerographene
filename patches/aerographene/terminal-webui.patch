@@ -135,48 +135,54 @@ C2-C5 (ver seção de segurança do plano).
 +AeroTerminalUI::~AeroTerminalUI() = default;
 --- a/chrome/browser/ui/webui/BUILD.gn
 +++ b/chrome/browser/ui/webui/BUILD.gn
-@@ -110,7 +110,10 @@
+@@ -113,6 +113,10 @@
+     deps += [ "//chrome/browser/ui/webui/aero_notes" ]
    }
  
-   if (is_linux) {
--    deps += [ "//chrome/browser/ui/webui/aero_notes" ]
-+    deps += [
-+      "//chrome/browser/ui/webui/aero_notes",
-+      "//chrome/browser/ui/webui/aero_terminal",
-+    ]
-   }
- 
++  if (is_linux) {
++    deps += [ "//chrome/browser/ui/webui/aero_terminal" ]
++  }
++
    if (!is_android) {
+     deps += [
+       "//chrome/browser/actor/ui:actor_overlay_web_view",
 --- a/chrome/browser/ui/webui/chrome_web_ui_configs.cc
 +++ b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
-@@ -240,6 +240,7 @@
- 
- #if BUILDFLAG(IS_LINUX)
+@@ -242,6 +242,10 @@
  #include "chrome/browser/ui/webui/aero_notes/aero_notes_ui.h"
-+#include "chrome/browser/ui/webui/aero_terminal/aero_terminal_ui.h"
- #endif  // BUILDFLAG(IS_LINUX)
+ #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
  
++#if BUILDFLAG(IS_LINUX)
++#include "chrome/browser/ui/webui/aero_terminal/aero_terminal_ui.h"
++#endif  // BUILDFLAG(IS_LINUX)
++
  #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
-@@ -326,6 +327,7 @@
- #if BUILDFLAG(IS_LINUX)
+     BUILDFLAG(IS_CHROMEOS)
+ #include "chrome/browser/ui/webui/skills/skills_ui.h"
+@@ -327,6 +331,9 @@
    // aerographene: config only; the page is built when a tab opens it.
    map.AddWebUIConfig(std::make_unique<AeroNotesUIConfig>());
+ #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
++#if BUILDFLAG(IS_LINUX)
 +  map.AddWebUIConfig(std::make_unique<AeroTerminalUIConfig>());
- #endif  // BUILDFLAG(IS_LINUX)
++#endif  // BUILDFLAG(IS_LINUX)
  #if BUILDFLAG(ENABLE_WEBUI_NTP)
    map.AddWebUIConfig(std::make_unique<NewTabPageUIConfig>());
+ #endif  // BUILDFLAG(ENABLE_WEBUI_NTP)
 --- a/chrome/browser/browser_resources.grd
 +++ b/chrome/browser/browser_resources.grd
-@@ -111,6 +111,9 @@
-         <include name="IDR_AERO_NOTES_HTML" file="resources\aero_notes\notes.html" type="BINDATA" />
+@@ -112,6 +112,11 @@
          <include name="IDR_AERO_NOTES_CSS" file="resources\aero_notes\notes.css" type="BINDATA" />
          <include name="IDR_AERO_NOTES_JS" file="resources\aero_notes\notes.js" type="BINDATA" />
+       </if>
++      <if expr="is_linux">
 +        <include name="IDR_AERO_TERMINAL_HTML" file="resources\aero_terminal\terminal.html" type="BINDATA" />
 +        <include name="IDR_AERO_TERMINAL_CSS" file="resources\aero_terminal\terminal.css" type="BINDATA" />
 +        <include name="IDR_AERO_TERMINAL_JS" file="resources\aero_terminal\terminal.js" type="BINDATA" />
-       </if>
++      </if>
        <if expr="is_chromeos">
          <include name="IDR_CHROME_APP_MANIFEST" file="resources\chrome_app\manifest.json" type="BINDATA" />
+         <include name="IDR_URL_MOJOM_LITE_JS" file="${root_gen_dir}\url\mojom\url.mojom-lite.js" use_base_dir="false" type="BINDATA" />
 --- /dev/null
 +++ b/chrome/browser/resources/aero_terminal/terminal.html
 @@ -0,0 +1,27 @@

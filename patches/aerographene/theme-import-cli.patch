@@ -5,7 +5,7 @@ Depende de: aerographene/settings-theme-import.patch (ImportThemeArchive,
 strings IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_* reusadas),
 aerographene/theme-repo.patch, aerographene/pinned-label.patch (contexto do
 generated_resources.grd).
-Propósito: switch --import-theme=<arquivo> (Linux). ProcessCmdLineImpl o trata
+Propósito: switch --import-theme=<arquivo> (Linux e Windows, D3b). ProcessCmdLineImpl o trata
 antes de qualquer janela: chama aerographene::ShowThemeImport e retorna sem
 abrir janela, aba ou restaurar sessão. Com instância rodando, o
 ProcessSingleton entrega o argv e o mesmo caminho mostra só o diálogo.
@@ -111,7 +111,7 @@ diff --git a/chrome/browser/ui/startup/startup_browser_creator.cc b/chrome/brows
    }
  #endif  // !BUILDFLAG(IS_ANDROID)
  
-+#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
 +  // aerographene: --import-theme=<file> only shows the import dialog. No
 +  // window, tab or session restore; a running instance gets it through
 +  // ProcessSingleton. The dialog's keep-alive ends the process when it closes
@@ -137,7 +137,7 @@ diff --git a/chrome/browser/ui/startup/startup_browser_creator.cc b/chrome/brows
 +    }
 +    return true;
 +  }
-+#endif  // BUILDFLAG(IS_LINUX)
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
 +
    // Try to validate a CRX if --validate-crx is present.
    if (std::optional<bool> crx_result =

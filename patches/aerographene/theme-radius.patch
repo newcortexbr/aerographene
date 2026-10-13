@@ -7,12 +7,23 @@ Propósito: hook estático em views::LayoutProvider
 ShapeContextTokens) e pelo raio superior de TabStyle. default: 4px em
 controle/menu/diálogo, 3px em chip/badge; pixelized: 0 e 2px. Definido em
 ThemeService::Init (perfil regular) a partir de
-GetActiveTheme().radius/radius_small.
+GetActiveTheme().radius/radius_small. Linux e Windows (D3b; no Windows
+o alvo themes ganha a dep de ui/views).
 
 
 --- a/chrome/browser/themes/BUILD.gn
 +++ b/chrome/browser/themes/BUILD.gn
-@@ -98,6 +98,7 @@
+@@ -90,6 +90,9 @@
+       "theme_helper_win.cc",
+       "theme_helper_win.h",
+     ]
++
++    # aerographene: corner radii (theme-radius).
++    deps += [ "//ui/views" ]
+   }
+   if (is_linux) {
+     public += [ "theme_service_aura_linux.h" ]
+@@ -98,6 +101,7 @@
        "//ui/linux:linux_ui",
        "//ui/linux:linux_ui_factory",
        "//ui/ozone",
@@ -20,22 +31,24 @@ GetActiveTheme().radius/radius_small.
      ]
    }
    if (!is_android) {
-
 --- a/chrome/browser/themes/theme_service.cc
 +++ b/chrome/browser/themes/theme_service.cc
-@@ -94,6 +94,7 @@
- #include "ui/linux/linux_ui.h"
- #include "ui/linux/linux_ui_factory.h"
+@@ -96,6 +96,10 @@
  #include "ui/ozone/public/ozone_platform.h"  // nogncheck
-+#include "ui/views/layout/layout_provider.h"
  #endif
  
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
++#include "ui/views/layout/layout_provider.h"
++#endif
++
  using TP = ThemeProperties;
-@@ -366,6 +367,14 @@ void ThemeService::Init() {
+ 
+ // Helpers --------------------------------------------------------------------
+@@ -366,6 +370,14 @@
            profile_->GetPrefs()->GetString(aerographene::kThemePref)))) {
      ui::ColorProviderManager::Get().ResetColorProviderCache();
    }
-+#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
 +  if (profile_->IsRegularProfile()) {
 +    // Corner radii of the active theme (default 4/3, pixelized 0/2).
 +    const aerographene::ThemeData& theme = aerographene::GetActiveTheme();
@@ -46,7 +59,6 @@ GetActiveTheme().radius/radius_small.
  
    InitFromPrefs();
  
-
 --- a/chrome/browser/ui/tabs/tab_style.cc
 +++ b/chrome/browser/ui/tabs/tab_style.cc
 @@ -100,7 +100,11 @@
@@ -62,7 +74,6 @@ GetActiveTheme().radius/radius_small.
  }
  
  int TabStyle::GetBottomCornerRadius() const {
-
 --- a/ui/views/layout/layout_provider.cc
 +++ b/ui/views/layout/layout_provider.cc
 @@ -188,8 +188,27 @@
@@ -110,7 +121,6 @@ GetActiveTheme().radius/radius_small.
    switch (token) {
      case ShapeSysTokens::kXSmall:
        return 4;
-
 --- a/ui/views/layout/layout_provider.h
 +++ b/ui/views/layout/layout_provider.h
 @@ -256,6 +256,12 @@
@@ -126,4 +136,3 @@ GetActiveTheme().radius/radius_small.
   protected:
    static constexpr int kSmallDialogWidth = 320;
    static constexpr int kMediumDialogWidth = 448;
-

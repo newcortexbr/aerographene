@@ -12,8 +12,8 @@ WebUIConfigMap; controlador e data source nascem quando uma aba abre a
 página. Desabilitada em perfis off-the-record (anônimo e convidado).
 CSP mais estrita que o padrão da WebUI: default-src 'none', script-src e
 style-src 'self', img-src 'self', connect-src/form-action/base-uri 'none';
-Trusted Types do padrão mantido (o JS não usa innerHTML). Só Linux
-(BUILDFLAG(IS_LINUX), is_linux no GN). Leitura da vault, render Markdown,
+Trusted Types do padrão mantido (o JS não usa innerHTML). Linux e Windows
+(BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN), is_linux || is_win no GN; D3b). Leitura da vault, render Markdown,
 editor e aba única ficam para B2-B6.
 
 --- /dev/null
@@ -22,7 +22,7 @@ editor e aba única ficam para B2-B6.
 +# Copyright 2026 The aerographene Authors
 +# Use of this source code is governed by the GPL-3.0 license.
 +
-+assert(is_linux)
++assert(is_linux || is_win)
 +
 +source_set("aero_notes") {
 +  sources = [
@@ -139,7 +139,7 @@ editor e aba única ficam para B2-B6.
      deps += [ "//chrome/browser/ui/webui/signin:inline_login" ]
    }
  
-+  if (is_linux) {
++  if (is_linux || is_win) {
 +    deps += [ "//chrome/browser/ui/webui/aero_notes" ]
 +  }
 +
@@ -152,9 +152,9 @@ editor e aba única ficam para B2-B6.
  #include "chrome/browser/ui/webui/unexportable_keys_internals/unexportable_keys_internals_ui.h"
  #endif  // BUILDFLAG(IS_MAC)
  
-+#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
 +#include "chrome/browser/ui/webui/aero_notes/aero_notes_ui.h"
-+#endif  // BUILDFLAG(IS_LINUX)
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
 +
  #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
      BUILDFLAG(IS_CHROMEOS)
@@ -163,10 +163,10 @@ editor e aba única ficam para B2-B6.
    map.AddWebUIConfig(std::make_unique<VersionUIConfig>());
    map.AddWebUIConfig(std::make_unique<WebRtcLogsUIConfig>());
    map.AddWebUIConfig(std::make_unique<RegionalCapabilitiesInternalsUIConfig>());
-+#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
 +  // aerographene: config only; the page is built when a tab opens it.
 +  map.AddWebUIConfig(std::make_unique<AeroNotesUIConfig>());
-+#endif  // BUILDFLAG(IS_LINUX)
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
  #if BUILDFLAG(ENABLE_WEBUI_NTP)
    map.AddWebUIConfig(std::make_unique<NewTabPageUIConfig>());
  #endif  // BUILDFLAG(ENABLE_WEBUI_NTP)
@@ -176,7 +176,7 @@ editor e aba única ficam para B2-B6.
        <if expr="not is_android">
          <include name="IDR_AERO_NEWTAB_HTML" file="resources\aero_newtab\aero_newtab.html" type="BINDATA" />
        </if>
-+      <if expr="is_linux">
++      <if expr="is_linux or is_win">
 +        <include name="IDR_AERO_NOTES_HTML" file="resources\aero_notes\notes.html" type="BINDATA" />
 +        <include name="IDR_AERO_NOTES_CSS" file="resources\aero_notes\notes.css" type="BINDATA" />
 +        <include name="IDR_AERO_NOTES_JS" file="resources\aero_notes\notes.js" type="BINDATA" />

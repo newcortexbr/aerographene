@@ -12,7 +12,7 @@ listDir(rel), readNote(rel); toda mensagem confere frame principal com
 origem chrome://notes (como o terminal); I/O em base::ThreadPool (MayBlock) via
 vault_reader, que recusa caminho malformado e symlink para fora. Pref de
 perfil aerographene.notes.vault_path (FilePath, vazio = nenhuma), registrada
-em chrome/browser/prefs/browser_prefs.cc (Linux). Nota não UTF-8 é recusada.
+em chrome/browser/prefs/browser_prefs.cc (Linux e Windows). Nota não UTF-8 é recusada.
 Página: árvore lateral sob demanda, visualização Markdown por markdown.js,
 renderizador mínimo próprio que só cria nós DOM (createElement/textContent):
 HTML cru da nota vira texto, links só http(s)/mailto, [[wikilinks]] abrem a
@@ -23,6 +23,10 @@ texto puro. Nenhum sink de Trusted Types é usado. Desvio do plano:
 mensagens WebUI em vez de Mojo (bindings Mojo de WebUI geram TS e exigem o
 pipeline build_webui); mesma fronteira, só a página da WebUI fala com o
 handler. markdown-it não foi vendorizado (exigiria mudar build/inner.sh).
+D3b (Windows): página e pref registradas; sem leitor confinado
+(kVaultReadSupported false até a D3c), listDir/readNote respondem
+"unsupported" e a página mostra "leitura ... ainda não disponível neste
+sistema". Caminho da vault enviado à página em UTF-8 (WideToUTF8 no Windows).
 
 --- a/chrome/browser/browser_resources.grd
 +++ b/chrome/browser/browser_resources.grd
@@ -31,21 +35,21 @@ handler. markdown-it não foi vendorizado (exigiria mudar build/inner.sh).
          <include name="IDR_AERO_NOTES_CSS" file="resources\aero_notes\notes.css" type="BINDATA" />
          <include name="IDR_AERO_NOTES_JS" file="resources\aero_notes\notes.js" type="BINDATA" />
 +        <include name="IDR_AERO_NOTES_MARKDOWN_JS" file="resources\aero_notes\markdown.js" type="BINDATA" />
+       </if>
+       <if expr="is_linux">
          <include name="IDR_AERO_TERMINAL_HTML" file="resources\aero_terminal\terminal.html" type="BINDATA" />
-         <include name="IDR_AERO_TERMINAL_CSS" file="resources\aero_terminal\terminal.css" type="BINDATA" />
-         <include name="IDR_AERO_TERMINAL_JS" file="resources\aero_terminal\terminal.js" type="BINDATA" />
 --- a/chrome/browser/prefs/browser_prefs.cc
 +++ b/chrome/browser/prefs/browser_prefs.cc
 @@ -1792,6 +1792,12 @@
                            const std::string& locale) {
    TRACE_EVENT0("browser", "chrome::RegisterProfilePrefs");
    // User prefs. Please keep this list alphabetized.
-+#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
 +  // aerographene: vault folder of chrome://notes, empty = none chosen
 +  // (aerographene::notes::kVaultPathPref, aero_notes/notes_handler.h).
 +  registry->RegisterFilePathPref("aerographene.notes.vault_path",
 +                                 base::FilePath());
-+#endif  // BUILDFLAG(IS_LINUX)
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
    AccessibilityLabelsService::RegisterProfilePrefs(registry);
    registry->RegisterBooleanPref(prefs::kRendererAccessibilityEnabled, true);
    AccessibilityUIMessageHandler::RegisterProfilePrefs(registry);
@@ -307,7 +311,7 @@ handler. markdown-it não foi vendorizado (exigiria mudar build/inner.sh).
  
  const MIN_W = 160;
  const MAX_W = 560;
-@@ -52,3 +52,174 @@
+@@ -52,3 +52,178 @@
  }
  
  initSplitter();
@@ -362,7 +366,9 @@ handler. markdown-it não foi vendorizado (exigiria mudar build/inner.sh).
 +  try {
 +    entries = await send('listDir', path);
 +  } catch (e) {
-+    message(container, 'pasta indisponível');
++    message(container, e === 'unsupported' ?
++        'leitura da vault ainda não disponível neste sistema' :
++        'pasta indisponível');
 +    return;
 +  }
 +  container.replaceChildren();
@@ -411,7 +417,9 @@ handler. markdown-it não foi vendorizado (exigiria mudar build/inner.sh).
 +  try {
 +    text = await send('readNote', path);
 +  } catch (e) {
-+    noteTitle.textContent = `${baseName(path)} (não foi possível ler)`;
++    noteTitle.textContent = e === 'unsupported' ?
++        `${baseName(path)} (leitura ainda não disponível neste sistema)` :
++        `${baseName(path)} (não foi possível ler)`;
 +    return;
 +  }
 +  current = path;
@@ -532,7 +540,7 @@ handler. markdown-it não foi vendorizado (exigiria mudar build/inner.sh).
    ]
 --- /dev/null
 +++ b/chrome/browser/ui/webui/aero_notes/notes_handler.cc
-@@ -0,0 +1,212 @@
+@@ -0,0 +1,229 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -541,7 +549,9 @@ handler. markdown-it não foi vendorizado (exigiria mudar build/inner.sh).
 +#include <utility>
 +
 +#include "base/functional/bind.h"
++#include "base/strings/utf_string_conversions.h"
 +#include "base/task/thread_pool.h"
++#include "build/build_config.h"
 +#include "chrome/browser/ui/select_file_policy/chrome_select_file_policy.h"
 +#include "components/prefs/pref_service.h"
 +#include "content/public/browser/render_frame_host.h"
@@ -607,8 +617,13 @@ handler. markdown-it não foi vendorizado (exigiria mudar build/inner.sh).
 +base::Value NotesHandler::VaultInfo() const {
 +  const base::FilePath root = prefs_->GetFilePath(kVaultPathPref);
 +  base::DictValue info;
++#if BUILDFLAG(IS_WIN)
++  info.Set("path", base::WideToUTF8(root.value()));
++  info.Set("name", base::WideToUTF8(root.BaseName().value()));
++#else
 +  info.Set("path", root.value());
 +  info.Set("name", root.BaseName().value());
++#endif
 +  return base::Value(std::move(info));
 +}
 +
@@ -674,6 +689,11 @@ handler. markdown-it não foi vendorizado (exigiria mudar build/inner.sh).
 +    RejectJavascriptCallback(args[0], base::Value("noVault"));
 +    return;
 +  }
++  if (!kVaultReadSupported) {
++    // Windows until D3c: no confined reader yet, nothing is read.
++    RejectJavascriptCallback(args[0], base::Value("unsupported"));
++    return;
++  }
 +  base::ThreadPool::PostTaskAndReplyWithResult(
 +      FROM_HERE, kIoTraits,
 +      base::BindOnce(
@@ -714,6 +734,11 @@ handler. markdown-it não foi vendorizado (exigiria mudar build/inner.sh).
 +  const base::FilePath root = prefs_->GetFilePath(kVaultPathPref);
 +  if (root.empty()) {
 +    RejectJavascriptCallback(args[0], base::Value("noVault"));
++    return;
++  }
++  if (!kVaultReadSupported) {
++    // Windows until D3c: no confined reader yet, nothing is read.
++    RejectJavascriptCallback(args[0], base::Value("unsupported"));
 +    return;
 +  }
 +  base::ThreadPool::PostTaskAndReplyWithResult(
