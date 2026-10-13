@@ -1,14 +1,3 @@
-<!-- bench-charts: autorizado pelo dono; gerado por bench/charts.py -->
-<p align="center">
-  <img src="docs/img/bench/warm.svg" alt="startup, existing profile" width="440">
-  <img src="docs/img/bench/first.svg" alt="startup, new profile" width="440">
-</p>
-<p align="center">
-  <img src="docs/img/bench/tabs_all.svg" alt="10 tabs load time" width="440">
-  <img src="docs/img/bench/tabs_pss.svg" alt="10 tabs memory" width="440">
-</p>
-<p align="center"><sub>v0.2 baseline, Comet Lake i3-10110U, interleaved runs, median, lower is better. Details and limits: <a href="docs/BASELINE.md">BASELINE</a>.</sub></p>
-
 <p align="center">
   <img src="branding/ascii/wordmark-simple.svg" alt="aerographene" width="720">
 </p>
@@ -21,6 +10,16 @@
   <img alt="AVX1-only coming soon" src="https://img.shields.io/badge/AVX1--only-coming%20soon-d29922?style=flat-square">
   <a href="LICENSE"><img alt="GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0-8a8f98?style=flat-square"></a>
 </p>
+
+<p align="center">
+  <img src="docs/img/bench/warm.svg" alt="startup, existing profile" width="440">
+  <img src="docs/img/bench/first.svg" alt="startup, new profile" width="440">
+</p>
+<p align="center">
+  <img src="docs/img/bench/tabs_all.svg" alt="10 tabs load time" width="440">
+  <img src="docs/img/bench/tabs_pss.svg" alt="10 tabs memory" width="440">
+</p>
+<p align="center"><sub>v0.2 baseline, Comet Lake i3-10110U, interleaved runs, median, lower is better. Details and limits: <a href="docs/BASELINE.md">BASELINE</a>.</sub></p>
 
 <p align="center">
   <img src="docs/img/default-sidebar.webp" alt="default theme, sidebar" width="49%">
