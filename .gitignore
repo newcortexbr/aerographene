@@ -1,3 +1,4 @@
 bench/browsers/
 bench/out/
 __pycache__/
+bench/cache/

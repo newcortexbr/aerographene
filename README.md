@@ -12,12 +12,8 @@
 </p>
 
 <p align="center">
-  <img src="docs/img/bench/warm.svg" alt="startup, existing profile" width="440">
-  <img src="docs/img/bench/first.svg" alt="startup, new profile" width="440">
-</p>
-<p align="center">
-  <img src="docs/img/bench/tabs_all.svg" alt="10 tabs load time" width="440">
-  <img src="docs/img/bench/tabs_pss.svg" alt="10 tabs memory" width="440">
+  <img src="docs/img/bench/startup.svg" alt="startup: existing profile and new profile" width="440">
+  <img src="docs/img/bench/tabs.svg" alt="10 tabs: load time and memory" width="440">
 </p>
 <p align="center"><sub>v0.2 baseline, Comet Lake i3-10110U, interleaved runs, median, lower is better. Details and limits: <a href="docs/BASELINE.md">BASELINE</a>.</sub></p>
 
