@@ -641,10 +641,10 @@ index b3975fd..2c71456 100644
  };
 diff --git a/chrome/browser/ui/webui/aero_terminal/terminal_session_win.cc b/chrome/browser/ui/webui/aero_terminal/terminal_session_win.cc
 new file mode 100644
-index 0000000..7e3e750
+index 0000000..baff3c0
 --- /dev/null
 +++ b/chrome/browser/ui/webui/aero_terminal/terminal_session_win.cc
-@@ -0,0 +1,547 @@
+@@ -0,0 +1,543 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -971,12 +971,9 @@ index 0000000..7e3e750
 +
 +  STARTUPINFOEXW si = {};
 +  si.StartupInfo.cb = sizeof(si);
-+  // Standard handles come from the pseudo console only, never from the
-+  // browser's own (possibly redirected) stdio.
-+  si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-+  si.StartupInfo.hStdInput = INVALID_HANDLE_VALUE;
-+  si.StartupInfo.hStdOutput = INVALID_HANDLE_VALUE;
-+  si.StartupInfo.hStdError = INVALID_HANDLE_VALUE;
++  // Zeroed STARTUPINFOEX without STARTF_USESTDHANDLES, as in the Microsoft
++  // "Creating a Pseudoconsole session" sample: the standard handles come from
++  // the pseudo console attribute only.
 +  si.lpAttributeList = attrs;
 +
 +  base::NativeEnvironmentString env = ShellEnvironment(
@@ -1160,15 +1157,14 @@ index 0000000..7e3e750
 +}
 +
 +std::optional<int> TerminalSession::Terminate(base::TimeDelta grace) {
++  (void)grace;
 +  if (terminated_) {
 +    return std::nullopt;
 +  }
 +  terminated_ = true;
 +  // No SIGHUP on Windows: the graceful path (ClosePseudoConsole's
-+  // CTRL_CLOSE_EVENT) can hold the caller for seconds on Windows 10. Give a
-+  // shell that is already exiting `grace`, then kill the whole job.
-+  ::WaitForSingleObject(process_.Handle(),
-+                        static_cast<DWORD>(grace.InMilliseconds()));
++  // CTRL_CLOSE_EVENT) can hold the caller for seconds on Windows 10, so kill
++  // the whole job first; nothing is waited for politely.
 +  ::TerminateJobObject(job_.get(), 1);
 +  // Bounded: a process stuck in the kernel must not hang shutdown.
 +  ::WaitForSingleObject(process_.Handle(), 2000);
