@@ -13,7 +13,7 @@ uma só série de patches para Linux e Windows; Windows não perde função. Pat
 - `gn gen out/Win` passa sem passo manual; `chrome_elf.dll` linka com lld-link (`PE32+ ... x86-64`).
 - D3b: espaços (uma janela por space, troca no lugar), raio e fonte do tema, `--import-theme`, repositório de temas, tokens e import `.aerotheme` valem no Windows; o código compila no `out/Win` (objetos, sem link do `chrome`). Dados do tema no Windows: `%LOCALAPPDATA%\aerographene\theme.json` e `...\themes\` (provisório até a D3d). Fonte reserva do pixelized no Windows: Consolas.
 - leitura de arquivos de tema no Windows (`theme.json`, `.aerotheme`, `theme.json` do repositório): `CreateFileW` com `FILE_FLAG_OPEN_REPARSE_POINT`; recusa pipe/console/dispositivo, symlink/junção e diretório (mais estrito que o Linux). Linux mantém `S_ISREG`, `O_NONBLOCK`, `lstat` e `O_NOFOLLOW`.
-- notas (`chrome://notes`) registradas no Windows, mas sem leitura da vault: o leitor confinado Windows é a D3c; até lá a página mostra "leitura da vault ainda não disponível neste sistema". Terminal: ConPTY + Job Object (D3e, `terminal-win.patch`; ver [terminal](terminal.md)), compila mas não foi executado no Windows.
+- D3c (13/10/2026): notas no Windows com leitura confinada (lista, leitura, busca, imagens, vigia); escrita responde "não suportado" (a página mostra "escrita ainda não disponível neste sistema"). Repositório de temas confinado. Detalhe em "confinamento (D3c)" abaixo. Terminal: ConPTY + Job Object (D3e, `terminal-win.patch`; ver [terminal](terminal.md)), compila mas não foi executado no Windows.
 
 ## branding Windows (D3d)
 
@@ -26,6 +26,20 @@ uma só série de patches para Linux e Windows; Windows não perde função. Pat
 - JetBrains Mono (SIL OFL 1.1, v2.304, Regular e Bold, `branding/fonts/jetbrains-mono/` com `OFL.txt`, sha256 do zip `6f6376c6...f7bbf`): fica em `<exe>\fonts\`, registrada como fonte privada do processo do navegador (`AddFontResourceExW`, `FR_PRIVATE`) quando o tema tem fonte (pixelized). Sem os arquivos, Consolas.
 - theme-scheme: não existe `ThemeServiceWin`; o `ThemeService::GetBrowserColorScheme` da classe base (patch `theme-scheme`) já vale no Windows.
 - limites: a fonte privada vale para a UI Views do processo do navegador; páginas web (renderers) e o WebUI não a enxergam (precisariam de `@font-face`). Se o Skia/DirectWrite do Chromium enxerga uma fonte `FR_PRIVATE` não foi verificado (não há Windows de teste). `mini_installer` e instalador (D5) ainda não foram compilados.
+
+## confinamento (D3c)
+
+vale para a vault de notas (`aero_notes/vault_reader.cc`) e para o repositório de temas (`aerographene_theme_repo.cc`), só no ramo `IS_WIN`; Linux sem mudança de comportamento. APIs desde o Vista (`GetFinalPathNameByHandleW`, `GetFileInformationByHandleEx`, `CompareStringOrdinal`), nada exclusivo do Windows 11.
+
+- caminho percorrido componente a componente a partir da raiz; cada diretório fica aberto sem `FILE_SHARE_DELETE` até o fim da operação, então nada já conferido pode ser renomeado, apagado ou trocado por junção nesse intervalo.
+- cada componente abre com `FILE_FLAG_OPEN_REPARSE_POINT` e é recusado se for reparse point (symlink, junção, ponto de montagem, placeholder de nuvem): mais estrito que o Linux, que segue symlink que fica dentro da vault. A raiz da vault (escolha do usuário) pode ser junção e é seguida uma vez; a pasta do repositório de temas não pode.
+- só arquivo comum em disco (`FILE_TYPE_DISK`, sem `DIRECTORY`/`DEVICE`), com teto de tamanho antes e durante a leitura.
+- o nome final (`GetFinalPathNameByHandleW`, normalizado) tem de ser igual ao pedido sem caixa: apelido 8.3 (`NOTAS~1`) é recusado. Comparação sem caixa como o NTFS (`CompareStringOrdinal`).
+- recusados antes de abrir: `:` (ADS), `<>"/\|?*`, controle, ponto ou espaço final, nomes reservados (`CON`, `PRN`, `AUX`, `NUL`, `COM0-9`, `LPT0-9`, também `¹²³`, `CONIN$`, `CONOUT$`, `CLOCK$`, com ou sem extensão e com espaço antes do ponto). No tema essas regras entram em `IsValidThemeName` (tema chamado `CON` é inválido no Windows).
+- raiz/repositório precisa ser `X:\...`: UNC (`\\servidor\`), `\\?\` e `\\.\` recusados. Unidade de rede mapeada com letra não é detectada.
+- listagem da vault enumera pelo handle aberto (`GetFileInformationByHandleEx(FileIdBothDirectoryInfo)`), não por caminho; reparse points e nomes que o Win32 não reabre iguais não aparecem.
+- tema: instalar não substitui junção/arquivo com o nome do tema (`kIoError`); varredura e busca sem caixa ignoram reparse points. A base `%LOCALAPPDATA%\aerographene` acima do repositório não é conferida.
+- não suportado no Windows: escrita da vault (salvar, criar, renomear, apagar), `kVaultWriteSupported = false`. Caminhos acima de `MAX_PATH` falham (sem `\\?\` interno).
 
 ## o que não está no repositório
 
@@ -81,5 +95,5 @@ arquivo novo sempre entra por temporário + `mv`, então nada é escrito atravé
 - série única Linux+Windows (dono, 13/10/2026); D3b feita (guardas `IS_LINUX || IS_WIN`, POSIX sob `#if`, ramo Win32 equivalente); próximas D3c–D3e no plano.
 - testes D3b no Linux: alvo temporário `aero_ui_tests` (overlay, fora da série), 42/42; `TerminateKillsWholeGroup` exige init que colhe zumbis (`docker run --init`).
 - D3d: branding no `windows-branding.patch` (nomes `aerographene`/`aerographene.exe`, dados em `%LOCALAPPDATA%\aerographene`, ícones do tema nos botões da janela, JetBrains Mono em `<exe>\fonts`); `.ico` e fontes entram por `build/win/apply_assets.sh`.
-- notas no Windows: `kVaultReadSupported` false até a D3c; nunca ler sem confinamento.
+- notas no Windows: leitura confinada ativa (D3c, `kVaultReadSupported` true), escrita não (`kVaultWriteSupported` false → "unsupported"). Patch `aerographene/windows-confine.patch` (fim da série) concentra o ramo Win32 da vault e do repositório de temas; testes Windows em `vault_reader_win_unittest.cc` e `aerographene_theme_repo_unittest.cc` (`Windows*`), escritos mas não executados (sem Windows no host).
 - o zip do toolchain é licenciado: nunca commitar, copiar para o repo ou publicar.

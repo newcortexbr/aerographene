@@ -47,7 +47,7 @@ aba única: `chrome::Navigate` trata `chrome://notes` (disposição atual, nova 
 - salvar: arquivo temporário oculto (`.aero-N.tmp`) na mesma pasta, `fsync`, `rename` sobre o original; o modo do arquivo é mantido. O mtime é conferido antes e de novo logo antes do `rename`. Janela restante: uma escrita externa nesse intervalo de microssegundos seria sobrescrita.
 - criar usa `O_CREAT|O_EXCL|O_NOFOLLOW` (nunca substitui nem segue um symlink pendente); renomear usa `renameat2(RENAME_NOREPLACE)` (com verificação prévia se o sistema de arquivos não suportar) e nunca sobrescreve; apagar é `unlink`.
 - só nomes `.md`, sem ponto inicial (a lista esconde ocultos), até 255 bytes; só arquivos comuns; uma entrada que é symlink não pode ser renomeada nem apagada pela página; diretório não pode ser criado, renomeado nem apagado; destino em pasta inexistente é recusado.
-- Windows: o código novo fica atrás das guardas existentes e responde `unsupported` (como a leitura), sem fallback sem confinamento, até o leitor confinado da D3c.
+- Windows: escrita não suportada (`kVaultWriteSupported` false): salvar, criar, renomear e apagar respondem `unsupported` e a página mostra "escrita ainda não disponível neste sistema". A leitura é confinada desde a D3c (ver "Windows (D3c)").
 
 ## watcher, busca e imagens (B5)
 
@@ -62,14 +62,20 @@ aba única: `chrome::Navigate` trata `chrome://notes` (disposição atual, nova 
 - imagens passam pelo mesmo confinamento das notas (`ResolveInVault` + `openat` `O_NOFOLLOW` por componente, só arquivo comum, FIFO não trava); o browser devolve bytes em base64 e a página os mostra como URL `data:`. A CSP da página passou a `img-src 'self' data:` (nada de rede). Imagens ficam em cache por nota (até 48 Mi caracteres) e o cache é limpo a cada mudança na vault.
 - busca e `FindVaultFileByName` andam pela árvore visível (mesmos filtros da listagem) com limites de arquivos, bytes e profundidade, então symlink em laço ou pasta enorme não prende o worker. Trechos e caminhos devolvidos são UTF-8 válido (o trecho é realinhado se o corte cai no meio de um caractere); nomes de arquivo que não são UTF-8 são ignorados na listagem, busca e imagens, porque `base::Value` exige UTF-8.
 - o watcher usa a raiz real da vault; ele só avisa "mudou" (sem caminho), então a página nunca recebe nomes de arquivos por esse canal. Limitação: inotify recursivo observa também as pastas ocultas (cada uma gasta um watch), só o aviso é filtrado; vaults com milhares de pastas podem bater no limite do sistema.
-- Windows: `watchVault` responde `false`, busca e imagem respondem `unsupported`/vazio até a D3c.
+- Windows (D3c): watcher (`FilePathWatcher` recursivo), busca e imagens funcionam pela leitura confinada; ver "Windows (D3c)".
+
+## Windows (D3c)
+
+- lista, leitura, busca, imagens e watcher funcionam; escrita não (acima).
+- confinamento próprio do Windows, mais estrito que o Linux: nenhum reparse point (symlink, junção) abaixo da raiz é seguido nem listado; cada pasta do caminho fica aberta sem permitir apagar/renomear enquanto a leitura acontece; nome 8.3 (`NOTAS~1`), `:` (fluxos alternativos), ponto/espaço final, nomes reservados (`CON`, `NUL`, `COM1`...) e raiz UNC ou `\\?\` são recusados. Maiúsculas/minúsculas não importam, como no NTFS. Detalhe em `docs/wiki/windows.md`, seção "confinamento (D3c)".
+- nomes que o Windows não abre de volta iguais não aparecem na árvore.
 
 ## como funciona
 
 - custo zero no startup: só a entrada de configuração da página é registrada; controlador e recursos nascem quando uma aba abre `aerographene://notes`.
 - desabilitada em janelas anônimas e no perfil convidado.
 - sem rede: a política de segurança (CSP) da página bloqueia tudo que não seja o próprio HTML, CSS e JS dela (`default-src 'none'`, `connect-src 'none'`, sem script inline, Trusted Types ligado).
-- só Linux.
+- Linux e Windows (no Windows sem escrita, D3c).
 
 ## render do Markdown
 
@@ -104,7 +110,7 @@ o antigo limite (alguém trocar um componente por symlink entre conferir e abrir
 - `chrome://notes` = `AeroNotesUI` + `NotesHandler` (WebUIMessageHandler, `chrome.send`: `getVault`, `pickVault`, `listDir`, `readNote` (devolve `{text, mtime}`), `writeNote(path, text, expectedMtime|null)`, `createNote(path, text)`, `renameNote(from, to)`, `deleteNote(path)` (estes devolvem `{status, mtime}`; `status` = `ok|conflict|notFound|exists|invalid|tooLarge|unsupported|ioError`); resposta por `cr.webUIResponse`, shim próprio em `notes.js`). Pref `aerographene.notes.vault_path` (FilePath) registrada em `browser_prefs.cc` sob `IS_LINUX`. Sem Mojo (desvio no plano, seção B), `AeroNotesUIConfig` registrado em `chrome_web_ui_configs.cc` sob `BUILDFLAG(IS_LINUX)`; recursos `IDR_AERO_NOTES_{HTML,CSS,JS}` em `chrome/browser/browser_resources.grd`; desabilitada em off-the-record.
 - título da aba = sempre `o: <nome da vault>` (`document.title` só em `showVault`); nunca o arquivo aberto (decisão do dono, 13/10/2026).
 - escrita: `WriteVaultNote/CreateVaultNote/RenameVaultNote/DeleteVaultNote` + `OpenVaultFileNoFollow` (openat O_NOFOLLOW por componente) em `vault_reader.*`; token de conflito = mtime em µs; Windows responde `kUnsupported`. Patch `notes-editor` vem logo depois de `notes-render` na série; recurso `IDR_AERO_NOTES_EDITOR_JS`.
-- `aerographene::notes::{ResolveInVault, ListVaultDir, ReadVaultNote}` em `aero_notes/vault_reader.*`, I/O bloqueante (sequência MayBlock); alvo `aero_notes:unit_tests` ligado a `chrome/test:unit_tests` no Linux.
+- `aerographene::notes::{ResolveInVault, ListVaultDir, ReadVaultNote}` em `aero_notes/vault_reader.*`, I/O bloqueante (sequência MayBlock); alvo `aero_notes:unit_tests` ligado a `chrome/test:unit_tests` no Linux e, com `vault_reader_win_unittest.cc` no lugar dos testes POSIX, no Windows (D3c, `windows-confine.patch`).
 - recursos: `IDR_AERO_NOTES_MARKDOWN_JS`. Novos `IDR_` no `browser_resources.grd` exigem regenerar `gen/tools/gritsettings/default_resource_ids` (ação `update_resource_ids`) antes do grit, senão dá `IdRangeOverlap`.
 - patches: `notes-webui` → `terminal-webui` → `notes-vault-reader` → `terminal-pty` → `notes-render` → `terminal-xterm` → `terminal-bridge` (compartilham blocos do grd, configs, `chrome/test/BUILD.gn`); ordem importa.
 - testes rápidos sem `unit_tests`: executável temporário `aero_ui_tests` no overlay (main próprio, deps `base`, `gtest` e os `unit_tests` aero), compilando só as saídas ausentes e linkando à mão.
