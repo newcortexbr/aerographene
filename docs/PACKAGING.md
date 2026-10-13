@@ -107,10 +107,18 @@ Sandbox: a partir do branch `fix/branding-gaps`, `build/inner.sh` copia `out/Def
 StartupWMClass: `aerographene` (nome do desktop file; padrão do binário desde `patches/aerographene/branding-desktop.patch`, ver abaixo). NÃO verificado: o app_id/WM_CLASS real só aparece com a janela aberta. Verificar: `xprop WM_CLASS` (X11), `swaymsg -t get_tree` ou `hyprctl clients` (Wayland); ajuste o valor se diferir.
 
 Pendências:
-- checksums todos `SKIP` (release inexistente; rodar `updpkgsums`).
+- fontes auxiliares do PKGBUILD com `SKIP` (só o tarball tem sha256, passado por `build-native.sh`).
 - ícone só 48x48 (`product_logo_48.png`, placeholder).
 - nenhuma tag existe no repositório.
-- `namcap` e `makepkg` não rodados.
+- `namcap` rodou (13/10/2026, `namcap-<cpu>.txt` na release): sem erro que bloqueie; avisos esperados de dependências não declaradas (libs Qt dos `libqt5_shim`/`libqt6_shim`, carregados por dlopen e opcionais) e setuid do `chrome-sandbox`.
+
+### teste dos pacotes (13/10/2026)
+
+Cezanne, containers, entrada: artifact da run 38303973794 (`aerographene-0.1.0-...-x86_64_linux.tar.zst`, v0.1.0 + série v0.2), pacotes gerados como `0.3.0` avx2 por `build-native.sh`; `packaging/test-install.sh` em `archlinux`, `ubuntu:24.04` e `fedora:latest`:
+
+- instala (dependências resolvidas pelo gerenciador), `chrome-sandbox` 4755 root, `ldd chrome` sem faltas, `aerographene --version` = `aerographene 0.1.0 (Chromium 154.0.8037.97)`, `--headless --dump-dom about:blank` devolve DOM, remove sem sobrar arquivo do pacote.
+- observado: ao rodar como root o navegador cria `/opt/aerographene/extensions` (vazio), que sobra após a remoção em qualquer formato; o teste avisa e não reprova.
+- não testado: avx1 (sem artifact), interface gráfica, Debian/Ubuntu antigos, `pacman -U` fora de container limpo.
 
 ## ícones e identidade visual (`branding/`)
 

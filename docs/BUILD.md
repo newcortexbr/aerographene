@@ -39,11 +39,11 @@ Para forçar do zero: apagar `portablelinux/build/src`.
 
 Item 12 do `SCOPE.md`. A versão `vX.Y.Z` do aerographene (v0.x.x enquanto não houver release estável; primeira `v0.1.0`) é independente da do Chromium. Fonte única: `AERO_VERSION` em `build/config.sh`; `patches/aerographene/branding-version.patch` (`kVersion` em `chrome/common/aero_version.h`) e `pkgver` do PKGBUILD acompanham à mão, e o `inner.sh` aborta se o header divergir do `config.sh`. Subir a versão só recompila `chrome_main_delegate.cc` e `version_ui.cc` (+ link), não a árvore. Para subir a versão: mudar os três, a tag do `release` e o `.SRCINFO`.
 
-1. rodar o workflow `build` e anotar o `run_id`.
-2. disparar `release` (`workflow_dispatch`) com `run_id` e `tag` (`vX.Y.Z`): baixa o artifact `aerographene-linux-x86_64`, renomeia para `aerographene-X.Y.Z-x86_64_linux.tar.zst`, gera `SHA256SUMS` e cria a release como draft. Publicar à mão depois de conferir.
-3. `packaging/arch/PKGBUILD` consome esse tarball (instala em `/opt/aerographene`, symlink `/usr/bin/aerographene`, GPL3). Com a release publicada: ajustar `pkgver`, rodar `updpkgsums` e `makepkg --printsrcinfo > .SRCINFO`. Hoje os sha256 são `SKIP`. O repo é privado, então baixar o asset exige token.
+1. rodar o workflow `build` (input `cpu`: `avx2` padrão, `avx1` = `-march=ivybridge`) e anotar o `run_id`. `AERO_CPU`/`MARCH` (env; `build/config.sh`) escolhem o alvo: avx2 usa `out/Default` e `~/aerographene-ccache`; avx1 usa `out/Avx1` e `~/aerographene-ccache-avx1` (o gn fica em `out/Default/gn`). Alternar re-patcheia o `BUILD.gn` da árvore compartilhada (o `-march` entra no hash da série), mas a linha de comando de cada `out/` não muda. Push em `main` compila só avx2.
+2. disparar `release` (`workflow_dispatch`) com `run_id`, `tag` (`vX.Y.Z`) e `cpu`: baixa o artifact, gera `aerographene-vX.Y.Z-<cpu>-linux.{tar.zst,pkg.tar.zst,deb,rpm}` com `packaging/build-native.sh`, `SHA256SUMS` e cria a release como draft (ou acrescenta ao draft da tag). Publicar à mão depois de conferir.
+3. o `.pkg.tar.zst` vem do `packaging/arch/PKGBUILD` (instala em `/opt/aerographene`, wrapper `/usr/bin/aerographene`, GPL-3.0-only) rodado em container sobre o tarball local; deb e rpm vêm da mesma árvore via nfpm. Ver `docs/PACKAGING.md` e `docs/wiki/pacotes.md`. Para subir a versão do produto o `pkgver` não precisa mais ser editado (vem da tag via `AERO_PKGVER`).
 
-Não testado: `makepkg` completo e `namcap` (não há release ainda).
+`makepkg`, `namcap`, nfpm e instalação em containers testados em 13/10/2026 (`docs/PACKAGING.md`). O release.yml completo (dispatch) não foi executado.
 
 ## branding: versão e strings da UI
 

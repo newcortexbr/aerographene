@@ -72,7 +72,8 @@ I IMMENSELY thank projects such as Ungoogled-Chromium, Helium, Thorium and Brave
   - 🚧 v0.2 baseline against Helium: pending
 - ⬜ v0.3
   - ⬜ Windows 11 ([ADR 0008](docs/adr/0008-windows-11.md))
-  - ⬜ x86-64-v2 + AVX build for CPUs without AVX2 ([ADR 0009](docs/adr/0009-build-ivy-bridge.md))
+  - 🚧 x86-64-v2 + AVX build for CPUs without AVX2 ([ADR 0009](docs/adr/0009-build-ivy-bridge.md)): build input `cpu=avx1` (separate `out/` and ccache) written; the first avx1 build has not run
+  - 🚧 native packages from the compiled tarball: `.pkg.tar.zst` (PKGBUILD), `.deb`, `.rpm` ([pacotes](docs/wiki/pacotes.md)); install/remove/`--version` tested in Arch, Ubuntu 24.04 and Fedora containers, release workflow not yet run
   - ⬜ Obsidian and terminals inside workspaces
   - ⬜ Google Sync with own API keys ([ADR 0006](docs/adr/0006-google-sync-com-chaves-proprias.md))
 
@@ -81,6 +82,8 @@ I IMMENSELY thank projects such as Ungoogled-Chromium, Helium, Thorium and Brave
 the wiki lives in [`docs/wiki/`](docs/wiki/), in pt-BR.
 
 - [temas](docs/wiki/temas.md): how themes load (built-in theme, `theme.json` tokens, extension themes), where to change them and how to make your own. Ends with a dense spec you can paste into your AI agent so it writes a valid theme for you.
+
+- [pacotes](docs/wiki/pacotes.md): release assets (`tar.zst`, `pkg.tar.zst`, `deb`, `rpm`, per CPU target), how to install and remove, what gets installed, how the packages are built. Ends with a summary for agents.
 
 for builders: [scope](docs/SCOPE.md), [build](docs/BUILD.md), [packaging](docs/PACKAGING.md), [decisions](docs/adr/), [patch origins](patches/README.md).
 
