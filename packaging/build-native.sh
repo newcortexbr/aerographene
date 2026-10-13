@@ -54,7 +54,7 @@ docker run --rm \
         mkdir /out/stage
         bsdtar -xpf "$pkg" -C /out/stage
         rm -f /out/stage/.PKGINFO /out/stage/.BUILDINFO /out/stage/.MTREE /out/stage/.INSTALL
-        (cd /out/stage && find . -mindepth 1 \( -type f -o -type l \) -printf "%y\t%m\t%P\t%l\n" | LC_ALL=C sort) > /out/manifest.tsv
+        (cd /out/stage && find . -mindepth 1 \( -type f -o -type l -o -type d \) -printf "%y\t%m\t%P\t%l\n" | LC_ALL=C sort) > /out/manifest.tsv
         chown -R "$HOST_UID:$HOST_GID" /out
     '
 
@@ -63,6 +63,10 @@ echo "== 2/3 nfpm.yaml a partir do manifesto"
     cat "$here/nfpm.yaml"
     awk -F'\t' '
         $1 == "f" { printf "  - src: /out/stage/%s\n    dst: /%s\n    file_info:\n      mode: 0%s\n", $3, $3, $2; next }
+        # diretórios só dos próprios caminhos do aerographene (o rpm precisa possuí-los para remover)
+        $1 == "d" { if ($3 ~ /^opt\/aerographene/ || $3 ~ /^usr\/share\/licenses\/aerographene/)
+                        printf "  - dst: /%s\n    type: dir\n    file_info:\n      mode: 0755\n", $3
+                    next }
         $1 == "l" { printf "  - src: %s\n    dst: /%s\n    type: symlink\n", $4, $3; next }
     ' "$work/manifest.tsv"
 } > "$work/nfpm.run.yaml"

@@ -83,11 +83,16 @@ Com `aerographene/branding.patch` e `aerographene/branding-version.patch`, `--ve
 
 Fluxo de release (cada passo exige pedido explícito do dono: dispatch de workflow, tag, publicação):
 
-1. `build.yml` (dispatch) gera o artifact `aerographene-linux-x86_64`.
+1. `build.yml` (dispatch; input `cpu`: `avx2` padrão, `avx1`) gera o artifact `aerographene-linux-x86_64` (avx2) ou `aerographene-linux-x86_64-avx1`.
 2. `smoke.yml` valida o artifact.
-3. `release.yml` (inputs `run_id`, `tag` vX.Y.Z) cria release em draft com o tarball renomeado e `SHA256SUMS`.
-4. Com o tarball acessível: `updpkgsums` em `packaging/arch/` (troca os `SKIP`).
-5. Dono publica o draft; só então `makepkg`.
+3. `release.yml` (inputs `run_id`, `tag` vX.Y.Z, `cpu`) roda `packaging/build-native.sh` e cria a release em draft (ou acrescenta ao draft existente da mesma tag; recusa release já publicada) com `aerographene-vX.Y.Z-<cpu>-linux.{tar.zst,pkg.tar.zst,deb,rpm}`, `SHA256SUMS` e `namcap-<cpu>.txt`. Um dispatch por cpu.
+4. Dono publica o draft. Nada aqui publica.
+
+O pacote Arch sai do próprio `packaging/arch/PKGBUILD`, rodado em container `archlinux:base-devel` sobre o tarball local (nada é baixado): `build-native.sh` copia o tarball para o nome que o `source=` espera e passa `AERO_PKGVER` (versão da tag) e `AERO_TARBALL_SHA256` (conferido pelo makepkg). Sem essas variáveis o PKGBUILD continua utilizável à mão: baixa o asset `aerographene-vX.Y.Z-avx2-linux.tar.zst` da release e usa `SKIP`.
+
+`.deb` e `.rpm`: nfpm (`goreleaser/nfpm:v2.48.0` fixado por digest) com `packaging/nfpm.yaml`. O script extrai o `.pkg.tar.zst` (modos preservados), gera o manifesto de arquivos e anexa a lista de `contents:` ao cabeçalho do YAML, então os três formatos têm a mesma árvore. Dependências por distro estão em `overrides:` do `nfpm.yaml`. Sem scripts de pós-instalação: os triggers de MIME, desktop e ícones do dpkg/rpm já atualizam os caches (no Arch, hooks do pacman).
+
+Teste: `packaging/test-install.sh <dir> <cpu> <versão>` instala e remove em containers `archlinux`, `ubuntu:24.04` e `fedora:latest`. Resultado de 13/10/2026 no Cezanne com o artifact da run 38303973794 (v0.1.0 + série v0.2): ver `docs/wiki/pacotes.md` e a seção "teste dos pacotes" abaixo.
 
 Fontes: o `LICENSE` é cópia local da raiz (`packaging/arch/LICENSE`), pois makepkg resolve fontes relativas ao diretório do PKGBUILD e a URL raw do repo privado falharia sem token. Se o `LICENSE` da raiz mudar, recopie.
 
