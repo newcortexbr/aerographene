@@ -7,7 +7,7 @@ _chromium=154.0.8037.97   # base do ungoogled-chromium; independente do pkgver
 pkgdesc="Navegador baseado em ungoogled-chromium ${_chromium}"
 arch=('x86_64')
 url="https://github.com/newcortexbr/aerographene"
-license=('GPL3')
+license=('GPL-3.0-only')
 depends=('gtk3' 'nss' 'alsa-lib' 'libxss' 'libcups' 'libxkbcommon' 'mesa'
          'dbus' 'at-spi2-core' 'cairo' 'pango' 'expat' 'libx11' 'libxcb' 'libxext'
          'libxcomposite' 'libxdamage' 'libxfixes' 'libxrandr' 'systemd-libs'

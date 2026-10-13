@@ -15,7 +15,7 @@ description: |
   Série própria de patches sobre ungoogled-chromium, com partes do Helium.
 vendor: newcortexbr
 homepage: https://github.com/newcortexbr/aerographene
-license: GPL-3.0-or-later
+license: GPL-3.0-only
 
 # Dependências por distro (espelham o depends do PKGBUILD). Alternativas `a | b` cobrem o
 # sufixo t64 do Ubuntu 24.04 / Debian 13 e os nomes sem sufixo de Ubuntu 22.04.

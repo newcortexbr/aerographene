@@ -9,7 +9,7 @@
 set -euo pipefail
 
 ARCH_IMAGE="archlinux:base-devel"
-NFPM_IMAGE="goreleaser/nfpm:v2.48.0"
+NFPM_IMAGE="goreleaser/nfpm:v2.48.0@sha256:d57a1452e7a019896b355f7b1ec67262278f6c503631f652d4fce7aef9ac8df7"
 
 tarball="${1:?uso: build-native.sh <tarball.tar.zst> <avx2|avx1> <X.Y.Z> [saída]}"
 cpu="${2:?cpu: avx2 ou avx1}"
@@ -70,7 +70,7 @@ grep -q 'mode: 04755' "$work/nfpm.run.yaml" || echo "aviso: chrome-sandbox 4755 
 
 echo "== 3/3 nfpm ($NFPM_IMAGE)"
 for fmt in deb rpm; do
-    docker run --rm -e VERSION="$ver" -v "$work:/out" "$NFPM_IMAGE" \
+    docker run --rm --user "$(id -u):$(id -g)" -e VERSION="$ver" -v "$work:/out" "$NFPM_IMAGE" \
         package -f /out/nfpm.run.yaml -p "$fmt" -t "/out/${base}.${fmt}"
 done
 
