@@ -74,8 +74,8 @@ I IMMENSELY thank projects such as Ungoogled-Chromium, Helium, Thorium and Brave
   - ⬜ Windows 11 ([ADR 0008](docs/adr/0008-windows-11.md))
   - 🚧 x86-64-v2 + AVX build for CPUs without AVX2 ([ADR 0009](docs/adr/0009-build-ivy-bridge.md)): build input `cpu=avx1` (separate `out/` and ccache) written; the first avx1 build has not run
   - 🚧 native packages from the compiled tarball: `.pkg.tar.zst` (PKGBUILD), `.deb`, `.rpm` ([pacotes](docs/wiki/pacotes.md)); install/remove/`--version` tested in Arch, Ubuntu 24.04 and Fedora containers, release workflow not yet run
-  - 🚧 notes page `aerographene://notes` (Obsidian-style vault) ([notas](docs/wiki/notas.md)): page skeleton with in-page vault sidebar and confined vault reader with unit tests; not wired yet, not tested in the browser
-  - 🚧 terminal board `aerographene://terminal` ([terminal](docs/wiki/terminal.md)): board with draggable fake windows and a pty session class with unit tests; not wired yet, not tested in the browser
+  - 🚧 notes page `aerographene://notes` (Obsidian-style vault) ([notas](docs/wiki/notas.md)): folder picker, lazy vault tree and safe Markdown view wired in code; unit tests pass; not tested in the browser yet, no editing
+  - 🚧 terminal board `aerographene://terminal` ([terminal](docs/wiki/terminal.md)): board of draggable windows, each an xterm.js wired to a local shell (pty in the browser process, restricted to that page); unit tests pass; not tested in the browser yet, security review pending
   - ⬜ Google Sync with own API keys ([ADR 0006](docs/adr/0006-google-sync-com-chaves-proprias.md))
 
 ## docs
