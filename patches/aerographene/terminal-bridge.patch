@@ -8,12 +8,16 @@ Propósito: TerminalHandler (content::WebUIMessageHandler adicionado só pelo
 AeroTerminalUI) e TerminalHost (sessões de uma aba numa sequência
 ThreadPool MayBlock/WithBaseSyncPrimitives/BLOCK_SHUTDOWN via
 base::SequenceBound; leitura do mestre com FileDescriptorWatcher em blocos de
-16 KiB). Segurança (docs/PLANO-V0.3.md, "segurança do terminal"): mensagens
+16 KiB). Nada bloqueia no pty: entrada vai para fila por sessão drenada
+com WatchWritable (teto 1 MiB; acima a escrita é descartada e a página
+recebe "writeDropped"); saída com créditos: acima de 256 KiB sem ack o
+host para de ler o fd até a página mandar ack(id, bytes) no callback do
+term.write. Segurança (docs/PLANO-V0.3.md, "segurança do terminal"): mensagens
 só existem no renderer do chrome://terminal e cada uma confere que vem do
 frame principal com origem chrome://terminal; o config recusa perfis
 off-the-record; open(cols, rows) não aceita programa, argumentos nem
 diretório (shell do usuário em $HOME, escolhido no browser); no máximo 16
-sessões por aba; escrita até 64 KiB; tamanhos 1..1000; id desconhecido ou
+sessões por aba e 64 no processo; escrita até 64 KiB; tamanhos 1..1000; id desconhecido ou
 mensagem malformada é descartada (WebUIMessageHandler não tem
 ReportBadMessage). Recarregar ou sair da página mata todas as sessões
 (OnJavascriptDisallowed recria o host); fechar a aba destrói o host e mata os
@@ -78,7 +82,7 @@ WebUI em vez de Mojo (ver notes-render.patch).
  </template>
 --- a/chrome/browser/resources/aero_terminal/terminal.js
 +++ b/chrome/browser/resources/aero_terminal/terminal.js
-@@ -1,9 +1,69 @@
+@@ -1,9 +1,78 @@
  // Copyright 2026 The aerographene Authors
  // Use of this source code is governed by the GPL-3.0 license.
  
@@ -126,7 +130,16 @@ WebUI em vez de Mojo (ver notes-render.patch).
 +listeners.set('output', (id, b64) => {
 +  const s = sessions.get(id);
 +  if (s) {
-+    s.term.write(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
++    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
++    // Flow control: the browser stops reading the pty while too much output
++    // is unacknowledged; ack once xterm.js has parsed this chunk.
++    s.term.write(bytes, () => chrome.send('ack', [id, bytes.length]));
++  }
++});
++listeners.set('writeDropped', (id) => {
++  const s = sessions.get(id);
++  if (s) {
++    s.term.write('\r\n[entrada descartada: o programa não está lendo]\r\n');
 +  }
 +});
 +listeners.set('exit', (id, code) => {
@@ -151,7 +164,7 @@ WebUI em vez de Mojo (ver notes-render.patch).
  
  const MIN_W = 220;
  const MIN_H = 120;
-@@ -79,10 +139,43 @@
+@@ -79,10 +148,43 @@
    };
    apply();
  
@@ -198,7 +211,7 @@ WebUI em vez de Mojo (ver notes-render.patch).
  
    let start = {...box};
    track(win.querySelector('.win-head'), () => {
-@@ -105,6 +198,11 @@
+@@ -105,6 +207,11 @@
    });
    win.addEventListener('pointerdown', () => focusWin(win));
    win.querySelector('.win-close').addEventListener('click', () => {
@@ -210,7 +223,7 @@ WebUI em vez de Mojo (ver notes-render.patch).
      win.remove();
      count--;
      updateTitle();
-@@ -114,6 +212,21 @@
+@@ -114,6 +221,21 @@
    count++;
    focusWin(win);
    updateTitle();
@@ -337,7 +350,7 @@ WebUI em vez de Mojo (ver notes-render.patch).
      "//testing/gtest",
 --- /dev/null
 +++ b/chrome/browser/ui/webui/aero_terminal/terminal_handler.cc
-@@ -0,0 +1,169 @@
+@@ -0,0 +1,198 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -375,7 +388,8 @@ WebUI em vez de Mojo (ver notes-render.patch).
 +}
 +
 +void TerminalHandler::CreateHost() {
-+  // Blocking sequence for the ptys. BLOCK_SHUTDOWN so closing the browser
++  // Sequence for the ptys. Pty I/O never blocks (O_NONBLOCK, queued input);
++  // only Start/Terminate wait briefly. BLOCK_SHUTDOWN so closing the browser
 +  // still runs ~TerminalHost and kills every process group.
 +  host_ = base::SequenceBound<TerminalHost>(
 +      base::ThreadPool::CreateSequencedTaskRunner(
@@ -405,6 +419,9 @@ WebUI em vez de Mojo (ver notes-render.patch).
 +  web_ui()->RegisterMessageCallback(
 +      "close", base::BindRepeating(&TerminalHandler::HandleClose,
 +                                   base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "ack", base::BindRepeating(&TerminalHandler::HandleAck,
++                                 base::Unretained(this)));
 +}
 +
 +void TerminalHandler::OnJavascriptDisallowed() {
@@ -462,7 +479,32 @@ WebUI em vez de Mojo (ver notes-render.patch).
 +      text.size() > kMaxWriteBytes) {
 +    return;
 +  }
-+  host_.AsyncCall(&TerminalHost::Write).WithArgs(*id, text);
++  host_.AsyncCall(&TerminalHost::Write)
++      .WithArgs(*id, text)
++      .Then(base::BindOnce(&TerminalHandler::OnWritten,
++                           weak_ptr_factory_.GetWeakPtr(), *id));
++}
++
++void TerminalHandler::OnWritten(int32_t id, bool accepted) {
++  // The program is not reading its input and the queue is full: the bytes
++  // were dropped. Tell the page instead of blocking.
++  if (!accepted && IsJavascriptAllowed() && open_ids_.contains(id)) {
++    FireWebUIListener("writeDropped", base::Value(id));
++  }
++}
++
++void TerminalHandler::HandleAck(const base::ListValue& args) {
++  if (args.size() != 2 || !FromTerminalPage()) {
++    return;
++  }
++  std::optional<int> id = args[0].GetIfInt();
++  std::optional<int> bytes = args[1].GetIfInt();
++  if (!id || !open_ids_.contains(*id) || !bytes || *bytes < 1 ||
++      static_cast<size_t>(*bytes) > TerminalHost::kReadChunk) {
++    return;
++  }
++  host_.AsyncCall(&TerminalHost::Ack)
++      .WithArgs(*id, static_cast<size_t>(*bytes));
 +}
 +
 +void TerminalHandler::HandleResize(const base::ListValue& args) {
@@ -509,7 +551,7 @@ WebUI em vez de Mojo (ver notes-render.patch).
 +}  // namespace aerographene
 --- /dev/null
 +++ b/chrome/browser/ui/webui/aero_terminal/terminal_handler.h
-@@ -0,0 +1,65 @@
+@@ -0,0 +1,71 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -535,12 +577,16 @@ WebUI em vez de Mojo (ver notes-render.patch).
 +// (WebUI bindings); every message also checks that the sender is the primary
 +// main frame committed at chrome://terminal. The page never chooses the
 +// program, arguments or directory: open(cols, rows) starts the user's shell
-+// in $HOME. Limits: TerminalHost::kMaxSessions per tab, kMaxWriteBytes per
-+// write, sizes 1..1000. Malformed messages are dropped.
++// in $HOME. Limits: TerminalHost::kMaxSessions per tab and
++// kMaxSessionsGlobal per process, kMaxWriteBytes per write,
++// kMaxPendingInput queued, kMaxUnackedOutput in flight, sizes 1..1000.
++// Malformed messages are dropped.
 +//
 +// Messages (args[0] is the callback id when a reply is expected):
 +//   open(cb, cols, rows) -> id or null; write(id, text); resize(id, c, r);
-+//   close(id). Events: "output"(id, base64 bytes), "exit"(id, code).
++//   close(id); ack(id, bytes) after the page rendered `bytes` of output (at
++//   most one read chunk per ack). Events: "output"(id, base64 bytes),
++//   "exit"(id, code), "writeDropped"(id) when the input queue is full.
 +class TerminalHandler : public content::WebUIMessageHandler {
 + public:
 +  static constexpr size_t kMaxWriteBytes = 64 * 1024;
@@ -561,8 +607,10 @@ WebUI em vez de Mojo (ver notes-render.patch).
 +  void HandleWrite(const base::ListValue& args);
 +  void HandleResize(const base::ListValue& args);
 +  void HandleClose(const base::ListValue& args);
++  void HandleAck(const base::ListValue& args);
 +
 +  void OnOpened(base::Value callback_id, int32_t id, bool ok);
++  void OnWritten(int32_t id, bool accepted);
 +  void OnOutput(int32_t id, std::string bytes);
 +  void OnExit(int32_t id, int code);
 +
@@ -577,7 +625,7 @@ WebUI em vez de Mojo (ver notes-render.patch).
 +#endif  // CHROME_BROWSER_UI_WEBUI_AERO_TERMINAL_TERMINAL_HANDLER_H_
 --- /dev/null
 +++ b/chrome/browser/ui/webui/aero_terminal/terminal_host.cc
-@@ -0,0 +1,101 @@
+@@ -0,0 +1,191 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -586,6 +634,9 @@ WebUI em vez de Mojo (ver notes-render.patch).
 +#include <errno.h>
 +#include <unistd.h>
 +
++#include <algorithm>
++#include <atomic>
++#include <optional>
 +#include <utility>
 +
 +#include "base/functional/bind.h"
@@ -593,10 +644,31 @@ WebUI em vez de Mojo (ver notes-render.patch).
 +
 +namespace aerographene {
 +
++namespace {
++
++// Sessions of every TerminalHost in the process; hosts live on different
++// sequences.
++std::atomic<size_t> g_live_sessions{0};
++
++bool TakeGlobalSlot() {
++  if (g_live_sessions.fetch_add(1) >= TerminalHost::kMaxSessionsGlobal) {
++    g_live_sessions.fetch_sub(1);
++    return false;
++  }
++  return true;
++}
++
++}  // namespace
++
 +TerminalHost::Entry::Entry() = default;
 +TerminalHost::Entry::~Entry() {
 +  // Stop watching before the session closes the fd.
-+  watch.reset();
++  read_watch.reset();
++  write_watch.reset();
++  session.reset();
++  if (counted) {
++    g_live_sessions.fetch_sub(1);
++  }
 +}
 +
 +TerminalHost::TerminalHost(OutputCallback on_output, ExitCallback on_exit)
@@ -610,32 +682,79 @@ WebUI em vez de Mojo (ver notes-render.patch).
 +  sessions_.clear();
 +}
 +
++// static
++size_t TerminalHost::LiveSessionsForTesting() {
++  return g_live_sessions.load();
++}
++
 +bool TerminalHost::Open(int32_t id, uint16_t cols, uint16_t rows) {
 +  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 +  if (sessions_.size() >= kMaxSessions || sessions_.contains(id)) {
 +    return false;
 +  }
++  auto entry = std::make_unique<Entry>();
++  if (!TakeGlobalSlot()) {
++    return false;
++  }
++  entry->counted = true;
 +  TerminalSession::Options options;  // argv empty = login shell, cwd = HOME
 +  options.cols = cols;
 +  options.rows = rows;
-+  auto entry = std::make_unique<Entry>();
 +  entry->session = TerminalSession::Start(options);
 +  if (!entry->session) {
-+    return false;
++    return false;  // ~Entry gives the slot back
 +  }
-+  entry->watch = base::FileDescriptorWatcher::WatchReadable(
-+      entry->session->master_fd(),
-+      base::BindRepeating(&TerminalHost::OnReadable, base::Unretained(this),
-+                          id));
++  WatchReadable(id, *entry);
 +  sessions_[id] = std::move(entry);
 +  return true;
 +}
 +
-+void TerminalHost::Write(int32_t id, std::string bytes) {
++void TerminalHost::WatchReadable(int32_t id, Entry& entry) {
++  entry.read_watch = base::FileDescriptorWatcher::WatchReadable(
++      entry.session->master_fd(),
++      base::BindRepeating(&TerminalHost::OnReadable, base::Unretained(this),
++                          id));
++}
++
++bool TerminalHost::Write(int32_t id, std::string bytes) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  auto it = sessions_.find(id);
++  if (it == sessions_.end()) {
++    return false;
++  }
++  Entry& entry = *it->second;
++  if (bytes.size() > kMaxPendingInput - entry.pending.size()) {
++    return false;  // the program is not reading its input; drop, never block
++  }
++  entry.pending += bytes;
++  Flush(id, entry);
++  return true;
++}
++
++void TerminalHost::Flush(int32_t id, Entry& entry) {
++  std::optional<size_t> n = entry.session->WriteSome(entry.pending);
++  if (!n) {
++    // Write error (slave gone): the reader sees EIO and reports the exit.
++    entry.pending.clear();
++    entry.write_watch.reset();
++    return;
++  }
++  entry.pending.erase(0, *n);
++  if (entry.pending.empty()) {
++    entry.write_watch.reset();
++  } else if (!entry.write_watch) {
++    entry.write_watch = base::FileDescriptorWatcher::WatchWritable(
++        entry.session->master_fd(),
++        base::BindRepeating(&TerminalHost::OnWritable, base::Unretained(this),
++                            id));
++  }
++}
++
++void TerminalHost::OnWritable(int32_t id) {
 +  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 +  auto it = sessions_.find(id);
 +  if (it != sessions_.end()) {
-+    it->second->session->Write(bytes);
++    Flush(id, *it->second);
 +  }
 +}
 +
@@ -652,28 +771,47 @@ WebUI em vez de Mojo (ver notes-render.patch).
 +  sessions_.erase(id);
 +}
 +
++void TerminalHost::Ack(int32_t id, size_t bytes) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  auto it = sessions_.find(id);
++  if (it == sessions_.end()) {
++    return;
++  }
++  Entry& entry = *it->second;
++  entry.unacked -= std::min(bytes, entry.unacked);
++  if (!entry.read_watch && entry.unacked < kMaxUnackedOutput) {
++    WatchReadable(id, entry);
++  }
++}
++
 +void TerminalHost::OnReadable(int32_t id) {
 +  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 +  auto it = sessions_.find(id);
 +  if (it == sessions_.end()) {
 +    return;
 +  }
++  Entry& entry = *it->second;
 +  std::string buf(kReadChunk, '\0');
-+  const ssize_t n =
-+      HANDLE_EINTR(read(it->second->session->master_fd(), buf.data(),
-+                        buf.size()));
++  const ssize_t n = HANDLE_EINTR(
++      read(entry.session->master_fd(), buf.data(), buf.size()));
 +  if (n > 0) {
 +    buf.resize(static_cast<size_t>(n));
++    entry.unacked += static_cast<size_t>(n);
++    if (entry.unacked >= kMaxUnackedOutput) {
++      // The page is behind: stop reading until it acknowledges.
++      entry.read_watch.reset();
++    }
 +    on_output_.Run(id, std::move(buf));
 +    return;
 +  }
-+  if (n < 0 && errno == EAGAIN) {
++  if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
 +    return;
 +  }
 +  // EOF or EIO: every holder of the slave side is gone.
-+  it->second->watch.reset();
++  entry.read_watch.reset();
++  entry.write_watch.reset();
 +  const int code =
-+      it->second->session->Terminate(base::Milliseconds(200)).value_or(-1);
++      entry.session->Terminate(base::Milliseconds(200)).value_or(-1);
 +  sessions_.erase(it);
 +  on_exit_.Run(id, code);
 +}
@@ -681,7 +819,7 @@ WebUI em vez de Mojo (ver notes-render.patch).
 +}  // namespace aerographene
 --- /dev/null
 +++ b/chrome/browser/ui/webui/aero_terminal/terminal_host.h
-@@ -0,0 +1,66 @@
+@@ -0,0 +1,90 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -704,18 +842,28 @@ WebUI em vez de Mojo (ver notes-render.patch).
 +
 +// Owns the pty sessions of one chrome://terminal tab. Lives on a blocking
 +// sequence (MayBlock + WithBaseSyncPrimitives, via base::SequenceBound) and
-+// is destroyed with the tab, which kills every process group. Output is read
-+// with base::FileDescriptorWatcher in chunks of at most kReadChunk bytes and
-+// handed to `on_output`; `on_exit` runs once per session when the slave
-+// side closes. Both callbacks must post to the UI sequence themselves.
++// is destroyed with the tab, which kills every process group. Nothing here
++// blocks on the pty: the master is O_NONBLOCK, input waits in a per-session
++// queue drained when the fd is writable, and output is read with
++// base::FileDescriptorWatcher in chunks of at most kReadChunk bytes and
++// handed to `on_output`. Output flow control: once kMaxUnackedOutput bytes
++// were handed out without Ack(), the host stops reading that pty (the child
++// then blocks on its own writes) until the page acknowledges. `on_exit` runs
++// once per session when the slave side closes. Both callbacks must post to
++// the UI sequence themselves.
 +class TerminalHost {
 + public:
 +  using OutputCallback =
 +      base::RepeatingCallback<void(int32_t id, std::string bytes)>;
 +  using ExitCallback = base::RepeatingCallback<void(int32_t id, int code)>;
 +
++  // Per tab, and for the whole browser process (all tabs and profiles).
 +  static constexpr size_t kMaxSessions = 16;
++  static constexpr size_t kMaxSessionsGlobal = 64;
 +  static constexpr size_t kReadChunk = 16 * 1024;
++  // Input not yet accepted by the pty; a Write() beyond it is refused whole.
++  static constexpr size_t kMaxPendingInput = 1024 * 1024;
++  static constexpr size_t kMaxUnackedOutput = 256 * 1024;
 +
 +  TerminalHost(OutputCallback on_output, ExitCallback on_exit);
 +  TerminalHost(const TerminalHost&) = delete;
@@ -723,21 +871,35 @@ WebUI em vez de Mojo (ver notes-render.patch).
 +  ~TerminalHost();
 +
 +  // Starts the user's shell (chosen here, never by the page) in $HOME.
-+  // Returns false when the limit is reached or the pty cannot be created.
++  // Returns false when a limit is reached or the pty cannot be created.
 +  bool Open(int32_t id, uint16_t cols, uint16_t rows);
-+  void Write(int32_t id, std::string bytes);
++  // Queues `bytes` for the pty and returns at once. False (bytes dropped)
++  // when the session is unknown or the queue would exceed kMaxPendingInput.
++  bool Write(int32_t id, std::string bytes);
 +  void Resize(int32_t id, uint16_t cols, uint16_t rows);
 +  void Close(int32_t id);
++  // The page consumed `bytes` of output of session `id`.
++  void Ack(int32_t id, size_t bytes);
++
++  // Sessions alive in the whole process (all hosts).
++  static size_t LiveSessionsForTesting();
 +
 + private:
 +  struct Entry {
 +    Entry();
 +    ~Entry();
 +    std::unique_ptr<TerminalSession> session;
-+    std::unique_ptr<base::FileDescriptorWatcher::Controller> watch;
++    std::unique_ptr<base::FileDescriptorWatcher::Controller> read_watch;
++    std::unique_ptr<base::FileDescriptorWatcher::Controller> write_watch;
++    std::string pending;  // input not yet written to the pty
++    size_t unacked = 0;   // output handed out and not acknowledged
++    bool counted = false;  // holds a slot of kMaxSessionsGlobal
 +  };
 +
++  void WatchReadable(int32_t id, Entry& entry);
 +  void OnReadable(int32_t id);
++  void OnWritable(int32_t id);
++  void Flush(int32_t id, Entry& entry);
 +
 +  OutputCallback on_output_;
 +  ExitCallback on_exit_;
@@ -750,7 +912,7 @@ WebUI em vez de Mojo (ver notes-render.patch).
 +#endif  // CHROME_BROWSER_UI_WEBUI_AERO_TERMINAL_TERMINAL_HOST_H_
 --- /dev/null
 +++ b/chrome/browser/ui/webui/aero_terminal/terminal_host_unittest.cc
-@@ -0,0 +1,132 @@
+@@ -0,0 +1,234 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -761,9 +923,11 @@ WebUI em vez de Mojo (ver notes-render.patch).
 +#include <map>
 +#include <memory>
 +#include <string>
++#include <vector>
 +
 +#include "base/files/file_descriptor_watcher_posix.h"
 +#include "base/functional/bind.h"
++#include "base/functional/callback_helpers.h"
 +#include "base/message_loop/message_pump_type.h"
 +#include "base/run_loop.h"
 +#include "base/strings/string_number_conversions.h"
@@ -792,6 +956,9 @@ WebUI em vez de Mojo (ver notes-render.patch).
 +
 +  void OnOutput(int32_t id, std::string bytes) {
 +    output_[id] += bytes;
++    if (auto_ack_) {
++      host_->Ack(id, bytes.size());
++    }
 +    if (quit_ && !needle_.empty() &&
 +        output_[id].find(needle_) != std::string::npos) {
 +      std::move(quit_).Run();
@@ -819,6 +986,14 @@ WebUI em vez de Mojo (ver notes-render.patch).
 +    return !timed_out_;
 +  }
 +
++  // Spins the loop for `delay` (the pty and the child make progress).
++  void RunFor(base::TimeDelta delay) {
++    base::RunLoop loop;
++    base::OneShotTimer t;
++    t.Start(FROM_HERE, delay, loop.QuitClosure());
++    loop.Run();
++  }
++
 +  void OnTimeout(base::OnceClosure quit) {
 +    timed_out_ = true;
 +    std::move(quit).Run();
@@ -832,6 +1007,7 @@ WebUI em vez de Mojo (ver notes-render.patch).
 +  std::string needle_;
 +  base::OnceClosure quit_;
 +  bool timed_out_ = false;
++  bool auto_ack_ = true;
 +};
 +
 +TEST_F(TerminalHostTest, EchoesThroughShell) {
@@ -881,6 +1057,94 @@ WebUI em vez de Mojo (ver notes-render.patch).
 +  EXPECT_NE(kill(pid, 0), 0);
 +}
 +
++TEST_F(TerminalHostTest, PasteIntoProgramThatDoesNotReadNeverBlocks) {
++  // `sleep` never reads stdin and nobody acks output: pasting more than the
++  // pty buffer must queue, then refuse, and never block this sequence.
++  auto_ack_ = false;
++  ASSERT_TRUE(host_->Open(1, 80, 24));
++  ASSERT_TRUE(host_->Write(1, "exec sleep 100\n"));
++  RunFor(base::Milliseconds(300));
++  const std::string chunk(64 * 1024, 'x');
++  const base::TimeTicks start = base::TimeTicks::Now();
++  size_t accepted = 0;
++  bool refused = false;
++  for (int i = 0; i < 64 && !refused; ++i) {
++    if (host_->Write(1, chunk)) {
++      accepted += chunk.size();
++    } else {
++      refused = true;
++    }
++  }
++  EXPECT_TRUE(refused);
++  EXPECT_GE(accepted, TerminalHost::kMaxPendingInput - chunk.size());
++  EXPECT_FALSE(host_->Write(1, std::string(TerminalHost::kMaxPendingInput + 1,
++                                           'y')));
++  RunFor(base::Milliseconds(200));
++  host_->Close(1);
++  host_.reset();
++  EXPECT_LT(base::TimeTicks::Now() - start, base::Seconds(5));
++}
++
++TEST_F(TerminalHostTest, PasteMiBIntoCatThenClose) {
++  // `cat` echoes everything back; the page never acks, so output stops at
++  // the credit limit and the paste stays queued. Close must still finish.
++  auto_ack_ = false;
++  ASSERT_TRUE(host_->Open(1, 80, 24));
++  ASSERT_TRUE(host_->Write(1, "exec cat\n"));
++  RunFor(base::Milliseconds(300));
++  const std::string chunk(64 * 1024, 'z');
++  for (int i = 0; i < 16; ++i) {
++    host_->Write(1, chunk);
++  }
++  RunFor(base::Seconds(1));
++  EXPECT_LE(output_[1].size(),
++            TerminalHost::kMaxUnackedOutput + TerminalHost::kReadChunk);
++  const base::TimeTicks start = base::TimeTicks::Now();
++  host_->Close(1);
++  host_.reset();
++  EXPECT_LT(base::TimeTicks::Now() - start, base::Seconds(5));
++}
++
++TEST_F(TerminalHostTest, OutputPausesUntilAck) {
++  auto_ack_ = false;
++  ASSERT_TRUE(host_->Open(1, 80, 24));
++  host_->Write(1,
++               "head -c 800000 /dev/zero | tr '\\0' a; echo; echo E\"\"ND\n");
++  RunFor(base::Seconds(1));
++  const size_t paused = output_[1].size();
++  EXPECT_GE(paused, TerminalHost::kMaxUnackedOutput);
++  EXPECT_LE(paused, TerminalHost::kMaxUnackedOutput + TerminalHost::kReadChunk);
++  EXPECT_EQ(output_[1].find("END"), std::string::npos);
++  // Acknowledge everything so far; from now on ack as it arrives.
++  auto_ack_ = true;
++  host_->Ack(1, paused);
++  ASSERT_TRUE(RunUntil("END"));
++  EXPECT_GE(output_[1].size(), 800000u);
++}
++
++TEST_F(TerminalHostTest, GlobalSessionLimit) {
++  ASSERT_EQ(TerminalHost::LiveSessionsForTesting(), 0u);
++  const size_t per_tab = TerminalHost::kMaxSessions;
++  const size_t tabs = TerminalHost::kMaxSessionsGlobal / per_tab;
++  std::vector<std::unique_ptr<TerminalHost>> others;
++  for (size_t t = 0; t < tabs; ++t) {
++    others.push_back(std::make_unique<TerminalHost>(base::DoNothing(),
++                                                    base::DoNothing()));
++    for (size_t i = 0; i < per_tab; ++i) {
++      ASSERT_TRUE(others.back()->Open(static_cast<int32_t>(i), 10, 10))
++          << t << " " << i;
++    }
++  }
++  EXPECT_EQ(TerminalHost::LiveSessionsForTesting(),
++            TerminalHost::kMaxSessionsGlobal);
++  EXPECT_FALSE(host_->Open(1, 80, 24));
++  others.back()->Close(0);
++  EXPECT_TRUE(host_->Open(1, 80, 24));
++  others.clear();
++  host_.reset();
++  EXPECT_EQ(TerminalHost::LiveSessionsForTesting(), 0u);
++}
++
 +}  // namespace
 +}  // namespace aerographene
 --- a/chrome/browser/ui/webui/aero_terminal/terminal_session.h
@@ -888,9 +1152,9 @@ WebUI em vez de Mojo (ver notes-render.patch).
 @@ -23,7 +23,7 @@
  // owns the master side; the child is a session leader with the slave as its
  // controlling terminal, in its own process group, with a clean environment.
- // All methods block (open, write, waitpid) and must run on a MayBlock
--// sequence. Not exposed over Mojo yet (fatia C3).
-+// sequence. Driven by TerminalHost (fatia C3).
+ // Start() and Terminate() block (open, waitpid) and must run on a MayBlock
+-// sequence; I/O on the master never blocks. Not exposed over Mojo yet
++// sequence; I/O on the master never blocks. Driven by TerminalHost
+ // (fatia C3).
  class TerminalSession {
   public:
-   struct Options {
