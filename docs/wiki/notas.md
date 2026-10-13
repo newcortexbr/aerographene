@@ -25,11 +25,12 @@ decisão do dono em 13/10/2026: o título da aba de notas é sempre `o: <nome da
 command bar (prefixo `o:`, decisão do dono em 13/10/2026; vale a primeira troca de `-o` por `o:`):
 
 - `o: <termo>` + Enter: abre a página de notas sem documento aberto. A barra lateral mostra a árvore com todos os documentos e o centro mostra os resultados da busca (B5, nome e conteúdo) pelo termo; clicar num resultado abre a nota. A URL é `chrome://notes/?q=<termo>`; a página lê `q` depois de carregar a vault. Termo de 2 a 256 unidades, sem caracteres de controle.
-- `o:` sozinho + Enter: abre uma aba NOVA de notas, na raiz da vault, sem documento (o centro mostra a dica de sempre). A URL é `chrome://notes/?new=1`.
+- `o:` sozinho + Enter: abre uma aba NOVA de notas, na raiz da vault, sem documento (o centro mostra a dica de sempre). A URL é `chrome://notes/?new=1`. Desde a C6 o Enter abre mesmo outra aba (antes navegava a atual): `ChromeOmniboxClient` troca a disposição para aba nova quando o match é o `o:` sozinho do `BuiltinProvider`.
+- digitar `o:` deixa o texto da command bar em itálico, com o prefixo na cor de link (aparência de busca da vault; `terminal-c6-look.patch`).
 - `o` sem distinção de caixa, espaço depois dos dois pontos opcional (`o:ideias` funciona). `o`, `ox:`, `o :` e `-o` não são o comando.
 - o título da aba continua `o: <nome da vault>` em todos os casos; o termo nunca vai para o título.
 
-aba única: `chrome::Navigate` trata `chrome://notes` (disposição atual, nova aba em primeiro plano ou singleton): se a janela já tem uma aba de notas, foca essa e a leva à URL pedida (o termo novo recarrega a página; nota com edição não salva pede confirmação pelo `beforeunload`); sem aba de notas, abre normalmente. Abas em segundo plano não são alteradas. Exceção: `?new=1` (o `o:` sozinho) não é dobrado e abre outra aba, a pedido do dono. Limite: o Enter da command bar usa a disposição da omnibox (aba atual); "nova" aqui significa "sem reaproveitar a aba de notas existente", não força uma aba extra. Verificado só por unit test do parser, `-fsyntax-only` de `builtin_provider.cc` e `browser_navigator.cc` e a página no Chrome headless; o comportamento no navegador não foi testado.
+aba única: `chrome::Navigate` trata `chrome://notes` (disposição atual, nova aba em primeiro plano ou singleton): se a janela já tem uma aba de notas, foca essa e a leva à URL pedida (o termo novo recarrega a página; nota com edição não salva pede confirmação pelo `beforeunload`); sem aba de notas, abre normalmente. Abas em segundo plano não são alteradas. Exceção: `?new=1` (o `o:` sozinho) não é dobrado e abre outra aba, a pedido do dono. Desde a C6 o `o:` sozinho força aba nova no Enter (ver acima). Verificado só por unit test do parser, `-fsyntax-only` de `builtin_provider.cc` e `browser_navigator.cc` e a página no Chrome headless; o comportamento no navegador não foi testado.
 
 ## editor (B4)
 

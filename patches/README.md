@@ -427,6 +427,18 @@ v0.3, fatia B4. Escrita na vault do `chrome://notes`: `OpenVaultFileNoFollow` (o
 
 v0.3, fatia B5, no fim da série (depende de `notes-webui`, `notes-vault-reader`, `notes-render` e `notes-editor`). Watcher: `VaultWatcher` (`base::FilePathWatcher` recursivo numa sequência `MayBlock` dona do `NotesHandler`; ignora caminhos ocultos, inclusive o `.aero-N.tmp` do salvar); `watchVault` o inicia e `vaultChanged` (agrupado em 200 ms) avisa a página, que refaz a árvore, recarrega a nota aberta se estiver limpa e usa o fluxo de conflito do B4 se estiver alterada; o watcher morre com a aba/handler ou ao recarregar a página. Busca: `SearchVault` (nome e conteúdo `.md`, ASCII sem distinção de caixa, limites de 100 resultados, 20000 arquivos, 128 MiB e 16 níveis) e `searchVault`. Imagens: `ReadVaultImage` (png/jpg/gif/webp até 10 MiB, sem SVG, abertura `O_NOFOLLOW`), `FindVaultFileByName` e `readImage` (base64); `markdown.js` só cria `<img>` para caminhos relativos da vault; CSP `img-src 'self' data:`. A listagem ignora nomes que não são UTF-8. Testes `VaultSearchTest.*` e `VaultWatcher*Test.*` (inotify real); página verificada por `tests/notes-editor/run.sh`.
 
+### `aerographene/terminal-c6.patch` (GPL-3.0)
+
+v0.3, fatia C6, depois de `notes-b6` (contexto em `builtin_provider.cc`; usa `aero_notes_command.h`) e da cadeia `terminal-*`; usa `chrome/common/aero_version.h` de `branding-version`. Command bar `t:`/`t: <comando>` substitui o `-t N` (`aero_terminal_command.*` reescrito + teste). `ChromeOmniboxClient::OnAutocompleteAccept`: `t:` e `o:` sozinho abrem aba nova (só match do `BuiltinProvider`); o comando vai para a aba aberta pelo canal de uso único `terminal_launch.{h,cc}` (alvo `aero_terminal:launch`, `SupportsUserData`, validade 60 s), nunca na URL. `TerminalHandler`: mensagem `start` (workspace por perfil via `WorkspaceRegistry`, comando, resumo do sistema com `base::SysInfo`/`GpuDataManager`). Testes `AeroTerminalCommandTest.*`, `TerminalLaunchTest.*`.
+
+### `aerographene/terminal-c6-page.patch` (GPL-3.0; arte do gatinho do dono do projeto)
+
+v0.3, fatia C6, depois de `terminal-c6`. Página do workspace: sem barra superior, cantos (`☰` sidebar com todos os terminais, `+`), barra de título só com `×`, resumo estilo fastfetch em `banner.js` (novo recurso `IDR_AERO_TERMINAL_BANNER_JS`, com a arte braille que antes ficava solta em `patches/aerographene/terminal-cat.txt`), foco/atalhos (Ctrl+C, Ctrl+Shift+C/V, clique fora), `?new=1` -> `?w=N` e comando digitado depois de load + 0,5 s. Teste `tests/terminal-page/run.sh`.
+
+### `aerographene/terminal-c6-look.patch` (GPL-3.0)
+
+v0.3, fatia C6, fim da série. `OmniboxViewViews::AeroApplyCommandLook`: `t:` em fonte monoespaçada, `o:` em itálico, prefixo na cor `kColorOmniboxResultsUrl`. Só aparência. Mesmo arquivo de `urlbar-mockup`, hunks independentes.
+
 ### `aerographene/notes-b6.patch` (GPL-3.0)
 
 v0.3, fatia B6, no fim da série (depende de `notes-b5`, do contexto de `terminal-c4` em `builtin_provider.cc` e no `BUILD.gn` do omnibox, e do hunk de `helium/core/override-chrome-protocol.patch` em `browser_navigator.cc`). Command bar `o:`/`o: <termo>` (`aero_notes_command.{h,cc}` + teste; `BuiltinProvider::Start`): com termo abre `chrome://notes/?q=<termo>` (sem documento, árvore na lateral e resultados da busca no centro); sozinho abre `chrome://notes/?new=1` (aba nova de notas). Aba única por janela em `chrome::Navigate` (foca a aba de notas existente e a leva à URL; `?new=1` não é dobrado). Título da aba continua `o: <nome da vault>`.
