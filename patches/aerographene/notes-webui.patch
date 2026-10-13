@@ -1,0 +1,366 @@
+aerographene: esqueleto da página chrome://notes (v0.3, fatia B1).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: base da página de notas estilo Obsidian (docs/PLANO-V0.3.md,
+seção B). AeroNotesUI é um content::WebUIController puro (sem Mojo, sem
+handlers, sem rede) com um WebUIDataSource de três recursos BINDATA do grd
+de chrome/browser (notes.html/.css/.js). Layout: segunda barra lateral da
+vault dentro da própria página (redimensionável por ponteiro e setas), à
+esquerda da área da nota; a sidebar do navegador e os side panels não são
+tocados. Custo no startup: só a entrada AeroNotesUIConfig no
+WebUIConfigMap; controlador e data source nascem quando uma aba abre a
+página. Desabilitada em perfis off-the-record (anônimo e convidado).
+CSP mais estrita que o padrão da WebUI: default-src 'none', script-src e
+style-src 'self', img-src 'self', connect-src/form-action/base-uri 'none';
+Trusted Types do padrão mantido (o JS não usa innerHTML). Só Linux
+(BUILDFLAG(IS_LINUX), is_linux no GN). Leitura da vault, render Markdown,
+editor e aba única ficam para B2-B6.
+
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_notes/BUILD.gn
+@@ -0,0 +1,20 @@
++# Copyright 2026 The aerographene Authors
++# Use of this source code is governed by the GPL-3.0 license.
++
++assert(is_linux)
++
++source_set("aero_notes") {
++  sources = [
++    "aero_notes_ui.cc",
++    "aero_notes_ui.h",
++  ]
++  public_deps = [
++    "//content/public/browser",
++    "//content/public/common",
++  ]
++  deps = [
++    "//chrome/browser:resources",
++    "//chrome/browser/profiles:profile",
++    "//services/network/public/mojom",
++  ]
++}
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_notes/aero_notes_ui.h
+@@ -0,0 +1,42 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_AERO_NOTES_AERO_NOTES_UI_H_
++#define CHROME_BROWSER_UI_WEBUI_AERO_NOTES_AERO_NOTES_UI_H_
++
++#include "content/public/browser/web_ui_controller.h"
++#include "content/public/browser/webui_config.h"
++#include "content/public/common/url_constants.h"
++
++namespace content {
++class BrowserContext;
++}
++
++inline constexpr char kAeroNotesHost[] = "notes";
++
++class AeroNotesUI;
++
++// chrome://notes (shown as aerographene://notes). Only the config lives in
++// the WebUIConfigMap; the controller and its data source are created when a
++// tab navigates to the page, so nothing runs at startup.
++class AeroNotesUIConfig : public content::DefaultWebUIConfig<AeroNotesUI> {
++ public:
++  AeroNotesUIConfig()
++      : DefaultWebUIConfig(content::kChromeUIScheme, kAeroNotesHost) {}
++
++  // Off the record (incognito and guest) profiles do not get the page.
++  bool IsWebUIEnabled(content::BrowserContext* browser_context) override;
++};
++
++// Static skeleton: no Mojo, no WebUI message handlers, no network.
++class AeroNotesUI : public content::WebUIController {
++ public:
++  explicit AeroNotesUI(content::WebUI* web_ui);
++
++  AeroNotesUI(const AeroNotesUI&) = delete;
++  AeroNotesUI& operator=(const AeroNotesUI&) = delete;
++
++  ~AeroNotesUI() override;
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_AERO_NOTES_AERO_NOTES_UI_H_
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_notes/aero_notes_ui.cc
+@@ -0,0 +1,46 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "chrome/browser/ui/webui/aero_notes/aero_notes_ui.h"
++
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/grit/browser_resources.h"
++#include "content/public/browser/browser_context.h"
++#include "content/public/browser/web_ui.h"
++#include "content/public/browser/web_ui_data_source.h"
++#include "services/network/public/mojom/content_security_policy.mojom.h"
++
++bool AeroNotesUIConfig::IsWebUIEnabled(
++    content::BrowserContext* browser_context) {
++  return !browser_context->IsOffTheRecord();
++}
++
++AeroNotesUI::AeroNotesUI(content::WebUI* web_ui)
++    : content::WebUIController(web_ui) {
++  content::WebUIDataSource* source = content::WebUIDataSource::CreateAndAdd(
++      Profile::FromWebUI(web_ui), kAeroNotesHost);
++  source->AddResourcePath("notes.css", IDR_AERO_NOTES_CSS);
++  source->AddResourcePath("notes.js", IDR_AERO_NOTES_JS);
++  source->SetDefaultResource(IDR_AERO_NOTES_HTML);
++
++  // Strict policy on top of the WebUI defaults (object-src 'none',
++  // Trusted Types, frame-ancestors 'none'): nothing outside the page itself,
++  // no network, no inline script or style.
++  using network::mojom::CSPDirectiveName;
++  source->OverrideContentSecurityPolicy(CSPDirectiveName::DefaultSrc,
++                                        "default-src 'none';");
++  source->OverrideContentSecurityPolicy(CSPDirectiveName::ScriptSrc,
++                                        "script-src 'self';");
++  source->OverrideContentSecurityPolicy(CSPDirectiveName::StyleSrc,
++                                        "style-src 'self';");
++  source->OverrideContentSecurityPolicy(CSPDirectiveName::ImgSrc,
++                                        "img-src 'self';");
++  source->OverrideContentSecurityPolicy(CSPDirectiveName::ConnectSrc,
++                                        "connect-src 'none';");
++  source->OverrideContentSecurityPolicy(CSPDirectiveName::FormAction,
++                                        "form-action 'none';");
++  source->OverrideContentSecurityPolicy(CSPDirectiveName::BaseURI,
++                                        "base-uri 'none';");
++}
++
++AeroNotesUI::~AeroNotesUI() = default;
+--- a/chrome/browser/ui/webui/BUILD.gn
++++ b/chrome/browser/ui/webui/BUILD.gn
+@@ -109,6 +109,10 @@
+     deps += [ "//chrome/browser/ui/webui/signin:inline_login" ]
+   }
+ 
++  if (is_linux) {
++    deps += [ "//chrome/browser/ui/webui/aero_notes" ]
++  }
++
+   if (!is_android) {
+     deps += [
+       "//chrome/browser/actor/ui:actor_overlay_web_view",
+--- a/chrome/browser/ui/webui/chrome_web_ui_configs.cc
++++ b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
+@@ -238,6 +238,10 @@
+ #include "chrome/browser/ui/webui/unexportable_keys_internals/unexportable_keys_internals_ui.h"
+ #endif  // BUILDFLAG(IS_MAC)
+ 
++#if BUILDFLAG(IS_LINUX)
++#include "chrome/browser/ui/webui/aero_notes/aero_notes_ui.h"
++#endif  // BUILDFLAG(IS_LINUX)
++
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+     BUILDFLAG(IS_CHROMEOS)
+ #include "chrome/browser/ui/webui/skills/skills_ui.h"
+@@ -319,6 +323,10 @@
+   map.AddWebUIConfig(std::make_unique<VersionUIConfig>());
+   map.AddWebUIConfig(std::make_unique<WebRtcLogsUIConfig>());
+   map.AddWebUIConfig(std::make_unique<RegionalCapabilitiesInternalsUIConfig>());
++#if BUILDFLAG(IS_LINUX)
++  // aerographene: config only; the page is built when a tab opens it.
++  map.AddWebUIConfig(std::make_unique<AeroNotesUIConfig>());
++#endif  // BUILDFLAG(IS_LINUX)
+ #if BUILDFLAG(ENABLE_WEBUI_NTP)
+   map.AddWebUIConfig(std::make_unique<NewTabPageUIConfig>());
+ #endif  // BUILDFLAG(ENABLE_WEBUI_NTP)
+--- a/chrome/browser/browser_resources.grd
++++ b/chrome/browser/browser_resources.grd
+@@ -107,6 +107,11 @@
+       <if expr="not is_android">
+         <include name="IDR_AERO_NEWTAB_HTML" file="resources\aero_newtab\aero_newtab.html" type="BINDATA" />
+       </if>
++      <if expr="is_linux">
++        <include name="IDR_AERO_NOTES_HTML" file="resources\aero_notes\notes.html" type="BINDATA" />
++        <include name="IDR_AERO_NOTES_CSS" file="resources\aero_notes\notes.css" type="BINDATA" />
++        <include name="IDR_AERO_NOTES_JS" file="resources\aero_notes\notes.js" type="BINDATA" />
++      </if>
+       <if expr="is_chromeos">
+         <include name="IDR_CHROME_APP_MANIFEST" file="resources\chrome_app\manifest.json" type="BINDATA" />
+         <include name="IDR_URL_MOJOM_LITE_JS" file="${root_gen_dir}\url\mojom\url.mojom-lite.js" use_base_dir="false" type="BINDATA" />
+--- /dev/null
++++ b/chrome/browser/resources/aero_notes/notes.html
+@@ -0,0 +1,35 @@
++<!doctype html>
++<html lang="pt-BR">
++<head>
++<meta charset="utf-8">
++<title>o: notas</title>
++<meta name="color-scheme" content="dark light">
++<link rel="stylesheet" href="notes.css">
++<script type="module" src="notes.js"></script>
++</head>
++<body>
++<div class="app" id="app">
++  <aside class="vault" id="vault" aria-label="vault">
++    <header class="vault-head">
++      <span class="vault-name" id="vaultName">vault</span>
++      <button class="vault-pick" id="vaultPick" type="button" disabled
++          title="escolher pasta (ainda não disponível)">escolher pasta</button>
++    </header>
++    <nav class="tree" id="tree" role="tree" aria-label="arquivos da vault">
++      <p class="empty">nenhuma vault escolhida</p>
++    </nav>
++  </aside>
++  <div class="splitter" id="splitter" role="separator"
++      aria-orientation="vertical" aria-label="redimensionar vault" tabindex="0"></div>
++  <main class="note" id="note">
++    <header class="note-head">
++      <span class="note-title" id="noteTitle">sem nota aberta</span>
++    </header>
++    <div class="editor" id="editor" aria-readonly="true">
++      <p class="hint">esqueleto da página de notas: leitura e edição da vault
++        chegam nas próximas fatias.</p>
++    </div>
++  </main>
++</div>
++</body>
++</html>
+--- /dev/null
++++ b/chrome/browser/resources/aero_notes/notes.css
+@@ -0,0 +1,82 @@
++:root {
++  --bg: #0b0d14;
++  --panel: #10131c;
++  --text: #e7e4f3;
++  --text2: #9a94b3;
++  --line: #262a3a;
++  --accent: #b69cff;
++  --vault-w: 260px;
++}
++@media (prefers-color-scheme: light) {
++  :root {
++    --bg: #f7f6fb;
++    --panel: #efedf6;
++    --text: #1b1830;
++    --text2: #5f5a78;
++    --line: #d9d5e8;
++    --accent: #7a5ce0;
++  }
++}
++* { box-sizing: border-box; margin: 0; }
++html, body { height: 100%; overflow: hidden; }
++body {
++  background: var(--bg);
++  color: var(--text);
++  font: 14px/1.5 "Noto Sans", "DejaVu Sans", system-ui, sans-serif;
++}
++.app {
++  display: grid;
++  grid-template-columns: var(--vault-w) 4px 1fr;
++  height: 100%;
++}
++.vault {
++  background: var(--panel);
++  display: flex;
++  flex-direction: column;
++  min-width: 0;
++}
++.vault-head, .note-head {
++  align-items: center;
++  border-bottom: 1px solid var(--line);
++  display: flex;
++  gap: 8px;
++  height: 40px;
++  padding: 0 12px;
++}
++.vault-name {
++  color: var(--accent);
++  flex: 1;
++  font-weight: 600;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++.vault-pick {
++  background: none;
++  border: 1px solid var(--line);
++  border-radius: 4px;
++  color: var(--text2);
++  font: inherit;
++  font-size: 12px;
++  padding: 2px 8px;
++}
++.tree { flex: 1; overflow: auto; padding: 8px 0; }
++.empty, .hint { color: var(--text2); padding: 8px 12px; }
++.splitter {
++  background: var(--line);
++  cursor: col-resize;
++}
++.splitter:hover, .splitter:focus-visible, .splitter.dragging {
++  background: var(--accent);
++  outline: none;
++}
++.note { display: flex; flex-direction: column; min-width: 0; }
++.note-title { color: var(--text2); }
++.editor {
++  flex: 1;
++  margin: 0 auto;
++  max-width: 820px;
++  overflow: auto;
++  padding: 32px 24px;
++  width: 100%;
++}
+--- /dev/null
++++ b/chrome/browser/resources/aero_notes/notes.js
+@@ -0,0 +1,54 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++// Skeleton of chrome://notes: only the resizable vault sidebar. No network,
++// no Mojo, no innerHTML (Trusted Types is enforced by the WebUI CSP).
++
++const MIN_W = 160;
++const MAX_W = 560;
++
++function setVaultWidth(px) {
++  const w = Math.max(MIN_W, Math.min(MAX_W, Math.round(px)));
++  document.documentElement.style.setProperty('--vault-w', `${w}px`);
++  return w;
++}
++
++function initSplitter() {
++  const splitter = document.getElementById('splitter');
++  const vault = document.getElementById('vault');
++  let startX = 0;
++  let startW = 0;
++
++  splitter.addEventListener('pointerdown', (e) => {
++    startX = e.clientX;
++    startW = vault.getBoundingClientRect().width;
++    splitter.setPointerCapture(e.pointerId);
++    splitter.classList.add('dragging');
++  });
++  splitter.addEventListener('pointermove', (e) => {
++    if (splitter.hasPointerCapture(e.pointerId)) {
++      setVaultWidth(startW + e.clientX - startX);
++    }
++  });
++  const stop = (e) => {
++    if (splitter.hasPointerCapture(e.pointerId)) {
++      splitter.releasePointerCapture(e.pointerId);
++    }
++    splitter.classList.remove('dragging');
++  };
++  splitter.addEventListener('pointerup', stop);
++  splitter.addEventListener('pointercancel', stop);
++  splitter.addEventListener('keydown', (e) => {
++    const step = e.shiftKey ? 48 : 16;
++    const w = vault.getBoundingClientRect().width;
++    if (e.key === 'ArrowLeft') {
++      setVaultWidth(w - step);
++      e.preventDefault();
++    } else if (e.key === 'ArrowRight') {
++      setVaultWidth(w + step);
++      e.preventDefault();
++    }
++  });
++}
++
++initSplitter();

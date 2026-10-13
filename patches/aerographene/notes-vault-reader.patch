@@ -1,0 +1,357 @@
+aerographene: leitura confinada da vault das notas (v0.3, fatia B2, parte backend).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/notes-webui.patch (BUILD.gn de aero_notes).
+Propósito: núcleo de leitura da vault em aerographene::notes
+(vault_reader.{h,cc}), ainda sem Mojo nem UI (próxima parte da B2).
+ResolveInVault(raiz, relativo) recusa caminho absoluto, componentes
+vazios, "." e "..", NUL e mais de 4096 bytes; resolve symlinks
+(MakeAbsoluteFilePath) e exige que o resultado fique dentro do realpath da
+raiz (symlink para fora = recusa; para dentro = aceito). ListVaultDir lista
+um nível (árvore sob demanda): diretórios e arquivos .md/imagem, sem
+ocultos, sem symlinks que saem da vault, no máximo 5000 entradas, pastas
+primeiro. ReadVaultNote lê só .md regular até 4 MiB. I/O bloqueante: o
+chamador roda em sequência MayBlock. Testes em vault_reader_unittest.cc
+(alvo aero_notes:unit_tests, ligado a unit_tests no Linux). Limite
+conhecido: TOCTOU entre resolver e abrir (troca de componente por symlink
+depois da checagem) fica para quando a escrita (B4) existir.
+
+--- a/chrome/browser/ui/webui/aero_notes/BUILD.gn
++++ b/chrome/browser/ui/webui/aero_notes/BUILD.gn
+@@ -18,3 +18,23 @@
+     "//services/network/public/mojom",
+   ]
+ }
++
++# Confined read access to the vault (fatia B2). Mojo comes later.
++source_set("vault_reader") {
++  sources = [
++    "vault_reader.cc",
++    "vault_reader.h",
++  ]
++  public_deps = [ "//base" ]
++}
++
++source_set("unit_tests") {
++  testonly = true
++  sources = [ "vault_reader_unittest.cc" ]
++  deps = [
++    ":vault_reader",
++    "//base",
++    "//base/test:test_support",
++    "//testing/gtest",
++  ]
++}
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_notes/vault_reader.h
+@@ -0,0 +1,54 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_AERO_NOTES_VAULT_READER_H_
++#define CHROME_BROWSER_UI_WEBUI_AERO_NOTES_VAULT_READER_H_
++
++#include <stddef.h>
++#include <stdint.h>
++
++#include <optional>
++#include <string>
++#include <string_view>
++#include <vector>
++
++#include "base/files/file_path.h"
++
++// Read-only access to a notes vault (a local folder of Markdown files),
++// confined to the vault root. Paths coming from the page are untrusted:
++// relative, '/'-separated, no empty, "." or ".." components, no NUL, and
++// after resolving symlinks the result must stay inside the real root.
++// Blocking file I/O: call on a MayBlock sequence. Not wired to Mojo yet.
++namespace aerographene::notes {
++
++inline constexpr size_t kMaxRelativePathLength = 4096;
++inline constexpr size_t kMaxNoteBytes = 4 * 1024 * 1024;
++inline constexpr size_t kMaxListEntries = 5000;
++
++struct VaultEntry {
++  std::string path;  // relative to the vault root, '/'-separated
++  bool is_dir = false;
++  int64_t size = 0;
++};
++
++// Real path of `relative` inside the real path of `root`, or nullopt when
++// the input is malformed, missing, or escapes the root (also via symlink).
++// An empty `relative` means the root itself.
++std::optional<base::FilePath> ResolveInVault(const base::FilePath& root,
++                                             std::string_view relative);
++
++// One level of `relative` (lazy tree): visible directories and files with a
++// note or image extension, directories first, then by name. Hidden entries
++// (leading '.') and symlinks resolving outside the root are skipped. At most
++// kMaxListEntries. nullopt when `relative` is not a directory in the vault.
++std::optional<std::vector<VaultEntry>> ListVaultDir(
++    const base::FilePath& root,
++    std::string_view relative);
++
++// Contents of a ".md" regular file in the vault, up to kMaxNoteBytes.
++std::optional<std::string> ReadVaultNote(const base::FilePath& root,
++                                         std::string_view relative);
++
++}  // namespace aerographene::notes
++
++#endif  // CHROME_BROWSER_UI_WEBUI_AERO_NOTES_VAULT_READER_H_
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_notes/vault_reader.cc
+@@ -0,0 +1,136 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "chrome/browser/ui/webui/aero_notes/vault_reader.h"
++
++#include <algorithm>
++
++#include "base/files/file_enumerator.h"
++#include "base/files/file_util.h"
++#include "base/strings/string_split.h"
++#include "base/strings/string_util.h"
++
++namespace aerographene::notes {
++
++namespace {
++
++bool IsValidRelative(std::string_view relative) {
++  if (relative.size() > kMaxRelativePathLength ||
++      relative.find('\0') != std::string_view::npos) {
++    return false;
++  }
++  if (relative.empty()) {
++    return true;
++  }
++  if (relative.front() == '/') {
++    return false;
++  }
++  for (std::string_view part : base::SplitStringPiece(
++           relative, "/", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL)) {
++    if (part.empty() || part == "." || part == "..") {
++      return false;
++    }
++  }
++  return true;
++}
++
++bool HasExtension(const base::FilePath& path,
++                  std::initializer_list<std::string_view> exts) {
++  const std::string ext = base::ToLowerASCII(path.FinalExtension());
++  return std::ranges::any_of(exts,
++                             [&](std::string_view e) { return ext == e; });
++}
++
++bool IsNote(const base::FilePath& path) {
++  return HasExtension(path, {".md"});
++}
++
++bool IsListable(const base::FilePath& path) {
++  return HasExtension(path, {".md", ".png", ".jpg", ".jpeg", ".gif", ".webp",
++                             ".svg"});
++}
++
++}  // namespace
++
++std::optional<base::FilePath> ResolveInVault(const base::FilePath& root,
++                                             std::string_view relative) {
++  if (!root.IsAbsolute() || !IsValidRelative(relative)) {
++    return std::nullopt;
++  }
++  const base::FilePath real_root = base::MakeAbsoluteFilePath(root);
++  if (real_root.empty()) {
++    return std::nullopt;
++  }
++  if (relative.empty()) {
++    return real_root;
++  }
++  const base::FilePath real =
++      base::MakeAbsoluteFilePath(real_root.Append(relative));
++  if (real.empty() || !real_root.IsParent(real)) {
++    return std::nullopt;
++  }
++  return real;
++}
++
++std::optional<std::vector<VaultEntry>> ListVaultDir(
++    const base::FilePath& root,
++    std::string_view relative) {
++  std::optional<base::FilePath> dir = ResolveInVault(root, relative);
++  if (!dir || !base::DirectoryExists(*dir)) {
++    return std::nullopt;
++  }
++  const std::string prefix =
++      relative.empty() ? std::string() : std::string(relative) + "/";
++  std::vector<VaultEntry> entries;
++  base::FileEnumerator e(*dir, /*recursive=*/false,
++                         base::FileEnumerator::FILES |
++                             base::FileEnumerator::DIRECTORIES);
++  for (base::FilePath p = e.Next(); !p.empty(); p = e.Next()) {
++    const std::string name = p.BaseName().value();
++    if (name.empty() || name[0] == '.') {
++      continue;
++    }
++    const std::string rel = prefix + name;
++    // Re-resolve so symlinks pointing outside the vault are dropped.
++    std::optional<base::FilePath> real = ResolveInVault(root, rel);
++    if (!real) {
++      continue;
++    }
++    VaultEntry entry;
++    entry.path = rel;
++    entry.is_dir = base::DirectoryExists(*real);
++    if (!entry.is_dir) {
++      if (!IsListable(*real)) {
++        continue;
++      }
++      std::optional<int64_t> size = base::GetFileSize(*real);
++      entry.size = size.value_or(0);
++    }
++    entries.push_back(std::move(entry));
++    if (entries.size() >= kMaxListEntries) {
++      break;
++    }
++  }
++  std::ranges::sort(entries, [](const VaultEntry& a, const VaultEntry& b) {
++    if (a.is_dir != b.is_dir) {
++      return a.is_dir;
++    }
++    return a.path < b.path;
++  });
++  return entries;
++}
++
++std::optional<std::string> ReadVaultNote(const base::FilePath& root,
++                                         std::string_view relative) {
++  std::optional<base::FilePath> path = ResolveInVault(root, relative);
++  if (!path || !IsNote(*path) || base::DirectoryExists(*path)) {
++    return std::nullopt;
++  }
++  std::string contents;
++  if (!base::ReadFileToStringWithMaxSize(*path, &contents, kMaxNoteBytes)) {
++    return std::nullopt;
++  }
++  return contents;
++}
++
++}  // namespace aerographene::notes
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_notes/vault_reader_unittest.cc
+@@ -0,0 +1,102 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "chrome/browser/ui/webui/aero_notes/vault_reader.h"
++
++#include <string>
++
++#include "base/files/file_util.h"
++#include "base/files/scoped_temp_dir.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace aerographene::notes {
++namespace {
++
++class VaultReaderTest : public testing::Test {
++ protected:
++  void SetUp() override {
++    ASSERT_TRUE(outer_.CreateUniqueTempDir());
++    root_ = outer_.GetPath().Append("vault");
++    ASSERT_TRUE(base::CreateDirectory(root_.Append("sub")));
++    ASSERT_TRUE(base::WriteFile(root_.Append("a.md"), "# a"));
++    ASSERT_TRUE(base::WriteFile(root_.Append("sub/b.md"), "b"));
++    ASSERT_TRUE(base::WriteFile(root_.Append("img.png"), "png"));
++    ASSERT_TRUE(base::WriteFile(root_.Append("x.txt"), "txt"));
++    ASSERT_TRUE(base::WriteFile(root_.Append(".hidden.md"), "h"));
++    ASSERT_TRUE(base::WriteFile(outer_.GetPath().Append("secret.md"), "s"));
++    ASSERT_TRUE(base::CreateDirectory(outer_.GetPath().Append("outdir")));
++  }
++
++  base::ScopedTempDir outer_;
++  base::FilePath root_;
++};
++
++TEST_F(VaultReaderTest, ReadsNotesInside) {
++  EXPECT_EQ(ReadVaultNote(root_, "a.md"), "# a");
++  EXPECT_EQ(ReadVaultNote(root_, "sub/b.md"), "b");
++}
++
++TEST_F(VaultReaderTest, RejectsMalformedPaths) {
++  for (const char* p : {"/etc/passwd", "../secret.md", "sub/../a.md",
++                        "./a.md", "sub//b.md", "sub/", "..", "."}) {
++    EXPECT_FALSE(ResolveInVault(root_, p)) << p;
++    EXPECT_FALSE(ReadVaultNote(root_, p)) << p;
++  }
++  EXPECT_FALSE(ResolveInVault(root_, std::string("a.md\0x", 6)));
++  EXPECT_FALSE(ResolveInVault(root_, std::string(kMaxRelativePathLength + 1,
++                                                 'a')));
++  EXPECT_FALSE(ResolveInVault(base::FilePath("relative"), "a.md"));
++}
++
++TEST_F(VaultReaderTest, RejectsSymlinkOutside) {
++  ASSERT_TRUE(base::CreateSymbolicLink(outer_.GetPath().Append("secret.md"),
++                                       root_.Append("link.md")));
++  ASSERT_TRUE(base::CreateSymbolicLink(outer_.GetPath().Append("outdir"),
++                                       root_.Append("linkdir")));
++  EXPECT_FALSE(ReadVaultNote(root_, "link.md"));
++  EXPECT_FALSE(ListVaultDir(root_, "linkdir"));
++  auto list = ListVaultDir(root_, "");
++  ASSERT_TRUE(list);
++  for (const auto& e : *list) {
++    EXPECT_NE(e.path, "link.md");
++    EXPECT_NE(e.path, "linkdir");
++  }
++}
++
++TEST_F(VaultReaderTest, AllowsSymlinkInside) {
++  ASSERT_TRUE(base::CreateSymbolicLink(root_.Append("sub/b.md"),
++                                       root_.Append("alias.md")));
++  EXPECT_EQ(ReadVaultNote(root_, "alias.md"), "b");
++}
++
++TEST_F(VaultReaderTest, OnlyMarkdownIsReadable) {
++  EXPECT_FALSE(ReadVaultNote(root_, "img.png"));
++  EXPECT_FALSE(ReadVaultNote(root_, "x.txt"));
++  EXPECT_FALSE(ReadVaultNote(root_, "sub"));
++  EXPECT_FALSE(ReadVaultNote(root_, "missing.md"));
++}
++
++TEST_F(VaultReaderTest, RejectsHugeNote) {
++  ASSERT_TRUE(base::WriteFile(root_.Append("big.md"),
++                              std::string(kMaxNoteBytes + 1, 'x')));
++  EXPECT_FALSE(ReadVaultNote(root_, "big.md"));
++}
++
++TEST_F(VaultReaderTest, ListsOneLevelFiltered) {
++  auto list = ListVaultDir(root_, "");
++  ASSERT_TRUE(list);
++  ASSERT_EQ(list->size(), 3u);
++  EXPECT_EQ((*list)[0].path, "sub");
++  EXPECT_TRUE((*list)[0].is_dir);
++  EXPECT_EQ((*list)[1].path, "a.md");
++  EXPECT_EQ((*list)[1].size, 3);
++  EXPECT_EQ((*list)[2].path, "img.png");
++  auto sub = ListVaultDir(root_, "sub");
++  ASSERT_TRUE(sub);
++  ASSERT_EQ(sub->size(), 1u);
++  EXPECT_EQ((*sub)[0].path, "sub/b.md");
++  EXPECT_FALSE(ListVaultDir(root_, "a.md"));
++}
++
++}  // namespace
++}  // namespace aerographene::notes
+--- a/chrome/test/BUILD.gn
++++ b/chrome/test/BUILD.gn
+@@ -6948,6 +6948,9 @@
+ 
+   if (is_linux) {
+     deps += [ "//chrome/browser:shell_integration_linux" ]
++
++    # aerographene: notes vault reader.
++    deps += [ "//chrome/browser/ui/webui/aero_notes:unit_tests" ]
+   }
+ 
+   if (is_chromeos) {
