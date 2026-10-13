@@ -1,6 +1,7 @@
 # Maintainer: newcortexbr
 pkgname=aerographene
-pkgver=0.1.0   # = AERO_VERSION de build/config.sh; tag v${pkgver}
+# pkgver = versão da release (tag v${pkgver}); packaging/build-native.sh passa AERO_PKGVER
+pkgver=${AERO_PKGVER:-0.1.0}
 pkgrel=1
 _chromium=154.0.8037.97   # base do ungoogled-chromium; independente do pkgver
 pkgdesc="Navegador baseado em ungoogled-chromium ${_chromium}"
@@ -14,16 +15,17 @@ depends=('gtk3' 'nss' 'alsa-lib' 'libxss' 'libcups' 'libxkbcommon' 'mesa'
 # pixelized usa JetBrains Mono; sem ela cai na mono do sistema (theme-font.patch)
 optdepends=('ttf-jetbrains-mono: fonte do tema pixelized')
 options=('!strip' '!debug')
-# release.yml publica o tarball com este nome (renomeado do artifact do build)
-source=("${pkgname}-${pkgver}-x86_64_linux.tar.zst::${url}/releases/download/v${pkgver}/${pkgname}-${pkgver}-x86_64_linux.tar.zst"
+# O pacote sai do tarball compilado: packaging/build-native.sh coloca o tarball local no diretório com o
+# nome abaixo (makepkg usa o arquivo presente e não baixa). Sem ele, baixa o asset do release.yml.
+source=("${pkgname}-${pkgver}-x86_64_linux.tar.zst::${url}/releases/download/v${pkgver}/${pkgname}-v${pkgver}-avx2-linux.tar.zst"
         "${pkgname}.desktop"
         "${pkgname}-theme-import.desktop"
         "${pkgname}-mime.xml"
         "${pkgname}-wrapper"
         "initial_preferences"
         "LICENSE")
-# SKIP até existir release publicada (repo privado: baixar exige token); trocar por updpkgsums
-sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
+# AERO_TARBALL_SHA256 (calculado por build-native.sh) confere o tarball local; sem ele, SKIP
+sha256sums=("${AERO_TARBALL_SHA256:-SKIP}" 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
 noextract=("${pkgname}-${pkgver}-x86_64_linux.tar.zst")
 
 prepare() {
