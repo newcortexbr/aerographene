@@ -1,7 +1,7 @@
 # Maintainer: newcortexbr
 pkgname=aerographene
 # pkgver = versão da release (tag v${pkgver}); packaging/build-native.sh passa AERO_PKGVER
-pkgver=${AERO_PKGVER:-0.1.0}
+pkgver=${AERO_PKGVER:-0.3.0}
 pkgrel=1
 _chromium=154.0.8037.97   # base do ungoogled-chromium; independente do pkgver
 pkgdesc="Navegador baseado em ungoogled-chromium ${_chromium}"
