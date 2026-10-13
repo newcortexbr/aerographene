@@ -85,10 +85,10 @@ Fluxo de release (cada passo exige pedido explícito do dono: dispatch de workfl
 
 1. `build.yml` (dispatch; input `cpu`: `avx2` padrão, `avx1`) gera o artifact `aerographene-linux-x86_64` (avx2) ou `aerographene-linux-x86_64-avx1`.
 2. `smoke.yml` valida o artifact.
-3. `release.yml` (inputs `run_id`, `tag` vX.Y.Z, `cpu`) roda `packaging/build-native.sh` e cria a release em draft (ou acrescenta ao draft existente da mesma tag; recusa release já publicada) com `aerographene-vX.Y.Z-<cpu>-linux.{tar.zst,pkg.tar.zst,deb,rpm}`, `SHA256SUMS` e `namcap-<cpu>.txt`. Um dispatch por cpu.
+3. `release.yml` (inputs `run_id`, `tag` vX.Y.Z, `cpu`) roda `packaging/build-native.sh` e cria a release em draft (ou acrescenta ao draft existente da mesma tag; recusa release já publicada) com ``<cpu>-linux--aerographene-vX.Y.Z.tar.zst`, `<cpu>-arch--….pkg.tar.zst`, `<cpu>-debian--….deb`, `<cpu>-fedora--….rpm``, `SHA256SUMS` e `<cpu>-arch--namcap.txt`. Um dispatch por cpu.
 4. Dono publica o draft. Nada aqui publica.
 
-O pacote Arch sai do próprio `packaging/arch/PKGBUILD`, rodado em container `archlinux:base-devel` sobre o tarball local (nada é baixado): `build-native.sh` copia o tarball para o nome que o `source=` espera e passa `AERO_PKGVER` (versão da tag) e `AERO_TARBALL_SHA256` (conferido pelo makepkg). Sem essas variáveis o PKGBUILD continua utilizável à mão: baixa o asset `aerographene-vX.Y.Z-avx2-linux.tar.zst` da release e usa `SKIP`.
+O pacote Arch sai do próprio `packaging/arch/PKGBUILD`, rodado em container `archlinux:base-devel` sobre o tarball local (nada é baixado): `build-native.sh` copia o tarball para o nome que o `source=` espera e passa `AERO_PKGVER` (versão da tag) e `AERO_TARBALL_SHA256` (conferido pelo makepkg). Sem essas variáveis o PKGBUILD continua utilizável à mão: baixa o asset `avx2-linux--aerographene-vX.Y.Z.tar.zst` da release e usa `SKIP`.
 
 `.deb` e `.rpm`: nfpm (`goreleaser/nfpm:v2.48.0` fixado por digest) com `packaging/nfpm.yaml`. O script extrai o `.pkg.tar.zst` (modos preservados), gera o manifesto de arquivos e anexa a lista de `contents:` ao cabeçalho do YAML, então os três formatos têm a mesma árvore. Dependências por distro estão em `overrides:` do `nfpm.yaml`. Sem scripts de pós-instalação: os triggers de MIME, desktop e ícones do dpkg/rpm já atualizam os caches (no Arch, hooks do pacman).
 
@@ -110,7 +110,7 @@ Pendências:
 - fontes auxiliares do PKGBUILD com `SKIP` (só o tarball tem sha256, passado por `build-native.sh`).
 - ícone só 48x48 (`product_logo_48.png`, placeholder).
 - nenhuma tag existe no repositório.
-- `namcap` rodou (13/10/2026, `namcap-<cpu>.txt` na release): sem erro que bloqueie; avisos esperados de dependências não declaradas (libs Qt dos `libqt5_shim`/`libqt6_shim`, carregados por dlopen e opcionais) e setuid do `chrome-sandbox`.
+- `namcap` rodou (13/10/2026, `<cpu>-arch--namcap.txt` na release): sem erro que bloqueie; avisos esperados de dependências não declaradas (libs Qt dos `libqt5_shim`/`libqt6_shim`, carregados por dlopen e opcionais) e setuid do `chrome-sandbox`.
 
 ### teste dos pacotes (13/10/2026)
 

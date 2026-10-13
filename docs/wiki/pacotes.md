@@ -6,11 +6,11 @@ como instalar o aerographene (Arch, Debian/Ubuntu, Fedora ou tarball) e como os 
 
 cada release (draft até o dono publicar) tem, por alvo de CPU, quatro arquivos com o mesmo conteúdo:
 
-- `aerographene-vX.Y.Z-avx2-linux.tar.zst`: tarball compilado (x86-64-v3, o padrão).
-- `aerographene-vX.Y.Z-avx2-linux.pkg.tar.zst`: pacote Arch.
-- `aerographene-vX.Y.Z-avx2-linux.deb`: Debian/Ubuntu.
-- `aerographene-vX.Y.Z-avx2-linux.rpm`: Fedora e derivados.
-- `SHA256SUMS` cobre todos; `namcap-avx2.txt` é o relatório do `namcap` sobre o pacote Arch.
+- `avx2-linux--aerographene-vX.Y.Z.tar.zst`: tarball compilado (x86-64-v3, o padrão).
+- `avx2-arch--aerographene-vX.Y.Z.pkg.tar.zst`: pacote Arch.
+- `avx2-debian--aerographene-vX.Y.Z.deb`: Debian/Ubuntu.
+- `avx2-fedora--aerographene-vX.Y.Z.rpm`: Fedora e derivados.
+- `SHA256SUMS` cobre todos; `avx2-arch--namcap.txt` é o relatório do `namcap` sobre o pacote Arch.
 
 para CPUs sem AVX2 (Ivy Bridge, Sandy Bridge) existe o mesmo conjunto com `-avx1-` no nome (build `-march=ivybridge`, [ADR 0009](../adr/0009-build-ivy-bridge.md)). Os dois alvos usam o mesmo nome de pacote: instale só um.
 
@@ -20,11 +20,11 @@ para CPUs sem AVX2 (Ivy Bridge, Sandy Bridge) existe o mesmo conjunto com `-avx1
 sha256sum -c SHA256SUMS --ignore-missing
 
 # Arch
-sudo pacman -U aerographene-vX.Y.Z-avx2-linux.pkg.tar.zst
+sudo pacman -U avx2-arch--aerographene-vX.Y.Z.pkg.tar.zst
 # Debian / Ubuntu (apt resolve as dependências)
-sudo apt install ./aerographene-vX.Y.Z-avx2-linux.deb
+sudo apt install ./avx2-debian--aerographene-vX.Y.Z.deb
 # Fedora
-sudo dnf install ./aerographene-vX.Y.Z-avx2-linux.rpm
+sudo dnf install ./avx2-fedora--aerographene-vX.Y.Z.rpm
 ```
 
 remover: `sudo pacman -R aerographene`, `sudo apt remove aerographene` ou `sudo dnf remove aerographene`. Seu perfil em `~/.config/aerographene` não é tocado.
@@ -54,7 +54,7 @@ nada é recompilado: tudo parte do tarball da build.
 
 ## resumo para agentes
 
-- assets por cpu: `aerographene-vX.Y.Z-<avx2|avx1>-linux.{tar.zst,pkg.tar.zst,deb,rpm}` + `SHA256SUMS`; sempre draft.
+- assets por cpu: ``<avx2|avx1>-<linux|arch|debian|fedora>--aerographene-vX.Y.Z.<tar.zst|pkg.tar.zst|deb|rpm>`` + `SHA256SUMS`; sempre draft.
 - fonte única da árvore instalada: `packaging/arch/PKGBUILD` (+ wrapper, desktop, MIME, `initial_preferences`); deb/rpm derivam do pacote Arch via `packaging/nfpm.yaml` (cabeçalho e dependências; `contents:` é gerado). Mudou arquivo instalado: mude só o PKGBUILD.
 - dependências de deb/rpm ficam em `overrides` do `nfpm.yaml`; Arch no `depends` do PKGBUILD.
 - gerar: `bash packaging/build-native.sh <tar.zst> <cpu> <X.Y.Z> <dir>` (precisa de docker e rede); testar: `bash packaging/test-install.sh <dir> <cpu> <X.Y.Z>`.

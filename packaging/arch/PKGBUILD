@@ -17,7 +17,7 @@ optdepends=('ttf-jetbrains-mono: fonte do tema pixelized')
 options=('!strip' '!debug')
 # O pacote sai do tarball compilado: packaging/build-native.sh coloca o tarball local no diretório com o
 # nome abaixo (makepkg usa o arquivo presente e não baixa). Sem ele, baixa o asset do release.yml.
-source=("${pkgname}-${pkgver}-x86_64_linux.tar.zst::${url}/releases/download/v${pkgver}/${pkgname}-v${pkgver}-avx2-linux.tar.zst"
+source=("${pkgname}-${pkgver}-x86_64_linux.tar.zst::${url}/releases/download/v${pkgver}/avx2-linux--${pkgname}-v${pkgver}.tar.zst"
         "${pkgname}.desktop"
         "${pkgname}-theme-import.desktop"
         "${pkgname}-mime.xml"

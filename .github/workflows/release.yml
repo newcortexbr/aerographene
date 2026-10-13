@@ -48,7 +48,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir dist
-          base="aerographene-${TAG}-${CPU}-linux"
+          base="${CPU}-linux--aerographene-${TAG}"
           cp art/*.tar.zst "dist/${base}.tar.zst"
           # makepkg (PKGBUILD) e nfpm em containers; saída em dist/
           bash packaging/build-native.sh "dist/${base}.tar.zst" "$CPU" "${TAG#v}" dist
@@ -64,8 +64,9 @@ jobs:
           # junta com o SHA256SUMS de um dispatch anterior (outra cpu) da mesma tag, se houver
           mkdir old
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p SHA256SUMS -D old 2>/dev/null || true
-          (cd dist && sha256sum "aerographene-${TAG}-${CPU}-linux".{tar.zst,pkg.tar.zst,deb,rpm}) > new.sums
-          { grep -v -- "-${CPU}-linux\." old/SHA256SUMS 2>/dev/null || true; cat new.sums; } | sort -k2 > dist/SHA256SUMS
+          (cd dist && sha256sum "${CPU}-linux--aerographene-${TAG}.tar.zst" "${CPU}-arch--aerographene-${TAG}.pkg.tar.zst" \
+            "${CPU}-debian--aerographene-${TAG}.deb" "${CPU}-fedora--aerographene-${TAG}.rpm") > new.sums
+          { grep -v -- "  ${CPU}-" old/SHA256SUMS 2>/dev/null || true; cat new.sums; } | sort -k2 > dist/SHA256SUMS
           rm -f dist/SHA256SUMS.native-* new.sums
           cat dist/SHA256SUMS
 
@@ -73,15 +74,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
+          CPU: ${{ inputs.cpu }}
         run: |
           set -euo pipefail
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             # só acrescenta ao draft existente; recusa mexer em release já publicada
             [ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft -q .isDraft)" = true ] \
               || { echo "erro: $TAG já está publicada" >&2; exit 1; }
-            gh release upload "$TAG" dist/aerographene-* dist/SHA256SUMS dist/namcap-*.txt \
+            gh release upload "$TAG" dist/"${CPU}"-* dist/SHA256SUMS \
               --repo "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create "$TAG" dist/aerographene-* dist/SHA256SUMS dist/namcap-*.txt \
+            gh release create "$TAG" dist/"${CPU}"-* dist/SHA256SUMS \
               --repo "$GITHUB_REPOSITORY" --draft --title "aerographene $TAG" --target "$GITHUB_SHA"
           fi

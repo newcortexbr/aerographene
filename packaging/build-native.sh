@@ -5,7 +5,7 @@
 #   1. makepkg (packaging/arch/PKGBUILD) num container archlinux:base-devel, usuário não-root
 #   2. a árvore do .pkg.tar.zst é extraída e vira a lista de arquivos do nfpm
 #      (deb e rpm saem com o mesmo conteúdo, modos e wrapper do pacote Arch)
-# Saída: aerographene-vX.Y.Z-<cpu>-linux.{pkg.tar.zst,deb,rpm}, namcap.txt, SHA256SUMS.native
+# Saída: <cpu>-arch--aerographene-vX.Y.Z.pkg.tar.zst, <cpu>-debian--...deb, <cpu>-fedora--...rpm, <cpu>-arch--namcap.txt, SHA256SUMS.native
 set -euo pipefail
 
 ARCH_IMAGE="archlinux:base-devel"
@@ -28,12 +28,12 @@ tarball="$(cd "$(dirname "$tarball")" && pwd)/$(basename "$tarball")"
 work="$out/.work-$cpu"
 rm -rf -- "$work"
 mkdir -p "$work"
-base="aerographene-v${ver}-${cpu}-linux"
+n_arch="${cpu}-arch--aerographene-v${ver}"; n_deb="${cpu}-debian--aerographene-v${ver}"; n_rpm="${cpu}-fedora--aerographene-v${ver}"
 sha="$(sha256sum "$tarball" | cut -d' ' -f1)"
 
 echo "== 1/3 makepkg ($ARCH_IMAGE)"
 docker run --rm \
-    -e AERO_PKGVER="$ver" -e AERO_TARBALL_SHA256="$sha" -e BASE="$base" \
+    -e AERO_PKGVER="$ver" -e AERO_TARBALL_SHA256="$sha" -e BASE="$n_arch" \
     -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
     -v "$here/arch:/pkgsrc:ro" -v "$tarball:/in/tarball.tar.zst:ro" -v "$work:/out" \
     "$ARCH_IMAGE" bash -euo pipefail -c '
@@ -75,12 +75,12 @@ grep -q 'mode: 04755' "$work/nfpm.run.yaml" || echo "aviso: chrome-sandbox 4755 
 echo "== 3/3 nfpm ($NFPM_IMAGE)"
 for fmt in deb rpm; do
     docker run --rm --user "$(id -u):$(id -g)" -e VERSION="$ver" -v "$work:/out" "$NFPM_IMAGE" \
-        package -f /out/nfpm.run.yaml -p "$fmt" -t "/out/${base}.${fmt}"
+        package -f /out/nfpm.run.yaml -p "$fmt" -t "/out/$([ "$fmt" = deb ] && echo "$n_deb" || echo "$n_rpm").${fmt}"
 done
 
-for ext in pkg.tar.zst deb rpm; do mv -- "$work/${base}.${ext}" "$out/"; done
-mv -- "$work/namcap.txt" "$out/namcap-${cpu}.txt"
+mv -- "$work/${n_arch}.pkg.tar.zst" "$work/${n_deb}.deb" "$work/${n_rpm}.rpm" "$out/"
+mv -- "$work/namcap.txt" "$out/${cpu}-arch--namcap.txt"
 mv -- "$work/manifest.tsv" "$out/manifest-${cpu}.tsv"
 rm -rf -- "$work"
-(cd "$out" && sha256sum "${base}".{pkg.tar.zst,deb,rpm} > "SHA256SUMS.native-${cpu}")
+(cd "$out" && sha256sum "${n_arch}.pkg.tar.zst" "${n_deb}.deb" "${n_rpm}.rpm" > "SHA256SUMS.native-${cpu}")
 ls -l "$out"

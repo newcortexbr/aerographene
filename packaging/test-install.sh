@@ -64,7 +64,7 @@ cpu="${2:?cpu}"
 ver="${3:?versão}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 dir="$(cd "$dir" && pwd)"
-base="aerographene-v${ver}-${cpu}-linux"
+n_arch="${cpu}-arch--aerographene-v${ver}"; n_deb="${cpu}-debian--aerographene-v${ver}"; n_rpm="${cpu}-fedora--aerographene-v${ver}"
 rc=0
 
 run() {  # $1 = rótulo, $2 = imagem, $3 = pacote, $4 = comando de instalação, $5 = comando de remoção
@@ -79,13 +79,13 @@ run() {  # $1 = rótulo, $2 = imagem, $3 = pacote, $4 = comando de instalação,
     fi
 }
 
-run arch archlinux "${base}.pkg.tar.zst" \
-    "pacman -Sy --noconfirm >/dev/null && pacman -U --noconfirm /pkg/${base}.pkg.tar.zst" \
+run arch archlinux "${n_arch}.pkg.tar.zst" \
+    "pacman -Sy --noconfirm >/dev/null && pacman -U --noconfirm /pkg/${n_arch}.pkg.tar.zst" \
     "pacman -R --noconfirm aerographene"
-run ubuntu ubuntu:24.04 "${base}.deb" \
-    "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /pkg/${base}.deb" \
+run ubuntu ubuntu:24.04 "${n_deb}.deb" \
+    "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /pkg/${n_deb}.deb" \
     "DEBIAN_FRONTEND=noninteractive apt-get remove -y -qq aerographene"
-run fedora fedora:latest "${base}.rpm" \
-    "dnf install -y -q /pkg/${base}.rpm" \
+run fedora fedora:latest "${n_rpm}.rpm" \
+    "dnf install -y -q /pkg/${n_rpm}.rpm" \
     "dnf remove -y -q aerographene"
 exit "$rc"
