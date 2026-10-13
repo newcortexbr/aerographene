@@ -118,3 +118,6 @@ aerographene/notes-webui.patch
 aerographene/terminal-webui.patch
 aerographene/notes-vault-reader.patch
 aerographene/terminal-pty.patch
+aerographene/notes-render.patch
+aerographene/terminal-xterm.patch
+aerographene/terminal-bridge.patch

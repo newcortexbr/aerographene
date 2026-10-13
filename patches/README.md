@@ -405,8 +405,20 @@ v0.3, fatia C1. Esqueleto de `chrome://terminal`: `AeroTerminalUI`/`AeroTerminal
 
 ### `aerographene/notes-vault-reader.patch` (GPL-3.0)
 
-v0.3, fatia B2 (backend). `aerographene::notes::{ResolveInVault, ListVaultDir, ReadVaultNote}` em `aero_notes/vault_reader.*`, alvo `aero_notes:vault_reader`; testes `aero_notes:unit_tests` ligados a `chrome/test:unit_tests` no bloco `is_linux`. Sem Mojo nem UI ainda. Depende de `notes-webui`.
+v0.3, fatia B2 (backend). `aerographene::notes::{ResolveInVault, ListVaultDir, ReadVaultNote}` em `aero_notes/vault_reader.*`, alvo `aero_notes:vault_reader`; testes `aero_notes:unit_tests` ligados a `chrome/test:unit_tests` no bloco `is_linux`. Ligado à página em `notes-render`. Depende de `notes-webui`.
 
 ### `aerographene/terminal-pty.patch` (GPL-3.0; padrão de pty de `remoting/host/terminal_session_linux.cc`, BSD)
 
-v0.3, fatia C2. `aerographene::TerminalSession` em `aero_terminal/terminal_session.*` (alvo `aero_terminal:session`): pty `O_CLOEXEC`, só o escravo em 0/1/2, `setsid`+`TIOCSCTTY`, ambiente limpo, argv só do browser, resize 1..1000, término SIGHUP → SIGKILL ao grupo sem reutilização de pgid. Testes `aero_terminal:unit_tests` no mesmo bloco de `chrome/test/BUILD.gn`. Não exposto por Mojo. Depende de `terminal-webui` e `notes-vault-reader`; fim da série.
+v0.3, fatia C2. `aerographene::TerminalSession` em `aero_terminal/terminal_session.*` (alvo `aero_terminal:session`): pty `O_CLOEXEC`, só o escravo em 0/1/2, `setsid`+`TIOCSCTTY`, ambiente limpo, argv só do browser, resize 1..1000, término SIGHUP → SIGKILL ao grupo sem reutilização de pgid. Testes `aero_terminal:unit_tests` no mesmo bloco de `chrome/test/BUILD.gn`. Não exposto por Mojo. Depende de `terminal-webui` e `notes-vault-reader`. Ligado à página em `terminal-bridge`.
+
+### `aerographene/notes-render.patch` (GPL-3.0)
+
+v0.3, fatias B2 (ligação) e B3. `aerographene::notes::NotesHandler` (`aero_notes/notes_handler.*`, WebUIMessageHandler adicionado só pelo `AeroNotesUI`): `getVault`, `pickVault` (`SelectFileDialog` de pasta), `listDir`, `readNote`, I/O no ThreadPool via `vault_reader`. Pref de perfil `aerographene.notes.vault_path` registrada em `chrome/browser/prefs/browser_prefs.cc` (Linux). `markdown.js` próprio (`IDR_AERO_NOTES_MARKDOWN_JS`) que só cria nós DOM: HTML cru vira texto, links só http(s)/mailto, `[[wikilinks]]`, imagens ainda não. Mensagens WebUI em vez de Mojo (desvio registrado no plano). Depende de `notes-webui` e `notes-vault-reader`.
+
+### `aerographene/terminal-xterm.patch` (MIT, xterm.js 6.0.0)
+
+v0.3, fatia C3. `chrome/browser/resources/aero_terminal/xterm.{mjs,css}` e `XTERM_LICENSE` do pacote npm `@xterm/xterm` 6.0.0 (sha256 do tgz `908e66e04af6c8dc6b00dd3b54de088e2e81e5ed866284fd6c2fb3c2d1c7a3f6`), sem a linha `sourceMappingURL`. Só arquivos novos; ligado ao grd em `terminal-bridge`.
+
+### `aerographene/terminal-bridge.patch` (GPL-3.0)
+
+v0.3, fatia C3. `aerographene::TerminalHandler` (`aero_terminal/terminal_handler.*`, só no `AeroTerminalUI`, confere frame principal e origem `chrome://terminal` em cada mensagem) e `TerminalHost` (alvo `aero_terminal:host`, sessões de uma aba em sequência ThreadPool `BLOCK_SHUTDOWN`, leitura com `FileDescriptorWatcher`). `open(cols, rows)` sem comando nem cwd, até 16 sessões, escrita até 64 KiB, saída em base64; recarregar ou fechar a página mata as sessões. Página com xterm.js por janela; `style-src 'unsafe-inline'` só nesta página (xterm cria `<style>`). Teste `terminal_host_unittest.cc`. Depende de `terminal-webui`, `terminal-pty`, `terminal-xterm` e `notes-render`; fim da série.

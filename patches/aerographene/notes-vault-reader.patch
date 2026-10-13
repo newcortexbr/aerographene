@@ -18,7 +18,7 @@ depois da checagem) fica para quando a escrita (B4) existir.
 
 --- a/chrome/browser/ui/webui/aero_notes/BUILD.gn
 +++ b/chrome/browser/ui/webui/aero_notes/BUILD.gn
-@@ -18,3 +18,23 @@
+@@ -18,3 +18,22 @@
      "//services/network/public/mojom",
    ]
  }
@@ -38,7 +38,6 @@ depois da checagem) fica para quando a escrita (B4) existir.
 +  deps = [
 +    ":vault_reader",
 +    "//base",
-+    "//base/test:test_support",
 +    "//testing/gtest",
 +  ]
 +}
