@@ -188,3 +188,11 @@ Não cabe na noite: B2+ e C3+ funcionando no navegador, D com toolchain (depende
 - B/C: WebUI confiável + Mojo restrito ao controlador; nada no startup; sidebar das notas dentro da página.
 - pty: `posix_openpt` + `base::LaunchProcess` (`fds_to_remap`, `pre_exec_delegate` com `setsid`/`TIOCSCTTY`), padrão de `remoting/host/terminal_session_linux.cc`.
 - noite: E1–E3, A1–A2 + build avx1, B1/C1 (e C2) por objeto, D0.
+
+## status em 13/10/2026 (fatias A e E)
+
+- merge de `origin/main` (v0.2.1 + baseline v0.2) na `v0.3`; versão do produto 0.3.0 em `build/config.sh`, `branding-version.patch`, PKGBUILD e `.SRCINFO` (a build confirmou `aerographene-0.3.0-...` no nome do artefato).
+- A1/A2 (parametrizar cpu, input `cpu` no build/release): feitas e usadas nos runs abaixo.
+- E1-E3 (pacotes `pkg.tar.zst`/`deb`/`rpm` no `release.yml`): feitas; o draft v0.3.0 saiu com os quatro formatos avx2 + `SHA256SUMS` + `namcap-avx2.txt`.
+- runs: build avx2 38352856892 verde (9e41178, PGO, smoke do próprio build verde); smoke.yml 38353472937 verde; release.yml 38353528300 verde (draft v0.3.0, avx2); build avx1 38353476105 (ver abaixo).
+- A3/A4 (build avx1 completa, verificação de ISA, teste em Ivy Bridge): pendentes até o resultado do run avx1.
