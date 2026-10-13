@@ -42,7 +42,12 @@ if [ "${1:-}" = "--inner" ]; then
         fi
         ;;
     removed)
-        for p in /opt/aerographene /usr/bin/aerographene /usr/share/applications/aerographene.desktop \
+        # o navegador cria /opt/aerographene/extensions (vazio) ao rodar como root no teste headless:
+        # não é arquivo do pacote; exige-se ausência de arquivos e só se avisa dos diretórios
+        left="$(find /opt/aerographene -type f -o -type l 2>/dev/null | head -5)"
+        [ -z "$left" ] || fail "arquivos sobraram em /opt/aerographene: $left"
+        [ ! -d /opt/aerographene ] || echo "aviso: diretório residual criado em execução: $(find /opt/aerographene -type d | tr '\n' ' ')"
+        for p in /usr/bin/aerographene /usr/share/applications/aerographene.desktop \
                  /usr/share/applications/aerographene-theme-import.desktop /usr/share/mime/packages/aerographene.xml \
                  /usr/share/icons/hicolor/48x48/apps/aerographene.png /usr/share/licenses/aerographene; do
             [ ! -e "$p" ] || fail "sobrou depois da remoção: $p"
