@@ -12,11 +12,24 @@ validado até aqui (Chromium 154, Cezanne, overlay): os patches aplicam com `--f
 - feito (B2, parte backend, `patches/aerographene/notes-vault-reader.patch`): código que lista e lê a vault sem sair da pasta escolhida, com testes unitários.
 - feito (B2 ligação e B3, `patches/aerographene/notes-render.patch`): botão "escolher pasta" (diálogo de pasta do sistema; a escolha fica salva no perfil), árvore lateral que abre pastas sob demanda e visualização da nota em Markdown. `[[wikilinks]]` abrem a nota com esse nome ao lado da atual ou na raiz da vault.
 - feito (B4, `patches/aerographene/notes-editor.patch`): editor de coluna única com live preview, escrita atômica com detecção de conflito, criar/renomear/apagar e abertura sem seguir symlink (ver as seções abaixo).
-- falta: imagens nas notas, observação de mudanças (B5), aba única e entrada `-o` na command bar (B6) e a migração para Mojo (hoje usa mensagens WebUI).
+- feito (B5, `notes-b5.patch`): watcher da vault, busca por nome e conteúdo e imagens embutidas (seção "watcher, busca e imagens").
+- feito (B6, `patches/aerographene/notes-b6.patch`, último da série): aba única por janela e entrada `o:` na command bar (seção "aba única e command bar").
+- falta: a migração para Mojo (hoje usa mensagens WebUI), cor/ícone próprios da aba e a verificação como `chrome://notes` real.
 
 ## título da aba
 
 decisão do dono em 13/10/2026: o título da aba de notas é sempre `o: <nome da vault>` (nome da pasta escolhida), nunca o nome do arquivo aberto. O nome do arquivo aparece só no cabeçalho da nota dentro da página. Sem vault escolhida o título é `o: notas`. Isso substitui o rótulo `o: <arquivo>.md` do plano (B6) e dos mockups C-r02 para o título da aba.
+
+## aba única e command bar (B6)
+
+command bar (prefixo `o:`, decisão do dono em 13/10/2026; vale a primeira troca de `-o` por `o:`):
+
+- `o: <termo>` + Enter: abre a página de notas sem documento aberto. A barra lateral mostra a árvore com todos os documentos e o centro mostra os resultados da busca (B5, nome e conteúdo) pelo termo; clicar num resultado abre a nota. A URL é `chrome://notes/?q=<termo>`; a página lê `q` depois de carregar a vault. Termo de 2 a 256 unidades, sem caracteres de controle.
+- `o:` sozinho + Enter: abre uma aba NOVA de notas, na raiz da vault, sem documento (o centro mostra a dica de sempre). A URL é `chrome://notes/?new=1`.
+- `o` sem distinção de caixa, espaço depois dos dois pontos opcional (`o:ideias` funciona). `o`, `ox:`, `o :` e `-o` não são o comando.
+- o título da aba continua `o: <nome da vault>` em todos os casos; o termo nunca vai para o título.
+
+aba única: `chrome::Navigate` trata `chrome://notes` (disposição atual, nova aba em primeiro plano ou singleton): se a janela já tem uma aba de notas, foca essa e a leva à URL pedida (o termo novo recarrega a página; nota com edição não salva pede confirmação pelo `beforeunload`); sem aba de notas, abre normalmente. Abas em segundo plano não são alteradas. Exceção: `?new=1` (o `o:` sozinho) não é dobrado e abre outra aba, a pedido do dono. Limite: o Enter da command bar usa a disposição da omnibox (aba atual); "nova" aqui significa "sem reaproveitar a aba de notas existente", não força uma aba extra. Verificado só por unit test do parser, `-fsyntax-only` de `builtin_provider.cc` e `browser_navigator.cc` e a página no Chrome headless; o comportamento no navegador não foi testado.
 
 ## editor (B4)
 
@@ -82,6 +95,7 @@ o antigo limite (alguém trocar um componente por symlink entre conferir e abrir
 - `chrome/browser/resources/aero_notes/markdown.js`: renderizador.
 - `chrome/browser/resources/aero_notes/editor.js`: editor com live preview (modelo puro + visão).
 - `chrome/browser/ui/webui/aero_notes/vault_watcher.{h,cc}` e `vault_watcher_unittest.cc`: watcher recursivo e testes (inotify real).
+- `components/omnibox/browser/aero_notes_command.{h,cc}` e `_unittest.cc`: parser do `o:` e URL.
 - `tests/notes-editor/`: verificação da página num Chrome headless com backend simulado (`run.sh`; cobre editor, watcher, busca e imagens).
 
 ## resumo para agentes
@@ -96,3 +110,4 @@ o antigo limite (alguém trocar um componente por symlink entre conferir e abrir
 - validação: ver `docs/PLANO-V0.3.md`, seção B (status). Página verificada num Chrome headless com backend simulado (`tests/notes-editor/run.sh`); não testada como `chrome://notes` real.
 - B5: `watchVault` (resposta bool; depois o evento `vaultChanged` por `FireWebUIListener`, shim `cr.webUIListenerCallback` em `notes.js`), `searchVault(query)` -> `{hits:[{path,nameMatch,snippet}], truncated}`, `readImage(path, noteDir)` -> `{mime, data}`. Backend em `vault_reader.*` (`SearchVault`, `FindVaultFileByName`, `ReadVaultImage`) e `vault_watcher.*`. O watcher é `SequenceBound<VaultWatcher>` no handler: morre com a aba. Patch `notes-b5` é o último da série.
 - a página, ao receber `vaultChanged`: `syncExternal` (limpa cache de imagens, refaz a árvore, refaz a busca ativa, `checkOpenNote`). Edição externa em nota alterada reutiliza `resolveConflict` do B4. `markdown.js` recebe `opts.loadImage(path, img, onFail)` do editor; sem ele (ou com URL remota/absoluta) imagem vira texto.
+- B6 (`notes-b6`, último da série): `aerographene::ParseNotesCommand(text)` -> `optional<u16string>` (termo; `""` para `o:` sozinho) e `NotesCommandUrl(termo)` (`chrome://notes/?q=<termo>` ou `?new=1`) em `components/omnibox/browser/aero_notes_command.*`, chamados em `BuiltinProvider::Start` logo após o `-t` do terminal-c4 (patch depende dele pelo contexto). Aba única: bloco em `NavigateImpl` (`browser_navigator.cc`, depois do hunk `kHeliumUIScheme`) converte para `SINGLETON_TAB` + `IGNORE_AND_NAVIGATE` quando `GetIndexOfExistingTabMatchingURL` acha uma aba `chrome://notes`; `query == "new=1"` fica de fora. Página: `openFromQuery()` em `notes.js` e `renderHits(target, r)` (compartilhada com a busca lateral). Teste da página com `?q=`: `tests/notes-editor/test-q.js` (rodado por `run.sh`).

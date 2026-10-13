@@ -51,7 +51,8 @@ Arquitetura recomendada:
 - escolha da pasta: `ui::SelectFileDialog` (já usado pelo import de tema da v0.2).
 - render: Markdown → HTML no renderer da WebUI com biblioteca vendorizada (markdown-it, MIT) e saída sanitizada sob Trusted Types (a WebUI já exige); `[[wikilinks]]`, embeds de imagem via URL `chrome://notes/file?path=` servida pelo `URLDataSource` com o mesmo confinamento. Sem HTML cru da nota, sem scripts, sem recursos remotos (CSP padrão da WebUI).
 - editor v1: `textarea` com pré-visualização lado a lado (como C-r02); CodeMirror 6 (MIT) fica para depois se o dono quiser.
-- uma aba só: abrir `chrome://notes` quando já existe uma no space ativa a existente (lookup no `TabStripModel`).
+- uma aba só: abrir `chrome://notes` quando já existe uma na janela ativa a existente (`GetIndexOfExistingTabMatchingURL` em `chrome::Navigate`). Exceção do dono (13/10/2026): `o:` sozinho abre uma aba NOVA de notas (`?new=1`, não dobrada); `o: <termo>` reaproveita a aba existente.
+- command bar: prefixo `o:` (substitui o `-o` do plano e do primeiro esboço da B6): `o: <termo>` abre as notas sem documento, com a árvore na lateral e a busca B5 pelo termo no centro (`?q=`); `o:` sozinho abre aba nova na raiz da vault.
 
 Status em 13/10/2026 (branch `v0.3-ui`, sem merge): B1 feito sem a entrada `-o` na command bar nem ícone (`notes-webui.patch`); B2 só o backend (`notes-vault-reader.patch`: `ResolveInVault`/`ListVaultDir`/`ReadVaultNote` + `vault_reader_unittest.cc`), sem Mojo, sem seletor de pasta e sem árvore na página. Validação no overlay `/tmp/aero-st8` do Cezanne (árvore somente leitura com a série v0.3 já aplicada, patches com `--fuzz=0`): `aero_notes_ui.o`, `chrome_web_ui_configs.o`, `vault_reader.o` e `vault_reader_unittest.o` compilam; `gn check` OK em `aero_notes:*` e `chrome/test:unit_tests` (em `webui:configs` só um erro anterior, `autofill_ml_internals`); grit de `browser_resources` gerado. Não verificado: testes executados (o link exigiria 1001 passos com o CI reconstruindo o lower), link do `chrome`, página aberta no navegador, custo no startup medido.
 
@@ -61,12 +62,14 @@ Status em 13/10/2026, tarde (branch `v0.3`, sem merge na `main`): B4 feita em `n
 
 Fatias:
 
-1. B1 esqueleto: WebUI vazia `chrome://notes` registrada, `.grd`, ícone, entrada na command bar (`-o`). Aceite: compila (alvo `chrome/browser/ui:ui` objeto + recursos), página abre, nada carregado no startup (sem registro além do config).
+1. B1 esqueleto: WebUI vazia `chrome://notes` registrada, `.grd`, ícone, entrada na command bar (`o:`, ver B6). Aceite: compila (alvo `chrome/browser/ui:ui` objeto + recursos), página abre, nada carregado no startup (sem registro além do config).
 2. B2 Mojo de leitura: escolher vault, `ListTree`, `Read`; árvore lateral e visualização crua. Aceite: testes unitários do confinamento (`..`, absoluto, symlink para fora, nome com NUL) em `notes_handler_unittest.cc`; leitura de uma vault de exemplo.
 3. B3 render Markdown + sanitização + wikilinks e imagens. Aceite: nota com `<script>`, `onerror=`, `javascript:` não executa nada (teste manual + DevTools sem erro de Trusted Types).
 4. B4 escrita: editor, salvar, criar/renomear/apagar, conflito por mtime. Aceite: edição externa durante edição gera aviso, sem perda.
 5. B5 watcher e busca simples por nome/conteúdo (no browser, limitada). Aceite: arquivo criado fora aparece; watcher some ao fechar a aba.
 6. B6 aba única, título `o: <nome da vault>`, cor/ícone do tema, página wiki. Aceite: smoke com perfil novo; bench `--quick` sem a aba aberta dentro de 2% do Helium.
+
+Status em 13/10/2026, tarde (branch `v0.3`, sem merge na `main`): B6 feita em `notes-b6.patch` (último da série). Command bar `o:`/`o: <termo>` (parser `aero_notes_command`, `BuiltinProvider::Start` depois do `-t`), `?q=` lido pela página (centro mostra os resultados da busca, lateral mantém a árvore, nenhum documento aberto), aba única por janela em `chrome::Navigate` com a exceção `?new=1` (`o:` sozinho abre aba nova, pedido do dono). Título da aba continua `o: <nome da vault>`. Validação no overlay `/tmp/aero-d3b` do Cezanne: patch aplica com `--fuzz=0` sobre o estado da série; `aero_ui_tests` 71/71 (3 `AeroNotesCommandTest.*` novos); `builtin_provider.cc` e `browser_navigator.cc` passam `-fsyntax-only` com os flags da `out/Default` (com os arquivos do terminal-c4 copiados no overlay); página no Chrome headless com backend simulado, incluindo `?q=` (`tests/notes-editor/`, 0 falhas). Não verificado: o fluxo no navegador real (foco da aba existente, navegação com `?q=` numa aba já aberta, `beforeunload` com nota suja), o Enter da omnibox abre na aba atual (não força aba extra para `o:` sozinho), cor/ícone da aba, smoke com perfil novo e o bench `--quick` da fatia.
 
 Patches esperados: `aerographene/notes-webui.patch` (controlador, config, mojom, handler, `BUILD.gn`, grd), `aerographene/notes-resources.patch` (TS/Lit/CSS), `aerographene/notes-tab.patch` (aba única, rótulo, command bar). Vendor markdown-it baixado com sha256 fixado no `inner.sh`, como o uBlock, ou incluído no patch (decisão em aberto 4).
 
