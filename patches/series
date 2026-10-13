@@ -123,3 +123,4 @@ aerographene/notes-render.patch
 aerographene/notes-editor.patch
 aerographene/terminal-xterm.patch
 aerographene/terminal-bridge.patch
+aerographene/terminal-c4.patch

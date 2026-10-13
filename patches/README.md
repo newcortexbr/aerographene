@@ -419,6 +419,10 @@ v0.3, fatia C2. `aerographene::TerminalSession` em `aero_terminal/terminal_sessi
 
 v0.3, fatias B2 (ligação) e B3. `aerographene::notes::NotesHandler` (`aero_notes/notes_handler.*`, WebUIMessageHandler adicionado só pelo `AeroNotesUI`): `getVault`, `pickVault` (`SelectFileDialog` de pasta), `listDir`, `readNote`, I/O no ThreadPool via `vault_reader`. Pref de perfil `aerographene.notes.vault_path` registrada em `chrome/browser/prefs/browser_prefs.cc` (Linux). `markdown.js` próprio (`IDR_AERO_NOTES_MARKDOWN_JS`) que só cria nós DOM: HTML cru vira texto, links só http(s)/mailto, `[[wikilinks]]`, imagens ainda não. Mensagens WebUI em vez de Mojo (desvio registrado no plano). Depende de `notes-webui` e `notes-vault-reader`.
 
+### `aerographene/notes-editor.patch` (GPL-3.0)
+
+v0.3, fatia B4. Escrita na vault do `chrome://notes`: `OpenVaultFileNoFollow` (openat `O_NOFOLLOW` por componente a partir da raiz real; leitura e escrita abrem só por ela), `WriteVaultNote` (temporário oculto + fsync + rename, conflito por mtime em µs conferido antes e antes do rename, `nullopt` sobrescreve), `CreateVaultNote` (`O_EXCL`), `RenameVaultNote` (`renameat2` `RENAME_NOREPLACE`), `DeleteVaultNote`; só `.md`, arquivos comuns; Windows responde `kUnsupported`. `NotesHandler`: `writeNote`, `createNote`, `renameNote`, `deleteNote` e `readNote` com `{text, mtime}`. Página: `editor.js` (live preview em coluna única: linha ativa crua, demais por `markdown.js`), salvar/renomear/apagar/nova nota, aviso de conflito sem perder o texto, título da aba sempre `o: <nome da vault>`. Novo recurso `IDR_AERO_NOTES_EDITOR_JS`. Testes `VaultWriterTest.*` em `vault_reader_unittest.cc`; página verificada por `tests/notes-editor/run.sh`. Depende de `notes-webui`, `notes-vault-reader` e `notes-render`.
+
 ### `aerographene/terminal-xterm.patch` (MIT, xterm.js 6.0.0)
 
 v0.3, fatia C3. `chrome/browser/resources/aero_terminal/xterm.{mjs,css}` e `XTERM_LICENSE` do pacote npm `@xterm/xterm` 6.0.0 (sha256 do tgz `908e66e04af6c8dc6b00dd3b54de088e2e81e5ed866284fd6c2fb3c2d1c7a3f6`), sem a linha `sourceMappingURL`. Só arquivos novos; ligado ao grd em `terminal-bridge`.

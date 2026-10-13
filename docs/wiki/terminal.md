@@ -4,15 +4,24 @@ página interna `aerographene://terminal` (por baixo, `chrome://terminal`): um q
 
 ## estado atual (v0.3, em desenvolvimento)
 
-ligado no código, mas ainda não aberto no navegador: cada janela do quadro tem um xterm.js conectado a um shell real.
+ligado no código, mas ainda não aberto no navegador: cada janela do quadro tem um xterm.js conectado a um shell real, num workspace com pan e zoom.
 
-validado até aqui (Chromium 154, Cezanne, overlay): os patches aplicam sem fuzz, os objetos compilam e os testes passam: 8 da sessão pty e 8 do host (eco pelo shell e código de saída, resize, limite de 16 sessões por aba e 64 no processo, destruir o host mata o shell, colar 1 MiB num programa que não lê não trava, saída pausa sem ack). Não testado: a página no navegador (xterm sob a CSP real, vim, htop, Ctrl+C) e o teste negativo de acesso por página web ou extensão.
+validado até aqui (Chromium 154, Cezanne, overlay): os patches aplicam sem fuzz, os objetos compilam e os testes passam: 9 da sessão pty (incl. processo em primeiro plano), 9 do host e 3 do comando `-t` (eco pelo shell e código de saída, resize, limite de 16 sessões por aba e 64 no processo, destruir o host mata o shell, colar 1 MiB num programa que não lê não trava, saída pausa sem ack). Não testado: a página no navegador (xterm sob a CSP real, vim, htop, Ctrl+C) e o teste negativo de acesso por página web ou extensão.
 
 - feito (C1, `patches/aerographene/terminal-webui.patch`): quadro com grade de fundo e botão `+ terminal`; cada janela se arrasta pelo cabeçalho, redimensiona pelo canto, ganha foco ao clicar e fecha no `×`. O título da aba segue `t: N terminals`. Nenhum processo é criado.
 - feito (C2, `patches/aerographene/terminal-pty.patch`): sessão de pseudo-terminal no processo do browser, com testes unitários.
 - feito (C3, `patches/aerographene/terminal-xterm.patch` e `terminal-bridge.patch`): xterm.js 6.0.0 vendorizado (MIT) em cada janela, ligado ao shell; título da janela pelo OSC 0/2; recarregar ou fechar a página mata os shells.
 - feito (correções do review de segurança de 13/10/2026): escrita no pty nunca bloqueia, controle de fluxo da saída e limite global de sessões (ver abaixo).
-- falta: título da aba `t: <processo>`, persistência do layout, novo review e teste negativo (C4–C5), e a migração para Mojo (hoje usa mensagens WebUI).
+- feito (C4, `patches/aerographene/terminal-c4.patch`): pan e zoom do workspace, layout persistido, título da aba `t: workspace N` e entrada `-t` na command bar (seção abaixo). Overlay do Cezanne: `aero_ui_tests` 47/47; `builtin_provider.cc` e `terminal_handler.cc` passam `-fsyntax-only` com os flags da `out/Default`.
+- falta: novo review e teste negativo (C5), a página aberta no navegador (pan/zoom, restauração, tooltip, `-t` na omnibox) e a migração para Mojo (hoje usa mensagens WebUI).
+
+## workspace, título e `-t` (C4)
+
+- título da aba: sempre `t: workspace N` (ex.: `t: workspace 1`), nunca o processo. Decisão do dono em 13/10/2026; substitui o `t: <processo>` e o `t: N terminals` do plano. N vem de `?w=N` na URL (1 a 99, padrão 1).
+- o processo em primeiro plano (`tcgetpgrp` no mestre + `/proc/<pgid>/comm`, só ASCII imprimível, até 15 caracteres) aparece apenas no tooltip do cabeçalho da janela, consultado ao passar o mouse (mensagem `foreground(cb, id)`). O título da janela continua vindo do OSC 0/2.
+- pan: arrastar o fundo (botão esquerdo ou do meio) ou rolar a roda sobre o fundo. Zoom: Ctrl+roda no ponto do cursor ou botões `−`/`+`/`1:1`, de 25% a 200%. A grade acompanha. Janelas ficam em unidades do mundo, sem limite do quadro; arrastar e redimensionar dividem o delta pelo zoom. Limitação conhecida: com zoom diferente de 100% a seleção com mouse no xterm.js pode ficar deslocada (ele não conhece a transformação).
+- layout: posições e tamanhos das janelas e a vista (pan/zoom) são salvos por workspace no `localStorage` da origem `chrome://terminal` (chave `aero-terminal-layout-N`), 300 ms depois da última mudança. Desvio do plano, que previa pref do perfil: evita mexer em `browser_prefs` do upstream. Ao ler, tudo é validado e limitado (máx. 16 janelas, faixas de coordenadas, JSON inválido ignorado). Os shells não sobrevivem: janelas restauradas abrem shells novos.
+- command bar: `-t` ou `-t N` (N de 1 a 99, depois de espaço; `-t2`, `-t 0` e `-t 1 2` não valem) vira a sugestão padrão `t: workspace N` que abre `chrome://terminal/?w=N`. Implementado em `BuiltinProvider::Start` (o texto é classificado como QUERY, por isso o provedor ignorava) com o parser puro `aero_terminal_command` em `components/omnibox/browser`.
 
 ## como funciona
 
@@ -50,6 +59,7 @@ abrir o navegador com `--remote-debugging-port` (ou `--remote-debugging-pipe`) d
 - `chrome/browser/ui/webui/aero_terminal/terminal_session.{h,cc}` e `terminal_session_unittest.cc`: pty e testes.
 - `chrome/browser/ui/webui/aero_terminal/terminal_host.{h,cc}` e `terminal_host_unittest.cc`: sessões de uma aba numa sequência de I/O, e testes.
 - `chrome/browser/ui/webui/aero_terminal/terminal_handler.{h,cc}`: mensagens da página.
+- `components/omnibox/browser/aero_terminal_command.{h,cc}` e `_unittest.cc`: parser do `-t`.
 - `chrome/browser/resources/aero_terminal/xterm.{mjs,css}` e `XTERM_LICENSE`: xterm.js vendorizado.
 
 ## resumo para agentes
@@ -58,4 +68,5 @@ abrir o navegador com `--remote-debugging-port` (ou `--remote-debugging-pipe`) d
 - `aerographene::TerminalSession` (`Start/WriteSome/Resize/Terminate`, `master_fd()` O_NONBLOCK); `WriteSome` devolve quantos bytes o pty aceitou, nunca bloqueia. `TerminalHost`: fila de entrada por sessão (`kMaxPendingInput` 1 MiB, `Write` devolve false e o handler emite `writeDropped(id)`), drenada por `WatchWritable`; créditos de saída (`kMaxUnackedOutput` 256 KiB, mensagem `ack(id, bytes)` com bytes ≤ 16 KiB); `kMaxSessionsGlobal` 64 (contador atômico no processo). Alvo `aero_terminal:session`, testes `aero_terminal:unit_tests` ligados a `chrome/test:unit_tests`.
 - `--remote-debugging-port`/CDP e `--extensions-on-chrome-urls` equivalem a execução de código (documentado acima, item 4 do plano).
 - da seção "segurança do terminal" do plano faltam: revisar `override-chrome-protocol`/branding-scheme (itens 3/4), review opus e teste negativo (item 8); sem `ReportBadMessage` (mensagens WebUI só descartam).
+- C4 (`terminal-c4.patch`, depois de `terminal-bridge`): título da aba fixo `t: workspace N` (N = `?w=N`, 1..99); processo em primeiro plano só no tooltip (`TerminalSession::ForegroundProcessName`, `TerminalHost::Foreground`, mensagem `foreground(cb, id)` -> string); pan/zoom por transform em `#world`; layout em `localStorage` `aero-terminal-layout-N` (validado, máx. 16 janelas); `-t`/`-t N` em `BuiltinProvider::Start` via `aerographene::ParseTerminalCommand`/`TerminalCommandUrl` (nota: a omnibox trata "-t" como QUERY). Teste de JS só com DOM falso (fora do repo); `aero_ui_tests` do overlay inclui os testes do parser por fonte temporária.
 - validação: ver `docs/PLANO-V0.3.md`, seção C (status). Não testado no navegador.
