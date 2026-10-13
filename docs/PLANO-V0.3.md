@@ -182,6 +182,11 @@ D4 (`chrome.exe`) e D5 (instalador) seguem depois do D3.
 
 pendências para D3c: leitor confinado Windows para `notes-vault-reader` (ativar `kVaultReadSupported`), confinamento do repositório de temas (nomes reservados, ADS, 8.3, UNC/`\\?\`, caixa, ponto/espaço final, reparse point em diretórios intermediários), testes Windows dos dois; teste de junção `.install-*` no Windows (hoje só POSIX).
 
+### status D3d em 13/10/2026
+
+- `aerographene/windows-branding.patch` (último da série, `--fuzz=0` limpo) e `build/win/apply_assets.sh` (passo 9 do `prepare.sh`): install_static (`aerographene`, dados em `%LOCALAPPDATA%\aerographene\User Data`, AppUserModelID via `base_app_id`, ProgIDs e GUIDs próprios), `aerographene.exe` (BUILD, constantes, instalador, mini_installer), VERSIONINFO (`OriginalFilename`; resto do BRANDING), `.ico` de `branding/win`, glifos do tema nos botões da janela (Windows 10 e 11 iguais), JetBrains Mono (SIL OFL 1.1) em `<exe>\fonts` como fonte privada. theme-scheme: a classe base `ThemeService` já vale no Windows (não há `ThemeServiceWin`). Detalhes em `docs/wiki/windows.md`.
+- não verificado: execução no Windows, link, se o DirectWrite/Skia enxerga a fonte `FR_PRIVATE`, mini_installer/instalador (D5), WebUI/renderers com a fonte.
+
 ### status D3a em 13/10/2026
 
 - `build/win/prepare.sh` + `build/win/args.gn`: numa árvore Win nova (hardlink da árvore do CI, série revertida e reaplicada como o CI, com `windows-disable-rlz.patch` aplicando com `--fuzz=0`) o script repôs ciopfs, libfuse2, runtime clang win, clang-format, rc e `windows.0.52.0.lib` com hash conferido (sha256 do `.crate` = índice do crates.io) e extraiu o toolchain. 2ª execução: tudo "ok", 5 s.

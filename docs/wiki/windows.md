@@ -15,6 +15,18 @@ uma só série de patches para Linux e Windows; Windows não perde função. Pat
 - leitura de arquivos de tema no Windows (`theme.json`, `.aerotheme`, `theme.json` do repositório): `CreateFileW` com `FILE_FLAG_OPEN_REPARSE_POINT`; recusa pipe/console/dispositivo, symlink/junção e diretório (mais estrito que o Linux). Linux mantém `S_ISREG`, `O_NONBLOCK`, `lstat` e `O_NOFOLLOW`.
 - notas (`chrome://notes`) registradas no Windows, mas sem leitura da vault: o leitor confinado Windows é a D3c; até lá a página mostra "leitura da vault ainda não disponível neste sistema". Terminal: ConPTY + Job Object (D3e, `terminal-win.patch`; ver [terminal](terminal.md)), compila mas não foi executado no Windows.
 
+## branding Windows (D3d)
+
+`aerographene/windows-branding.patch` (último da série) + `build/win/apply_assets.sh` (chamado por `prepare.sh`, passo 9):
+
+- identidade (`install_static`): produto `aerographene`; dados do usuário em `%LOCALAPPDATA%\aerographene\User Data` (o tema já lê `%LOCALAPPDATA%\aerographene\theme.json`); registro `Software\aerographene`; AppUserModelID derivado de `base_app_id = aerographene` (`aerographene`, `aerographene.<perfil>`); ProgIDs `AerographeneHTM`/`AerographenePDF`; GUIDs de Active Setup e do ativador de toast próprios. CLSID/IID do elevation service e do tracing ficam (presos ao IDL).
+- executável `aerographene.exe` (o BUILD, `reorder_imports`, as constantes de nome, o instalador e o mini_installer foram renomeados juntos); `chrome.dll` e `chrome_elf.dll` ficam. VERSIONINFO: nome, empresa, copyright do BRANDING e `OriginalFilename=aerographene.exe`.
+- `.ico`: `branding/win/aerographene.ico` (16 a 256 px, gerado dos PNG de `branding/png` com ImageMagick) sobre `chromium.ico`, `chromium_doc.ico`, `chromium_pdf.ico` e `app_list.ico`. Incógnito e isolado seguem os do upstream.
+- botões da barra de título: glifos do tema ativo (`AerographeneIconPainter`), iguais no Windows 10 e 11 (sem Mica nem cantos exclusivos do 11). Pixelized usa o bitmap 16x16 do tema.
+- JetBrains Mono (SIL OFL 1.1, v2.304, Regular e Bold, `branding/fonts/jetbrains-mono/` com `OFL.txt`, sha256 do zip `6f6376c6...f7bbf`): fica em `<exe>\fonts\`, registrada como fonte privada do processo do navegador (`AddFontResourceExW`, `FR_PRIVATE`) quando o tema tem fonte (pixelized). Sem os arquivos, Consolas.
+- theme-scheme: não existe `ThemeServiceWin`; o `ThemeService::GetBrowserColorScheme` da classe base (patch `theme-scheme`) já vale no Windows.
+- limites: a fonte privada vale para a UI Views do processo do navegador; páginas web (renderers) e o WebUI não a enxergam (precisariam de `@font-face`). Se o Skia/DirectWrite do Chromium enxerga uma fonte `FR_PRIVATE` não foi verificado (não há Windows de teste). `mini_installer` e instalador (D5) ainda não foram compilados.
+
 ## o que não está no repositório
 
 - o pacote do toolchain (`<hash>.zip`, VS e SDK da Microsoft) é software licenciado: fica só no host, nunca no git, artifact ou release.
@@ -68,5 +80,6 @@ arquivo novo sempre entra por temporário + `mv`, então nada é escrito atravé
 - args em `build/win/args.gn`; RLZ resolvido por `patches/aerographene/windows-disable-rlz.patch` (série única).
 - série única Linux+Windows (dono, 13/10/2026); D3b feita (guardas `IS_LINUX || IS_WIN`, POSIX sob `#if`, ramo Win32 equivalente); próximas D3c–D3e no plano.
 - testes D3b no Linux: alvo temporário `aero_ui_tests` (overlay, fora da série), 42/42; `TerminateKillsWholeGroup` exige init que colhe zumbis (`docker run --init`).
+- D3d: branding no `windows-branding.patch` (nomes `aerographene`/`aerographene.exe`, dados em `%LOCALAPPDATA%\aerographene`, ícones do tema nos botões da janela, JetBrains Mono em `<exe>\fonts`); `.ico` e fontes entram por `build/win/apply_assets.sh`.
 - notas no Windows: `kVaultReadSupported` false até a D3c; nunca ler sem confinamento.
 - o zip do toolchain é licenciado: nunca commitar, copiar para o repo ou publicar.

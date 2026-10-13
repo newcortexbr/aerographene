@@ -182,6 +182,9 @@ if grep -Eq '^\s*use_sysroot\s*=\s*false' "$out/args.gn"; then
 fi
 [ -d "$src/build/linux/debian_bullseye_amd64-sysroot" ] || echo "aviso: sysroot Debian amd64 ausente na árvore"
 
+echo "== 9. ativos Windows (.ico do app e JetBrains Mono; D3d)"
+bash "$here/apply_assets.sh" "$src"
+
 echo "== pronto. Próximo:"
 echo "   export LD_LIBRARY_PATH=$fuse_lib   # só para remontar o ciopfs (rode este script de novo após reboot)"
 echo "   gn gen $out_rel && nice -n 19 ninja -C $out_rel -j8 chrome_elf"
