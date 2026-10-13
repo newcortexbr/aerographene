@@ -205,7 +205,7 @@ entram no Windows. APIs desde o Windows Vista (piso Win10 1809 atendido).
    return std::ranges::any_of(exts,
                               [&](std::string_view e) { return ext == e; });
  }
-@@ -141,6 +82,455 @@
+@@ -141,6 +82,499 @@
                               ".svg"});
  }
  
@@ -219,16 +219,18 @@ entram no Windows. APIs desde o Windows Vista (piso Win10 1809 atendido).
 +// root, holding each directory handle open WITHOUT FILE_SHARE_DELETE: while
 +// held, no component already checked can be renamed, deleted or swapped for a
 +// junction or symlink. Each component is opened with
-+// FILE_FLAG_OPEN_REPARSE_POINT and refused when it is a reparse point
-+// (symlink, junction, mount point, cloud placeholder...), so the walk never
-+// leaves the vault; stricter than POSIX, which follows symlinks that stay
-+// inside. The name Windows actually opened (GetFinalPathNameByHandleW,
-+// normalized) must equal the requested one without case: an 8.3 short name
-+// ("NOTAS~1") or any other alias is refused. Names with ':' (alternate data
-+// streams), the characters Win32 forbids, a trailing dot or space (Win32
-+// strips them), or a reserved device name (CON, NUL, COM1, LPT1...) are
-+// refused before any open. The root must be a local drive path ("X:\..."):
-+// UNC ("\\server\share"), "\\?\" and "\\.\" roots are refused.
++// FILE_FLAG_OPEN_REPARSE_POINT and refused when it is a name-surrogate
++// reparse point (symlink, junction, mount point), so the walk never leaves
++// the vault; stricter than POSIX, which follows symlinks that stay inside.
++// Cloud placeholders (OneDrive, Dropbox) are accepted. The final path of
++// each opened component (GetFinalPathNameByHandleW, normalized) must equal
++// the final path of the held parent + '\\' + the requested name without
++// case: a component reached through a junction swapped meanwhile, an 8.3
++// short name ("NOTAS~1") or any other alias is refused. Names with ':'
++// (alternate data streams), the characters Win32 forbids, a trailing dot or
++// space (Win32 strips them), or a reserved device name (CON, NUL, COM1,
++// LPT1...) are refused before any open. The root must be a local drive
++// path ("X:\..."): UNC ("\\server\share"), "\\?\" and "\\.\" roots are refused.
 +// Writes (B4) are not supported on Windows (kVaultWriteSupported).
 +
 +namespace {
@@ -280,21 +282,21 @@ entram no Windows. APIs desde o Windows Vista (piso Win10 1809 atendido).
 +         v[2] == L'\\' && root.IsAbsolute();
 +}
 +
-+// Last component of the normalized final path of `h` (long names, case on
-+// disk).
-+std::optional<std::wstring> FinalLeaf(HANDLE h) {
++// Normalized final path of `h` ("\\?\X:\...", long names, case on disk),
++// without a trailing separator.
++std::optional<std::wstring> FinalPath(HANDLE h) {
 +  wchar_t buf[MAX_PATH + 1];
 +  std::wstring path;
 +  DWORD n = ::GetFinalPathNameByHandleW(
 +      h, buf, static_cast<DWORD>(std::size(buf)),
-+      FILE_NAME_NORMALIZED | VOLUME_NAME_NONE);
++      FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
 +  if (n == 0) {
 +    return std::nullopt;
 +  }
 +  if (n >= std::size(buf)) {
 +    path.resize(n);
 +    n = ::GetFinalPathNameByHandleW(h, path.data(), n,
-+                                    FILE_NAME_NORMALIZED | VOLUME_NAME_NONE);
++                                    FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
 +    if (n == 0 || n >= path.size()) {
 +      return std::nullopt;
 +    }
@@ -302,8 +304,10 @@ entram no Windows. APIs desde o Windows Vista (piso Win10 1809 atendido).
 +  } else {
 +    path.assign(buf, n);
 +  }
-+  const size_t slash = path.rfind(L'\\');
-+  return slash == std::wstring::npos ? path : path.substr(slash + 1);
++  while (!path.empty() && path.back() == L'\\') {
++    path.pop_back();  // drive root "\\?\X:\"
++  }
++  return path;
 +}
 +
 +bool SameNameNoCase(std::wstring_view a, std::wstring_view b) {
@@ -340,22 +344,51 @@ entram no Windows. APIs desde o Windows Vista (piso Win10 1809 atendido).
 +  return info;
 +}
 +
-+// Checks the component just opened: not a reparse point, the expected kind,
-+// and the name on disk equal to `want` without case (no 8.3 alias).
-+bool CheckComponent(HANDLE h,
++// True for reparse points that redirect the name (symlink, junction, mount
++// point). Cloud placeholders (OneDrive, Dropbox) are not name surrogates and
++// stay readable like regular files.
++bool IsNameSurrogate(HANDLE h, DWORD attrs) {
++  if (!(attrs & FILE_ATTRIBUTE_REPARSE_POINT)) {
++    return false;
++  }
++  FILE_ATTRIBUTE_TAG_INFO tag;
++  if (!::GetFileInformationByHandleEx(h, FileAttributeTagInfo, &tag,
++                                      sizeof(tag))) {
++    return true;  // unknown: refuse
++  }
++  return IsReparseTagNameSurrogate(tag.ReparseTag);
++}
++
++// Checks the component just opened below the held directory `parent`: not a
++// name-surrogate reparse point, the expected kind, and its final path equal
++// to the final path of `parent` + '\' + `want` without case. This proves the
++// object really is the entry of `parent` (a path re-resolved through a
++// swapped junction lands elsewhere) and refuses 8.3 aliases.
++bool CheckComponent(HANDLE parent,
++                    HANDLE h,
 +                    std::wstring_view want,
 +                    bool directory,
 +                    BY_HANDLE_FILE_INFORMATION* out = nullptr) {
 +  std::optional<BY_HANDLE_FILE_INFORMATION> info = DiskInfo(h);
-+  if (!info || (info->dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT |
-+                                          FILE_ATTRIBUTE_DEVICE))) {
++  if (!info || (info->dwFileAttributes & FILE_ATTRIBUTE_DEVICE) ||
++      IsNameSurrogate(h, info->dwFileAttributes)) {
 +    return false;
 +  }
 +  if (!!(info->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != directory) {
 +    return false;
 +  }
-+  std::optional<std::wstring> leaf = FinalLeaf(h);
-+  if (!leaf || !SameNameNoCase(*leaf, want)) {
++  std::optional<std::wstring> base = FinalPath(parent);
++  std::optional<std::wstring> path = FinalPath(h);
++  if (!base || !path || path->size() <= base->size() + 1 ||
++      (*path)[base->size()] != L'\\' ||
++      !SameNameNoCase(std::wstring_view(*path).substr(0, base->size()),
++                      *base)) {
++    return false;
++  }
++  const std::wstring_view leaf =
++      std::wstring_view(*path).substr(base->size() + 1);
++  if (leaf.find(L'\\') != std::wstring_view::npos ||
++      !SameNameNoCase(leaf, want)) {
 +    return false;
 +  }
 +  if (out) {
@@ -408,7 +441,8 @@ entram no Windows. APIs desde o Windows Vista (piso Win10 1809 atendido).
 +  for (const std::wstring& name : dirs) {
 +    chain.path = chain.path.Append(name);
 +    base::win::ScopedHandle next = OpenComponent(chain.path, true);
-+    if (!next.is_valid() || !CheckComponent(next.get(), name, true)) {
++    if (!next.is_valid() ||
++        !CheckComponent(chain.dir(), next.get(), name, true)) {
 +      return std::nullopt;
 +    }
 +    chain.dirs.push_back(std::move(next));
@@ -446,7 +480,8 @@ entram no Windows. APIs desde o Windows Vista (piso Win10 1809 atendido).
 +  base::win::ScopedHandle file =
 +      OpenComponent(chain->path.Append(leaf), /*directory=*/false);
 +  BY_HANDLE_FILE_INFORMATION info;
-+  if (!file.is_valid() || !CheckComponent(file.get(), leaf, false, &info)) {
++  if (!file.is_valid() ||
++      !CheckComponent(chain->dir(), file.get(), leaf, false, &info)) {
 +    return std::nullopt;
 +  }
 +  const uint64_t size =
@@ -502,7 +537,7 @@ entram no Windows. APIs desde o Windows Vista (piso Win10 1809 atendido).
 +    return std::nullopt;
 +  }
 +  std::optional<BY_HANDLE_FILE_INFORMATION> info = DiskInfo(h.get());
-+  if (!info || !CheckComponent(h.get(), *leaf,
++  if (!info || !CheckComponent(chain->dir(), h.get(), *leaf,
 +                               !!(info->dwFileAttributes &
 +                                  FILE_ATTRIBUTE_DIRECTORY))) {
 +    return std::nullopt;
@@ -541,10 +576,14 @@ entram no Windows. APIs desde o Windows Vista (piso Win10 1809 atendido).
 +                                   e->FileNameLength / sizeof(wchar_t));
 +      const DWORD attrs = e->FileAttributes;
 +      std::string utf8;
-+      // Hidden ('.'), reparse points, devices and names Win32 cannot open
-+      // back as given are skipped, like symlinks leaving the vault on POSIX.
-+      if (!name.empty() && name[0] != L'.' &&
-+          !(attrs & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DEVICE)) &&
++      // With FILE_ATTRIBUTE_REPARSE_POINT, EaSize holds the reparse tag.
++      const bool surrogate = (attrs & FILE_ATTRIBUTE_REPARSE_POINT) &&
++                             IsReparseTagNameSurrogate(e->EaSize);
++      // Hidden ('.'), name surrogates (symlink, junction, mount point),
++      // devices and names Win32 cannot open back as given are skipped, like
++      // symlinks leaving the vault on POSIX. Cloud placeholders are listed.
++      if (!name.empty() && name[0] != L'.' && !surrogate &&
++          !(attrs & FILE_ATTRIBUTE_DEVICE) &&
 +          IsSafeWinComponent(name) &&
 +          base::WideToUTF8(name.data(), name.size(), &utf8)) {
 +        VaultEntry entry;
@@ -566,6 +605,11 @@ entram no Windows. APIs desde o Windows Vista (piso Win10 1809 atendido).
 +      }
 +      off += e->NextEntryOffset;
 +    }
++  }
++  // A failure other than the end of the directory is an error, not a
++  // partial list.
++  if (!full && ::GetLastError() != ERROR_NO_MORE_FILES) {
++    return std::nullopt;
 +  }
 +  std::ranges::sort(entries, [](const VaultEntry& a, const VaultEntry& b) {
 +    if (a.is_dir != b.is_dir) {
@@ -661,7 +705,7 @@ entram no Windows. APIs desde o Windows Vista (piso Win10 1809 atendido).
  // Type and size of `path` without following a final symlink (the caller
  // already resolved it) and without opening it, so FIFOs and devices never
  // block the worker.
-@@ -155,7 +545,6 @@
+@@ -155,7 +589,6 @@
  
  constexpr int kDirFlags =
      O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC | O_NOCTTY;
@@ -669,7 +713,7 @@ entram no Windows. APIs desde o Windows Vista (piso Win10 1809 atendido).
  
  #ifndef RENAME_NOREPLACE
  #define RENAME_NOREPLACE (1 << 0)
-@@ -449,170 +838,6 @@
+@@ -449,170 +882,6 @@
    return std::move(note->text);
  }
  
@@ -840,7 +884,8 @@ entram no Windows. APIs desde o Windows Vista (piso Win10 1809 atendido).
  
  std::optional<ImageContent> ReadVaultImage(const base::FilePath& root,
                                             std::string_view relative) {
-@@ -833,5 +1058,170 @@
+@@ -832,6 +1101,171 @@
+   return {WriteStatus::kOk, 0};
  }
  
 -}  // namespace aerographene::notes
