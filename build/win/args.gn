@@ -1,0 +1,39 @@
+# aerographene: args do cross-compile Linux -> Windows x64 (fatia D do docs/PLANO-V0.3.md).
+# Os do Linux (build/flags.gn) menos use_sysroot, use_vaapi, rtc_use_pipewire, use_kerberos,
+# use_system_libffi, pgo_data_path e cc_wrapper. Não usar use_sysroot=false (quebra a
+# toolchain host Linux). build/win/prepare.sh copia este arquivo para out/Win/args.gn.
+target_os="win"
+target_cpu="x64"
+is_official_build=true
+is_debug=false
+is_component_build=false
+is_clang=true
+chrome_pgo_phase=0
+symbol_level=0
+blink_symbol_level=0
+v8_symbol_level=0
+use_thin_lto=true
+thin_lto_enable_optimizations=true
+use_icf=true
+clang_use_chrome_plugins=false
+disable_fieldtrial_testing_config=true
+enable_hangout_services_extension=false
+enable_mdns=false
+enable_remoting=false
+enable_reporting=false
+enable_service_discovery=false
+enable_widevine=true
+exclude_unwind_tables=true
+google_api_key=""
+google_default_client_id=""
+google_default_client_secret=""
+safe_browsing_mode=0
+treat_warnings_as_errors=false
+use_official_google_api_keys=false
+use_unofficial_version_number=false
+blink_enable_generated_code_formatting=false
+ffmpeg_branding="Chrome"
+proprietary_codecs=true
+fatal_linker_warnings=false
+enable_rust=true
+enable_rlz=false
