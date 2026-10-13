@@ -1,61 +1,66 @@
 # windows (cross-compile no Cezanne)
 
-estado do build do aerographene para Windows 11 x64 por cross-compile Linux→Windows no Cezanne (fatia D do `docs/PLANO-V0.3.md`). Ainda não existe navegador Windows: só a toolchain e um alvo pequeno foram provados.
+estado do build do aerographene para Windows 11 x64 por cross-compile Linux→Windows no Cezanne (fatia D do `docs/PLANO-V0.3.md`). Ainda não existe navegador Windows: só a toolchain e alvos pequenos (`chrome_elf.dll`, `crashpad_handler.exe`) foram provados.
 
-## o que já funciona (13/10/2026)
+## decisão (dono, 13/10/2026)
 
-- árvore separada `~/aerographene-win/src` (cópia por hardlink da árvore base do CI, sem `out/`), toolchain VS 2026 + SDK 10.0.28000 extraído e montado em sistema de arquivos insensível a caixa (ciopfs).
-- `gn gen out/Win` com `target_os="win"` passa (36219 alvos), depois de dois ajustes (abaixo).
-- `ninja -C out/Win base` e `base_unittests` compila com clang-cl; `crashpad_handler.exe` e `chrome_elf.dll` linkam com lld-link e `file` mostra `PE32+ ... x86-64, for MS Windows`. O Rust std para `x86_64-pc-windows-msvc` é compilado da fonte pela própria build. `base_unittests` não compila (teste quebrado pela substituição de domínios do ungoogled).
+uma só série de patches para Linux e Windows; Windows não perde função. Patches que tocam arquivos só-Linux continuam na série (aplicam e não compilam no Windows); funções nossas ganham implementação Windows (subfatias D3a–D3e no plano). Revoga a ideia anterior de série derivada sem `use-default-theme`, `process-names` e `branding-desktop`.
+
+## o que já funciona
+
+- árvore separada por hardlink da árvore do CI (sem `out/`), com a série completa aplicada, inclusive `aerographene/windows-disable-rlz.patch`.
+- `build/win/prepare.sh` repõe sozinho, com hash conferido, o que o tarball do ungoogled/portablelinux não traz e extrai o toolchain VS 2026 + SDK 10.0.28000 em sistema de arquivos insensível a caixa (ciopfs).
+- `gn gen out/Win` passa sem passo manual; `chrome_elf.dll` linka com lld-link (`PE32+ ... x86-64`).
 
 ## o que não está no repositório
 
-- o pacote do toolchain (`b353c3b35e.zip`, VS e SDK da Microsoft) é software licenciado: fica só em `~/win-toolchain` no host, nunca no git, artifact ou release.
-- a árvore Windows, a lib fuse2 local e os binários `gn`/`ninja` copiados ficam em `~/aerographene-win` no host.
+- o pacote do toolchain (`<hash>.zip`, VS e SDK da Microsoft) é software licenciado: fica só no host, nunca no git, artifact ou release.
+- a árvore Windows, os downloads e a libfuse2 local ficam no host, fora do repo.
 
 ## como reproduzir no host
 
 ```bash
-# 1. árvore: hardlink da base (exceto out/), mesmo sistema de arquivos
-mkdir -p ~/aerographene-win/src && cd <árvore base>/src
-for f in $(ls -A | grep -vx out); do cp -al "$f" ~/aerographene-win/src/; done
+# 1. árvore: hardlink da árvore do CI (exceto out/), no mesmo sistema de arquivos.
+#    nunca editar arquivo no lugar: só sed -i, patch ou cópia nova (quebram o link).
+mkdir -p <win>/src && cd <árvore do CI>/src
+for f in $(ls -A | grep -vx out); do cp -al "$f" <win>/src/; done
+#    se a série do repo for diferente da aplicada no CI: quebrar o link dos arquivos que ela
+#    toca (cp -p f f.new && mv f.new f), reverter .aero-applied (patch -R) e aplicar a série
+#    nova como o CI (patch -p1 --ignore-whitespace).
 
-# 2. ciopfs (hook do DEPS que o tarball não rodou) + libfuse2 local, sem sudo
-cd ~/aerographene-win/src
-curl -fsSL -o build/ciopfs https://storage.googleapis.com/chromium-browser-clang/ciopfs/$(cat build/ciopfs.sha1) && chmod +x build/ciopfs
-(cd ~/aerographene-win/deb && apt-get download libfuse2t64 && dpkg-deb -x libfuse2t64_*.deb ../root)
+# 2. preparar (idempotente; rodar de novo depois de reboot, para remontar o ciopfs)
+AERO_WIN_TOOLCHAIN_DIR=<dir com o zip do toolchain> build/win/prepare.sh <win>/src
 
-# 3. extrair o toolchain (hash esperado em build/vs_toolchain.py: 3bfcb536c8)
-export LD_LIBRARY_PATH=$HOME/aerographene-win/root/lib/x86_64-linux-gnu
-export DEPOT_TOOLS_WIN_TOOLCHAIN=1 DEPOT_TOOLS_WIN_TOOLCHAIN_BASE_URL=$HOME/win-toolchain GYP_MSVS_HASH_3bfcb536c8=b353c3b35e
-python3 build/vs_toolchain.py update --force   # gera build/win_toolchain.json
-
-# 4. runtime clang para Windows (cópia real de llvm-build antes, para não escrever em hardlink do CI)
-mv third_party/llvm-build third_party/llvm-build.hardlink-ci && cp -a third_party/llvm-build.hardlink-ci third_party/llvm-build
-(cd third_party/llvm-build/Release+Asserts && curl -fsSL https://commondatastorage.googleapis.com/chromium-browser-clang/Win/clang-win-runtime-library-llvmorg-24-init-3796-g20e97c4b-27.tar.xz | tar xJ)
-
-# 5. clang-format (symlink do container), rc e lib podada do crate windows: ver lista de erros em docs/PLANO-V0.3.md seção D
-
-# 6. gerar e compilar (args em docs/PLANO-V0.3.md seção D)
-~/aerographene-win/bin/gn gen out/Win
-nice -n 19 ~/aerographene-win/bin/ninja -C out/Win -j8 base chrome_elf third_party/crashpad/crashpad/handler:crashpad_handler
+# 3. gerar e compilar (gn e ninja Linux do CI; args vêm de build/win/args.gn)
+cd <win>/src && gn gen out/Win
+nice -n 19 ninja -C out/Win -j8 chrome_elf
 ```
 
-depois de reiniciar o host o ponto de montagem ciopfs some: rode o passo 3 de novo (com `LD_LIBRARY_PATH`).
+o `prepare.sh` faz, nesta ordem (cobre os erros 1, 2, 4, 5, 6, 7 e 8 da seção D do plano; o 3 virou patch):
+
+1. `build/ciopfs` (hook `ciopfs_linux`), sha1 de `build/ciopfs.sha1`; `libfuse.so.2` sem sudo via `apt-get download libfuse2t64` + `dpkg-deb -x` no cache.
+2. runtime clang Windows `clang-win-runtime-library-<CLANG_REVISION>-<SUB>.tar.xz` (o mesmo que `tools/clang/scripts/update.py` baixa), sha256 fixado no script por versão.
+3. `buildtools/linux64-format/clang-format` (no tarball é symlink do container), sha256 do `DEPS`.
+4. `build/toolchain/win/rc/linux64/rc` (hook `rc_linux`), sha1 de `rc.sha1`.
+5. `windows.0.52.0.lib` do crate `windows_x86_64_msvc` (podado): o vendor do Chromium não guarda checksum, então o `.crate` é conferido contra o sha256 fixado e o índice do crates.io, e `build.rs`/`src/lib.rs`/`Cargo.toml.orig` têm de ser iguais aos vendorizados.
+6. toolchain: `build/vs_toolchain.py update --force` com `DEPOT_TOOLS_WIN_TOOLCHAIN=1`, `DEPOT_TOOLS_WIN_TOOLCHAIN_BASE_URL=$AERO_WIN_TOOLCHAIN_DIR` e `GYP_MSVS_HASH_<TOOLCHAIN_HASH do vs_toolchain.py>=<hash do zip>`.
+7. arquivos com mtime no futuro: link quebrado e `touch` (senão o ninja regenera em laço).
+8. `out/Win/args.gn` copiado de `build/win/args.gn` se não existir; recusa `use_sysroot=false`.
+
+arquivo novo sempre entra por temporário + `mv`, então nada é escrito através de hardlink do CI.
 
 ## problemas conhecidos
 
-- `use_sysroot=false` (do `flags.windows.gn` do ungoogled) quebra o cross: vale também para a toolchain host Linux, que passa a pedir glib via `pkg-config` do host. Não usar; o sysroot Debian da árvore serve.
-- RLZ: o ungoogled força `enable_rlz_support = false`, mas `chrome/installer/setup` e `rlz:rlz_id` ainda dependem de `rlz_lib` no Windows. Ajuste local só na árvore Win; `setup/uninstall.cc` ainda inclui headers do RLZ e vai falhar ao compilar `setup`: precisa de patch Windows (o helium-windows/ungoogled-windows tem um) na série Windows (D3).
-- arquivos com mtime no futuro fazem o ninja regenerar em laço; `touch` nos arquivos editados resolve.
-- a árvore é hardlink da do CI: nunca editar arquivo no lugar (`>`, editor que trunca); só `sed -i`/cópia nova, que quebram o link. Patches aplicados no CI aparecem aqui também.
+- `use_sysroot=false` (do `flags.windows.gn` do ungoogled) quebra o cross: vale também para a toolchain host Linux, que passa a pedir glib via `pkg-config` do host. O sysroot Debian da árvore serve.
+- quatro patches do Helium (`keyboard-shortcuts`, `ublock-install-as-component`, `crash-reporting-prefs`, `toolbar-button-prefs`) só aplicam com o fuzz padrão do `patch`, porque a domain substitution muda linhas de contexto; o CI aplica assim. Os patches próprios novos devem aplicar com `--fuzz=0`.
+- `base_unittests` não compila (substituição de domínios do ungoogled em `rtl_unittest.cc`); só testes.
+- `lld-link: warning: ignoring unknown argument '-Wl,--icf=all'`: flag ICF de ELF chegando ao link Windows; tratar em D4.
+- deps só-Windows vazias no tarball (`microsoft_dxheaders`, `microsoft_webauthn`, `microsoft_multimedia_redirection`, `widevine/cdm/win`, `wix`) devem bloquear o `chrome` (D4).
 
 ## resumo para agentes
 
-- cross Linux→Windows no Cezanne: árvore `~/aerographene-win/src` (hardlink da base, sem `out/`), saída `out/Win`; não tocar `out/Default`/`out/Avx1` nem a árvore base.
-- env: `DEPOT_TOOLS_WIN_TOOLCHAIN=1`, `GYP_MSVS_HASH_3bfcb536c8=b353c3b35e`, `DEPOT_TOOLS_WIN_TOOLCHAIN_BASE_URL=~/win-toolchain`, `LD_LIBRARY_PATH=~/aerographene-win/root/lib/x86_64-linux-gnu` para o ciopfs.
-- faltas do tarball resolvidas à mão: `build/ciopfs`, libfuse2, `clang-win-runtime-library`, `buildtools/linux64-format/clang-format`, `build/toolchain/win/rc/linux64/rc`, `windows.0.52.0.lib` do crate `windows_x86_64_msvc`; `gn`/`ninja` copiados para `~/aerographene-win/bin`.
-- args: os do Linux sem `use_sysroot`, `use_vaapi`, `rtc_use_pipewire`, `pgo_data_path`, `cc_wrapper`; mais `target_os="win"`, `chrome_pgo_phase=0`, `enable_rlz=false`.
+- cross Linux→Windows no Cezanne: árvore própria por `cp -al` da árvore do CI, saída `out/Win`; não tocar `out/Default`, `out/Avx1` nem a árvore do CI; nunca escrever através de hardlink.
+- preparo: `AERO_WIN_TOOLCHAIN_DIR=<dir do zip> build/win/prepare.sh <src>`; idempotente, confere hash de tudo, rodar de novo após reboot (ciopfs). Depois `gn gen out/Win` e `ninja`.
+- args em `build/win/args.gn`; RLZ resolvido por `patches/aerographene/windows-disable-rlz.patch` (série única).
+- série única Linux+Windows (dono, 13/10/2026); próximas subfatias D3b–D3e no plano.
 - o zip do toolchain é licenciado: nunca commitar, copiar para o repo ou publicar.
-- deps só-Windows vazias no tarball (dxheaders, webauthn, multimedia_redirection, widevine win, wix) devem bloquear o `chrome`.
-- próximo: série Windows (D3, inclui patch RLZ do setup), depois `chrome` + `mini_installer` (D4).

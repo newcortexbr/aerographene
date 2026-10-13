@@ -124,11 +124,36 @@ Fatias:
 1. D0 (sem build, esta noite) `gn gen out/WinProbe` com `target_os="win" target_cpu="x64"` e flags do Helium-windows, na cópia overlay: descobre o que falta no tarball e se o toolchain é exigido já no gen. Aceite: lista de erros/arquivos faltando.
 2. D1 dono gera o pacote do toolchain numa máquina Windows (uma vez) e copia ao Cezanne fora do git. Bloqueio humano.
 3. D2 alvo pequeno (`base`, depois `chrome/installer/mini_installer` só configurado) para validar toolchain. Aceite: `base.dll`/objetos linkam.
-4. D3 série Windows: lista derivada sem `helium/linux/use-default-theme`, `process-names`, `branding-desktop`; versões Windows de `branding` (install_static, `aerographene.exe`), `theme-scheme`, `theme-icons-window` (ADR 0008). Pré-checagem estática.
+4. D3 série única Linux+Windows, Windows sem tirar funções (decisão do dono, 13/10/2026; detalhe em "desenho D3" abaixo). Pré-checagem estática em cada subfatia.
 5. D4 build completa `chrome` + `mini_installer`. Aceite: abre no Windows 11 real (perfil novo, spaces, uBlock).
 6. D5 empacotamento (ver E4).
 
 Se D1 não sair ou D2 mostrar bloqueio estrutural, cai para o ADR 0008 opção 1a (máquina Windows).
+
+### desenho D3 (decisão do dono, 13/10/2026)
+
+Revogado: a fatia D3 anterior deste plano ("série Windows: lista derivada sem `helium/linux/use-default-theme`, `process-names`, `branding-desktop`"), revogada pelo dono em 13/10/2026. No lugar:
+
+- uma só série (`patches/series`) para Linux e Windows. Patches que tocam arquivos só-Linux continuam nela: aplicam na árvore Win e não entram na compilação Windows. Nada de série derivada.
+- funções nossas ganham implementação Windows; Windows não perde função. `process-names` não precisa de equivalente (o Windows já mostra `aerographene.exe`).
+
+subfatias:
+
+1. D3a `build/win/prepare.sh` (reproduz os contornos 1–8 abaixo, com hash conferido) + `aerographene/windows-disable-rlz.patch` (substitui o contorno manual do erro 3). Feito em 13/10/2026, ver status abaixo.
+2. D3b guardas `BUILDFLAG(IS_LINUX)` → `IS_LINUX || IS_WIN` em space-one-window, space-switch-in-place, theme-radius, theme-font, theme-import-cli, notes-webui/notes-render; POSIX cru trocado por `base::File` em theme-tokens, theme-repo, settings-theme-import.
+3. D3c confinamento Windows de notes-vault-reader e theme-repo: reparse points (abrir com `FILE_FLAG_OPEN_REPARSE_POINT`), só arquivo regular, nomes reservados (CON, NUL...), ADS (`:`), nomes 8.3, UNC e `\\?\`, comparação sem caixa, ponto/espaço final; com testes.
+4. D3d branding Windows: install_static, `aerographene.exe`, `.ico`, VERSIONINFO, AppUserModelID, dados em `%LOCALAPPDATA%\aerographene`; theme-scheme no ThemeService Windows; ícones da barra de título em `WindowsCaptionButton`/`BrowserFrameViewWin`; JetBrains Mono embarcada.
+5. D3e `TerminalSession` com ConPTY (`CreatePseudoConsole`, `CreateProcessW` + `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE`, `ResizePseudoConsole`, Job Object com `KILL_ON_JOB_CLOSE`, shell pwsh → powershell → `ComSpec`), mesma interface do Linux; review opus.
+
+D4 (`chrome.exe`) e D5 (instalador) seguem depois do D3.
+
+### status D3a em 13/10/2026
+
+- `build/win/prepare.sh` + `build/win/args.gn`: numa árvore Win nova (hardlink da árvore do CI, série revertida e reaplicada como o CI, com `windows-disable-rlz.patch` aplicando com `--fuzz=0`) o script repôs ciopfs, libfuse2, runtime clang win, clang-format, rc e `windows.0.52.0.lib` com hash conferido (sha256 do `.crate` = índice do crates.io) e extraiu o toolchain. 2ª execução: tudo "ok", 5 s.
+- `gn gen out/Win`: 36219 alvos, sem passo manual. `ninja -j8 chrome_elf` (nice 19): 2820 passos, 445 s, `PE32+ executable (DLL) (GUI) x86-64`.
+- Linux com o patch RLZ: `gn gen` com os args do CI (sem PGO/ccache) no container passa, 35139 alvos.
+- quatro patches do Helium só aplicam com fuzz (`keyboard-shortcuts`, `ublock-install-as-component`, `crash-reporting-prefs`, `toolbar-button-prefs`; contexto alterado pela domain substitution); o CI aplica assim desde antes.
+- pendente: o aviso `-Wl,--icf=all` no lld-link continua (D4).
 
 ### status D em 13/10/2026 (D0, D1, D2)
 
