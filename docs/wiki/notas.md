@@ -35,6 +35,21 @@ decisão do dono em 13/10/2026: o título da aba de notas é sempre `o: <nome da
 - só nomes `.md`, sem ponto inicial (a lista esconde ocultos), até 255 bytes; só arquivos comuns; uma entrada que é symlink não pode ser renomeada nem apagada pela página; diretório não pode ser criado, renomeado nem apagado; destino em pasta inexistente é recusado.
 - Windows: o código novo fica atrás das guardas existentes e responde `unsupported` (como a leitura), sem fallback sem confinamento, até o leitor confinado da D3c.
 
+## watcher, busca e imagens (B5)
+
+- watcher: enquanto a aba existe, o navegador observa a pasta da vault (recursivo, inotify no Linux). Arquivo criado, alterado, renomeado ou apagado fora do navegador aparece na árvore em cerca de meio segundo. Caminhos ocultos (`.git`, `.obsidian`, `.aero-N.tmp` do próprio salvar) são ignorados. Fechar a aba (ou recarregar a página) remove o watcher. Se o sistema não deixar observar (limite de inotify), a barra mostra "(sem observar arquivos)" e a árvore só atualiza ao reabrir.
+- nota aberta e edição externa: a página compara o mtime em disco com o que abriu. Nota sem alterações locais recarrega sozinha (o estado mostra "atualizado do disco"; o cursor volta ao início). Nota com alterações abre o mesmo aviso de conflito do salvar (salvar como cópia, sobrescrever, recarregar): nada é gravado nem descartado sem escolha. "cancelar" não repete a pergunta para a mesma versão do disco, mas salvar depois ainda cai no conflito. Se o disco passou a ter o mesmo texto do editor, só o mtime é atualizado. Nota apagada ou renomeada fora avisa (com texto alterado, ele continua no editor e salvar recria a nota).
+- busca: campo no topo da barra lateral (Ctrl+Shift+F foca). Mínimo 2 caracteres; busca ~300 ms depois de digitar (Enter busca já, Esc limpa). Procura no nome de todos os arquivos listáveis e no texto das notas `.md`, sem distinguir maiúsculas de minúsculas (só ASCII: "É" não casa com "é"). Resultados: nomes primeiro, depois conteúdo, com a linha do primeiro acerto. Limites no navegador: 100 resultados, 20000 arquivos, 128 MiB de texto lido, 16 níveis de pasta, notas de até 4 MiB; passando disso aparece "resultado parcial". Não segue ocultos nem symlink para fora da vault.
+- imagens: `![alt](caminho.png)` (relativo à pasta da nota, depois à raiz) e `![[nome.png|300]]` (só o nome acha o primeiro arquivo com esse nome na vault; `|300` é a largura). png, jpg, gif e webp até 10 MiB; SVG não. Imagem remota (`http:`), absoluta ou com esquema não carrega: aparece `[imagem: alt]`, como imagem que falta. `![[outra nota]]` aparece como `[nota embutida: ...]` (sem transclusão ainda).
+- custo: sem aba de notas não há watcher nem busca; a atualização da árvore refaz a árvore inteira (pastas abertas incluídas) a cada rajada de mudanças.
+
+## segurança de watcher, busca e imagens (B5)
+
+- imagens passam pelo mesmo confinamento das notas (`ResolveInVault` + `openat` `O_NOFOLLOW` por componente, só arquivo comum, FIFO não trava); o browser devolve bytes em base64 e a página os mostra como URL `data:`. A CSP da página passou a `img-src 'self' data:` (nada de rede). Imagens ficam em cache por nota (até 48 Mi caracteres) e o cache é limpo a cada mudança na vault.
+- busca e `FindVaultFileByName` andam pela árvore visível (mesmos filtros da listagem) com limites de arquivos, bytes e profundidade, então symlink em laço ou pasta enorme não prende o worker. Trechos e caminhos devolvidos são UTF-8 válido (o trecho é realinhado se o corte cai no meio de um caractere); nomes de arquivo que não são UTF-8 são ignorados na listagem, busca e imagens, porque `base::Value` exige UTF-8.
+- o watcher usa a raiz real da vault; ele só avisa "mudou" (sem caminho), então a página nunca recebe nomes de arquivos por esse canal. Limitação: inotify recursivo observa também as pastas ocultas (cada uma gasta um watch), só o aviso é filtrado; vaults com milhares de pastas podem bater no limite do sistema.
+- Windows: `watchVault` responde `false`, busca e imagem respondem `unsupported`/vazio até a D3c.
+
 ## como funciona
 
 - custo zero no startup: só a entrada de configuração da página é registrada; controlador e recursos nascem quando uma aba abre `aerographene://notes`.
@@ -66,7 +81,8 @@ o antigo limite (alguém trocar um componente por symlink entre conferir e abrir
 - `chrome/browser/ui/webui/aero_notes/notes_handler.{h,cc}`: mensagens da página (pasta, lista, leitura).
 - `chrome/browser/resources/aero_notes/markdown.js`: renderizador.
 - `chrome/browser/resources/aero_notes/editor.js`: editor com live preview (modelo puro + visão).
-- `tests/notes-editor/`: verificação da página num Chrome headless com backend simulado (`run.sh`).
+- `chrome/browser/ui/webui/aero_notes/vault_watcher.{h,cc}` e `vault_watcher_unittest.cc`: watcher recursivo e testes (inotify real).
+- `tests/notes-editor/`: verificação da página num Chrome headless com backend simulado (`run.sh`; cobre editor, watcher, busca e imagens).
 
 ## resumo para agentes
 
@@ -78,3 +94,5 @@ o antigo limite (alguém trocar um componente por symlink entre conferir e abrir
 - patches: `notes-webui` → `terminal-webui` → `notes-vault-reader` → `terminal-pty` → `notes-render` → `terminal-xterm` → `terminal-bridge` (compartilham blocos do grd, configs, `chrome/test/BUILD.gn`); ordem importa.
 - testes rápidos sem `unit_tests`: executável temporário `aero_ui_tests` no overlay (main próprio, deps `base`, `gtest` e os `unit_tests` aero), compilando só as saídas ausentes e linkando à mão.
 - validação: ver `docs/PLANO-V0.3.md`, seção B (status). Página verificada num Chrome headless com backend simulado (`tests/notes-editor/run.sh`); não testada como `chrome://notes` real.
+- B5: `watchVault` (resposta bool; depois o evento `vaultChanged` por `FireWebUIListener`, shim `cr.webUIListenerCallback` em `notes.js`), `searchVault(query)` -> `{hits:[{path,nameMatch,snippet}], truncated}`, `readImage(path, noteDir)` -> `{mime, data}`. Backend em `vault_reader.*` (`SearchVault`, `FindVaultFileByName`, `ReadVaultImage`) e `vault_watcher.*`. O watcher é `SequenceBound<VaultWatcher>` no handler: morre com a aba. Patch `notes-b5` é o último da série.
+- a página, ao receber `vaultChanged`: `syncExternal` (limpa cache de imagens, refaz a árvore, refaz a busca ativa, `checkOpenNote`). Edição externa em nota alterada reutiliza `resolveConflict` do B4. `markdown.js` recebe `opts.loadImage(path, img, onFail)` do editor; sem ele (ou com URL remota/absoluta) imagem vira texto.
