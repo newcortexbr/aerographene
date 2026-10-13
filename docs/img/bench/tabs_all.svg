@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="362" viewBox="0 0 900 362" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+<rect width="900" height="362" rx="14" fill="#14161c"/>
+<text x="28" y="40" font-size="22" font-weight="700" fill="#f2f4f8">10 abas: tempo até todas carregarem</text>
+<text x="28" y="64" font-size="14" fill="#9aa3b2">ms (mediana) · menor é melhor · aerographene v0.2</text>
+<text x="196" y="119" text-anchor="end" font-size="15" fill="#c3cad6" font-weight="400">Thorium</text>
+<rect x="210" y="102" width="457.0" height="28" rx="5" fill="#3a4152"/>
+<text x="677.0" y="122" font-size="15" font-weight="400" fill="#f2f4f8">837,2</text>
+<text x="196" y="163" text-anchor="end" font-size="15" fill="#ffffff" font-weight="700">aerographene</text>
+<rect x="210" y="146" width="477.7" height="28" rx="5" fill="#7c9cff"/>
+<text x="697.7" y="166" font-size="15" font-weight="700" fill="#f2f4f8">875,2</text>
+<text x="196" y="207" text-anchor="end" font-size="15" fill="#c3cad6" font-weight="400">Helium</text>
+<rect x="210" y="190" width="490.1" height="28" rx="5" fill="#3a4152"/>
+<text x="710.1" y="210" font-size="15" font-weight="400" fill="#f2f4f8">898,0</text>
+<text x="196" y="251" text-anchor="end" font-size="15" fill="#c3cad6" font-weight="400">Google Chrome</text>
+<rect x="210" y="234" width="498.1" height="28" rx="5" fill="#3a4152"/>
+<text x="718.1" y="254" font-size="15" font-weight="400" fill="#f2f4f8">912,5</text>
+<text x="196" y="295" text-anchor="end" font-size="15" fill="#c3cad6" font-weight="400">ungoogled-chromium</text>
+<rect x="210" y="278" width="570.0" height="28" rx="5" fill="#3a4152"/>
+<text x="790.0" y="298" font-size="15" font-weight="400" fill="#f2f4f8">1.044</text>
+<text x="28" y="346" font-size="12" fill="#7a8394">Comet Lake i3-10110U · perfil performance · 13/10/2026 · ordem intercalada</text>
+</svg>
