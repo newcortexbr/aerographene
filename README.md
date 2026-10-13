@@ -87,7 +87,7 @@ I IMMENSELY thank projects such as Ungoogled-Chromium, Helium, Thorium and Brave
   - ✅ theme folder names read as raw bytes (non-ASCII names now work under a `C` locale); unit tests for the theme repository and `.aerotheme` import ran for the first time: 18 of 18 pass
   - ✅ built and smoke-tested ([build 38346594627](https://github.com/newcortexbr/aerographene/actions/runs/38346594627)); known gaps: sidebar live tabs are not a drag source and drag has no image; no runtime check of internal pages
 - ⬜ v0.3
-  - 🚧 Windows 11 by cross-compiling on the Linux runner ([ADR 0008](docs/adr/0008-windows-11.md), [windows](docs/wiki/windows.md)): toolchain set up, `gn gen` passes and small Windows binaries link (PE32+); the same patch series now compiles for Windows (spaces, themes, notes page; vault reading and the terminal still Linux-only); the browser itself is not built yet
+  - 🚧 Windows 10 and 11 (nothing 11-only; tested on 11) by cross-compiling on the Linux runner ([ADR 0008](docs/adr/0008-windows-11.md), [windows](docs/wiki/windows.md)): toolchain set up, `gn gen` passes and small Windows binaries link (PE32+); the same patch series now compiles for Windows (spaces, themes, notes page; vault reading and the terminal still Linux-only); the browser itself is not built yet
   - 🚧 x86-64-v2 + AVX build for CPUs without AVX2 ([ADR 0009](docs/adr/0009-build-ivy-bridge.md)): build input `cpu=avx1` (separate `out/` and ccache) written; the first avx1 build has not run
   - 🚧 native packages from the compiled tarball: `.pkg.tar.zst` (PKGBUILD), `.deb`, `.rpm` ([pacotes](docs/wiki/pacotes.md)); install/remove/`--version` tested in Arch, Ubuntu 24.04 and Fedora containers, release workflow not yet run
   - 🚧 notes page `aerographene://notes` (Obsidian-style vault) ([notas](docs/wiki/notas.md)): folder picker, lazy vault tree, safe Markdown view and a live-preview editor (atomic save with conflict warning, create/rename/delete notes, no symlink following) wired in code; unit tests pass; not tested as a real `chrome://notes` page yet; the tab title is always `o: <vault name>`
@@ -105,7 +105,7 @@ the wiki lives in [`docs/wiki/`](docs/wiki/), in pt-BR.
 
 - [terminal](docs/wiki/terminal.md): the terminal board (`aerographene://terminal`), the pty session and its security rules. Ends with a summary for agents.
 
-- [windows](docs/wiki/windows.md): cross-compiling the Windows 11 build on the Linux runner, what works, what the source tarball lacks. Ends with a summary for agents.
+- [windows](docs/wiki/windows.md): cross-compiling the Windows 10/11 build on the Linux runner, what works, what the source tarball lacks. Ends with a summary for agents.
 
 - [pacotes](docs/wiki/pacotes.md): release assets (`tar.zst`, `pkg.tar.zst`, `deb`, `rpm`, per CPU target), how to install and remove, what gets installed, how the packages are built. Ends with a summary for agents.
 

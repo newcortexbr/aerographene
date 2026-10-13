@@ -1,6 +1,6 @@
 # plano da v0.3
 
-Status: proposto em 13/10/2026; B e C em andamento na branch `v0.3-ui` (ver status nas seções). Escopo decidido pelo dono em 13/10/2026: A (build avx1), B (notas), C (terminal), D (Windows 11 por cross-compile), E (pacotes nativos). Google Sync (ADR 0006) fica fora da v0.3.
+Status: proposto em 13/10/2026; B e C em andamento na branch `v0.3-ui` (ver status nas seções). Escopo decidido pelo dono em 13/10/2026: A (build avx1), B (notas), C (terminal), D (Windows 10 e 11 por cross-compile), E (pacotes nativos). Google Sync (ADR 0006) fica fora da v0.3.
 
 Status em 13/10/2026, manhã (branch `v0.3`, HEAD `95eafb8`): `v0.3-ui` mergeada na `v0.3` (sem merge na `main`). Build avx2 38392093934 verde; smoke 38399339291 verde; build avx1 38399420162 verde (agora com notas e terminal). Releases para o draft `v0.3.0`: avx2 38402316949 e avx1 38402602679, ambos success; o draft segue não publicado. Smoke CDP headless (contêiner `aerographene-builder:v2`, launcher `aerographene`): `chrome://notes` mostra "Pick a vault folder to start." e o botão "Choose folder"; `chrome://terminal` abre o shell; num contexto anônimo real (`Target.createBrowserContext`) as duas páginas recusam com `ERR_INVALID_URL`. Continua não testado à mão; falta smoke dedicado e verificação de ISA do avx1.
 
@@ -111,7 +111,9 @@ Fatias:
 
 Patches esperados: `aerographene/terminal-pty.patch` (sessão, host, `BUILD.gn`, unittest), `aerographene/terminal-webui.patch` (controlador, mojom, binder), `aerographene/terminal-resources.patch` (quadro, xterm.js), `aerographene/terminal-tab.patch` (rótulo, command bar `-t`). Só Linux na v0.3 (`BUILDFLAG(IS_LINUX)`); Windows (ConPTY) fica para depois.
 
-## D. Windows 11 por cross-compile no Cezanne
+## D. Windows 10 e 11 por cross-compile no Cezanne
+
+Alvo (decisão do dono, 13/10/2026): Windows 10 e 11 x64, mesma base. Nada exclusivo do Windows 11: APIs, manifesto e instalador precisam funcionar no Windows 10 (piso: 1809, primeira versão com ConPTY). O teste real é só no Windows 11; o Windows 10 fica "suportado, não testado".
 
 Pedido do dono (13/10/2026): tentar cross-compilar no Cezanne; se exigir atenção especial, compilar depois numa máquina Windows (ADR 0008 recomendava runner Windows; esta decisão o substitui como primeira tentativa).
 
@@ -129,7 +131,7 @@ Fatias:
 2. D1 dono gera o pacote do toolchain numa máquina Windows (uma vez) e copia ao Cezanne fora do git. Bloqueio humano.
 3. D2 alvo pequeno (`base`, depois `chrome/installer/mini_installer` só configurado) para validar toolchain. Aceite: `base.dll`/objetos linkam.
 4. D3 série única Linux+Windows, Windows sem tirar funções (decisão do dono, 13/10/2026; detalhe em "desenho D3" abaixo). Pré-checagem estática em cada subfatia.
-5. D4 build completa `chrome` + `mini_installer`. Aceite: abre no Windows 11 real (perfil novo, spaces, uBlock).
+5. D4 build completa `chrome` + `mini_installer`. Aceite: abre no Windows 11 real (perfil novo, spaces, uBlock); sem dependência exclusiva do 11 (Windows 10 suportado, não testado).
 6. D5 empacotamento (ver E4).
 
 Se D1 não sair ou D2 mostrar bloqueio estrutural, cai para o ADR 0008 opção 1a (máquina Windows).

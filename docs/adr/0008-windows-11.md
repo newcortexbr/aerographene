@@ -2,7 +2,7 @@
 
 Status: proposto em 12/10/2026. Nada implementado, nenhum build disparado. Investigação só de leitura (fontes abaixo; `src` do Cezanne lido por ssh).
 
-Escopo do SCOPE.md v0.3: Windows 11, x64, processo `aerographene.exe` (item 9). Este ADR escolhe como compilar, o que da série precisa de versão Windows e como empacotar. ARM64 e Windows 10 ficam fora.
+Escopo do SCOPE.md v0.3: Windows 11, x64, processo `aerographene.exe` (item 9). Este ADR escolhe como compilar, o que da série precisa de versão Windows e como empacotar. ARM64 fica fora. Windows 10 entrou em 13/10/2026 (ver adendo).
 
 ## fatos verificados
 
@@ -56,3 +56,7 @@ Empacotamento: zip portátil primeiro (menor risco, análogo ao `.tar.zst`); ins
 8. Atualizar `docs/BUILD.md`, `patches/README.md` e o ADR 0004 (segundo runner, exclusão mútua) quando a decisão for aceita.
 
 Risco aceito: segundo pipeline dobra a manutenção a cada rebase de versão do Chromium.
+
+## adendo 13/10/2026: Windows 10 e 11
+
+Decisão do dono: suportar Windows 10 e 11 x64, por terem a mesma base. Revoga "Windows 10 fica fora" deste ADR e o "Windows 11 apenas" do empacotamento. Regra: não depender de nada exclusivo do Windows 11 (APIs, manifesto, instalador, requisitos de hardware). Piso Windows 10 1809, por causa do ConPTY no terminal. Teste real só no Windows 11; Windows 10 fica suportado, não testado. O `-march` continua pelo ADR 0003, sem supor hardware de Windows 11.

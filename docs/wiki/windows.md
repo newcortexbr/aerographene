@@ -1,6 +1,6 @@
 # windows (cross-compile no Cezanne)
 
-estado do build do aerographene para Windows 11 x64 por cross-compile Linux→Windows no Cezanne (fatia D do `docs/PLANO-V0.3.md`). Ainda não existe navegador Windows: só a toolchain e alvos pequenos (`chrome_elf.dll`, `crashpad_handler.exe`) foram provados.
+estado do build do aerographene para Windows 10 e 11 x64 (nada exclusivo do 11; piso 1809 por causa do ConPTY; testado só no 11) por cross-compile Linux→Windows no Cezanne (fatia D do `docs/PLANO-V0.3.md`). Ainda não existe navegador Windows: só a toolchain e alvos pequenos (`chrome_elf.dll`, `crashpad_handler.exe`) foram provados.
 
 ## decisão (dono, 13/10/2026)
 
