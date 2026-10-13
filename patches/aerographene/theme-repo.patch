@@ -19,10 +19,15 @@ diferenciar caixa -> kConflict até replace=true; grava em pasta oculta
 temporária no mesmo diretório e renomeia; a pasta antiga só é apagada depois,
 e volta se a troca falhar), para as fatias 3/4. A nova aba usa UsesPixelizedStyle() em vez
 de comparar a pref.
+v0.2.1: ScheduleStagingCleanup() (chamada em ThemeService::Init, uma vez por
+processo) apaga, numa tarefa BEST_EFFORT/MayBlock, as pastas ".install-*"
+órfãs do repositório (sobras de queda entre a escrita e o rename): só
+diretórios reais com mtime de 60 s ou mais; symlinks nunca são seguidos nem
+removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 
 --- /dev/null
 +++ b/chrome/browser/themes/aerographene_theme_repo.h
-@@ -0,0 +1,103 @@
+@@ -0,0 +1,117 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -37,6 +42,7 @@ de comparar a pref.
 +
 +#include "base/files/file_path.h"
 +#include "base/functional/callback.h"
++#include "base/time/time.h"
 +#include "chrome/browser/themes/aerographene_theme.h"
 +
 +namespace aerographene {
@@ -123,12 +129,25 @@ de comparar a pref.
 +using InstallCallback = base::OnceCallback<void(InstallResult, std::string)>;
 +void InstallTheme(std::string json, bool replace, InstallCallback callback);
 +
++// Deletes orphaned staging folders (".install-*", left by a crash between
++// the staging write and the rename) from the repository directory, once per
++// process, on a best-effort thread-pool task (MayBlock); never blocks the UI
++// thread. Call at startup.
++void ScheduleStagingCleanup();
++
++// The cleanup itself (blocking). Only real directories named ".install-*"
++// whose mtime is at least `min_age` old are deleted: symlinks are never
++// followed (nor deleted), and a fresh folder may belong to an install in
++// progress. Exposed for tests.
++void RemoveStaleStagingFolders(const base::FilePath& dir,
++                               base::TimeDelta min_age);
++
 +}  // namespace aerographene
 +
 +#endif  // CHROME_BROWSER_THEMES_AEROGRAPHENE_THEME_REPO_H_
 --- /dev/null
 +++ b/chrome/browser/themes/aerographene_theme_repo.cc
-@@ -0,0 +1,508 @@
+@@ -0,0 +1,554 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -141,6 +160,7 @@ de comparar a pref.
 +#include <unistd.h>
 +
 +#include <algorithm>
++#include <atomic>
 +#include <memory>
 +#include <optional>
 +#include <set>
@@ -161,6 +181,7 @@ de comparar a pref.
 +#include "base/task/sequenced_task_runner.h"
 +#include "base/task/task_traits.h"
 +#include "base/task/thread_pool.h"
++#include "base/time/time.h"
 +#include "base/values.h"
 +#include "third_party/icu/source/common/unicode/normalizer2.h"
 +#include "third_party/icu/source/common/unicode/unistr.h"
@@ -172,6 +193,10 @@ de comparar a pref.
 +constexpr int kMaxRadius = 32;
 +constexpr int kMinFontSize = 8;
 +constexpr int kMaxFontSize = 32;
++// Hidden staging folders of InstallTheme (also "<staging>.old" backups).
++constexpr char kStagingPrefix[] = ".install-";
++// An install takes milliseconds; anything older is an orphan.
++constexpr base::TimeDelta kStagingMinAge = base::Seconds(60);
 +
 +base::FilePath& RepoDirOverride() {
 +  static base::NoDestructor<base::FilePath> dir;
@@ -364,7 +389,7 @@ de comparar a pref.
 +  for (base::FilePath path = enumerator.Next(); !path.empty();
 +       path = enumerator.Next()) {
 +    if (std::optional<ThemeData> theme =
-+            LoadRepoTheme(dir, path.BaseName().AsUTF8Unsafe())) {
++            LoadRepoTheme(dir, path.BaseName().value())) {
 +      found.push_back({std::move(*theme), /*builtin=*/false});
 +    }
 +  }
@@ -401,7 +426,7 @@ de comparar a pref.
 +                                    base::FileEnumerator::DIRECTORIES);
 +    for (base::FilePath path = enumerator.Next(); !path.empty();
 +         path = enumerator.Next()) {
-+      const std::string folder = path.BaseName().AsUTF8Unsafe();
++      const std::string folder = path.BaseName().value();
 +      if (IsValidThemeName(folder) && FoldName(folder) == key) {
 +        existing = path;
 +        break;
@@ -416,7 +441,7 @@ de comparar a pref.
 +  // The old folder moves aside first and is deleted only after the new one
 +  // is in place; any failure restores it.
 +  base::FilePath staging;
-+  if (!base::CreateTemporaryDirInDir(dir, ".install-", &staging)) {
++  if (!base::CreateTemporaryDirInDir(dir, kStagingPrefix, &staging)) {
 +    return InstallResult::kIoError;
 +  }
 +  if (!base::ImportantFileWriter::WriteFileAtomically(
@@ -448,6 +473,46 @@ de comparar a pref.
 +}
 +
 +}  // namespace
++
++void RemoveStaleStagingFolders(const base::FilePath& dir,
++                               base::TimeDelta min_age) {
++  DIR* d = opendir(dir.value().c_str());
++  if (!d) {
++    return;
++  }
++  const time_t cutoff = (base::Time::Now() - min_age).ToTimeT();
++  std::vector<base::FilePath> stale;
++  while (const dirent* entry = readdir(d)) {
++    const std::string_view name(entry->d_name);
++    if (!name.starts_with(kStagingPrefix)) {
++      continue;
++    }
++    const base::FilePath path = dir.Append(name);
++    // lstat: a symlink named ".install-*" is skipped, never followed.
++    struct stat st;
++    if (lstat(path.value().c_str(), &st) == 0 && S_ISDIR(st.st_mode) &&
++        st.st_mtime <= cutoff) {
++      stale.push_back(path);
++    }
++  }
++  closedir(d);
++  for (const base::FilePath& path : stale) {
++    base::DeletePathRecursively(path);
++  }
++}
++
++void ScheduleStagingCleanup() {
++  static std::atomic<bool> scheduled{false};
++  if (scheduled.exchange(true)) {
++    return;
++  }
++  base::ThreadPool::PostTask(
++      FROM_HERE,
++      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
++       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
++      base::BindOnce(&RemoveStaleStagingFolders, GetThemeRepoDir(),
++                     kStagingMinAge));
++}
 +
 +bool IsValidThemeName(std::string_view name) {
 +  return !name.empty() && name.size() <= kMaxThemeNameBytes &&
@@ -639,11 +704,14 @@ de comparar a pref.
 +}  // namespace aerographene
 --- /dev/null
 +++ b/chrome/browser/themes/aerographene_theme_repo_unittest.cc
-@@ -0,0 +1,220 @@
+@@ -0,0 +1,266 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
 +#include "chrome/browser/themes/aerographene_theme_repo.h"
++
++#include <sys/stat.h>
++#include <unistd.h>
 +
 +#include <string>
 +#include <vector>
@@ -651,6 +719,7 @@ de comparar a pref.
 +#include "base/files/file_enumerator.h"
 +#include "base/files/file_util.h"
 +#include "base/files/scoped_temp_dir.h"
++#include "base/time/time.h"
 +#include "base/test/task_environment.h"
 +#include "base/test/test_future.h"
 +#include "testing/gtest/include/gtest/gtest.h"
@@ -858,6 +927,48 @@ de comparar a pref.
 +  }
 +}
 +
++TEST_F(AerographeneThemeRepoTest, RemoveStaleStagingFolders) {
++  const base::FilePath root = dir_.GetPath();
++  const base::Time old_time = base::Time::Now() - base::Minutes(10);
++  auto make_dir = [&](const std::string& name, bool old) {
++    const base::FilePath path = root.Append(name);
++    ASSERT_TRUE(base::CreateDirectory(path));
++    ASSERT_TRUE(base::WriteFile(path.Append(kThemeFileName), kMinimal));
++    if (old) {
++      ASSERT_TRUE(base::TouchFile(path, old_time, old_time));
++    }
++  };
++  make_dir(".install-orphan", /*old=*/true);
++  make_dir(".install-orphan.old", /*old=*/true);
++  make_dir(".install-fresh", /*old=*/false);
++  make_dir(".outro-oculto", /*old=*/true);
++  WriteTheme("Meu Tema", kMinimal);
++  ASSERT_TRUE(base::TouchFile(root.Append("Meu Tema"), old_time, old_time));
++
++  // A symlink named like a staging folder, pointing outside the repository,
++  // is neither followed nor removed; its target stays intact.
++  base::ScopedTempDir outside;
++  ASSERT_TRUE(outside.CreateUniqueTempDir());
++  ASSERT_TRUE(base::WriteFile(outside.GetPath().Append("keep.txt"), "x"));
++  ASSERT_EQ(symlink(outside.GetPath().value().c_str(),
++                    root.Append(".install-link").value().c_str()),
++            0);
++
++  RemoveStaleStagingFolders(root, base::Minutes(1));
++
++  EXPECT_FALSE(base::PathExists(root.Append(".install-orphan")));
++  EXPECT_FALSE(base::PathExists(root.Append(".install-orphan.old")));
++  EXPECT_TRUE(base::PathExists(root.Append(".install-fresh")));
++  EXPECT_TRUE(base::PathExists(root.Append(".outro-oculto")));
++  EXPECT_TRUE(base::PathExists(root.Append("Meu Tema").Append(kThemeFileName)));
++  struct stat st;
++  EXPECT_EQ(lstat(root.Append(".install-link").value().c_str(), &st), 0);
++  EXPECT_TRUE(S_ISLNK(st.st_mode));
++  EXPECT_TRUE(base::PathExists(outside.GetPath().Append("keep.txt")));
++  // Missing repository directory: nothing to do.
++  RemoveStaleStagingFolders(root.Append("nao-existe"), base::Minutes(1));
++}
++
 +}  // namespace
 +}  // namespace aerographene
 --- a/chrome/browser/themes/BUILD.gn
@@ -878,15 +989,22 @@ de comparar a pref.
      "browser_theme_pack.cc",
      "custom_theme_supplier.cc",
      "theme_helper.cc",
-@@ -34,6 +36,8 @@
+@@ -34,6 +36,7 @@
      "theme_syncable_service.cc",
    ]
    deps = [
 +    "//base:i18n",
-+    "//third_party/icu",
      "//chrome/app/theme:theme_resources",
      "//chrome/browser:browser_process",
      "//chrome/browser/infobars",
+@@ -61,6 +64,7 @@
+     "//components/version_info",
+     "//content/public/browser",
+     "//third_party/abseil-cpp:absl",
++    "//third_party/icu",
+     "//ui/color",
+     "//ui/color/dynamic_color",
+     "//ui/gfx",
 @@ -144,6 +148,7 @@
      testonly = true
  
@@ -905,7 +1023,7 @@ de comparar a pref.
  #include "chrome/browser/themes/browser_theme_pack.h"
  #include "chrome/browser/themes/custom_theme_supplier.h"
  #include "chrome/browser/themes/theme_properties.h"
-@@ -386,12 +387,20 @@
+@@ -386,12 +387,22 @@
  void ThemeService::Init() {
    theme_helper_->DCheckCalledOnValidSequence();
  
@@ -928,6 +1046,8 @@ de comparar a pref.
 +    if (aerographene::SetActiveTheme(resolved.theme)) {
 +      ui::ColorProviderManager::Get().ResetColorProviderCache();
 +    }
++    // Orphaned ".install-*" staging folders: background task, once per process.
++    aerographene::ScheduleStagingCleanup();
    }
  #if BUILDFLAG(IS_LINUX)
    if (profile_->IsRegularProfile()) {

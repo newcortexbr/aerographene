@@ -12,14 +12,14 @@ GetActiveTheme().radius/radius_small.
 
 --- a/chrome/browser/themes/BUILD.gn
 +++ b/chrome/browser/themes/BUILD.gn
-@@ -96,6 +96,7 @@
-     sources += [ "theme_service_aura_linux.cc" ]
-     deps += [
+@@ -98,6 +98,7 @@
        "//ui/linux:linux_ui",
-+      "//ui/views",
        "//ui/linux:linux_ui_factory",
        "//ui/ozone",
++      "//ui/views",
      ]
+   }
+   if (!is_android) {
 
 --- a/chrome/browser/themes/theme_service.cc
 +++ b/chrome/browser/themes/theme_service.cc
