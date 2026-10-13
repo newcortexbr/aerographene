@@ -115,6 +115,15 @@ Fatias:
 3. C3 Mojo + binder restrito + xterm.js numa janela. Aceite: shell interativo (vim, htop, cores, Ctrl+C), teste negativo de acesso pela web.
 4. C4 várias janelas, título por OSC 0/2 e `t: ...`/`t: N terminals`, foco e teclado, persistência do layout. Aceite: 4 terminais ativos; fechar aba não deixa processo (`pgrep`).
 5. C5 hardening (limites, bad message, convidado/incógnito) + review de segurança + wiki. Aceite: zero Critical/High do review; bench `--quick` sem a aba dentro de 2%.
+6. C6 command bar `t:` e UX do workspace (pedido do dono, 13/10/2026; substitui o `-t N` da C4):
+   - `t:` sozinho + Enter: abre um workspace novo com um terminal aberto. `t: <comando>` + Enter: idem, e o comando roda nesse terminal depois que a página carrega (ou após 0,5 s, o que vier depois). Digitar `t:` deixa a command bar com aparência de linha de comando.
+   - o comando nunca viaja na URL nem em parâmetro que outra origem possa forjar: vai do navegador ao handler por canal interno, uso único, ligado à aba recém-aberta; vira texto digitado no pty (como se o usuário digitasse), sem `exec` direto.
+   - todo terminal aberto pelo aerographene começa com um resumo estilo fastfetch, impresso pela página antes do prompt (não depende de `fastfetch` instalado; funciona no Windows): logo ASCII do gatinho (arte braille do dono), versão do Chromium, versão do aerographene, CPU, GPU, RAM e discos. Dados vêm do processo do navegador (`base::SysInfo`, GPU info); nada sai da máquina.
+   - cantos do workspace: um botão abre a sidebar com todos os terminais abertos (clicar leva/centraliza e foca o terminal) e um botão `+` abre terminal novo. A barra superior atual sai.
+   - barra de título de cada terminal só com `×`. Arrastar a janela só pela barra de título; no conteúdo o mouse seleciona texto para copiar.
+   - foco: com um terminal focado, todo input vai para ele (Ctrl+C manda SIGINT, Ctrl+Shift+C copia, Ctrl+Shift+V cola); atalhos do navegador não roubam essas teclas. Clicar fora de qualquer terminal tira o foco.
+   - título da aba continua `t: workspace N`.
+   Aceite: unittests do parser `t:` e do canal do comando (recusa sem aba de destino, uso único); teste da página para foco/teclas/sidebar; review de segurança do canal do comando sem Critical/High.
 
 Patches esperados: `aerographene/terminal-pty.patch` (sessão, host, `BUILD.gn`, unittest), `aerographene/terminal-webui.patch` (controlador, mojom, binder), `aerographene/terminal-resources.patch` (quadro, xterm.js), `aerographene/terminal-tab.patch` (rótulo, command bar `-t`). Só Linux na v0.3 (`BUILDFLAG(IS_LINUX)`); Windows (ConPTY) fica para depois.
 
