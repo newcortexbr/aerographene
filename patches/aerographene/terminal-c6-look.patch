@@ -1,0 +1,92 @@
+aerographene: command bar — aparência de t: (linha de comando) e o: (busca da vault) (v0.3, fatia C6).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/urlbar-mockup.patch (mesmo arquivo; hunks
+independentes) e, para o comportamento, terminal-c6.patch e notes-b6.patch.
+Propósito: OmniboxViewViews::EmphasizeURLComponents chama
+AeroApplyCommandLook: texto começando por "t:" usa fonte monoespaçada; "o:"
+fica em itálico; nos dois o prefixo ganha a cor kColorOmniboxResultsUrl. Ao
+sair do modo a fonte original volta. Só aparência: o que o Enter faz continua
+no BuiltinProvider.
+
+--- a/chrome/browser/ui/views/omnibox/omnibox_view_views.h
++++ b/chrome/browser/ui/views/omnibox/omnibox_view_views.h
+@@ -8,6 +8,7 @@
+ #include <stddef.h>
+ 
+ #include <memory>
++#include <optional>
+ #include <set>
+ #include <string>
+ #include <string_view>
+@@ -33,6 +34,7 @@
+ #include "ui/compositor/compositor_observer.h"
+ #include "ui/compositor/layer_tree_owner.h"
+ #include "ui/gfx/animation/multi_animation.h"
++#include "ui/gfx/font_list.h"
+ #include "ui/gfx/range/range.h"
+ #include "ui/views/animation/animation_delegate_views.h"
+ #include "ui/views/controls/textfield/textfield.h"
+@@ -490,6 +492,13 @@
+   // this is set to 7 (the length of "Google ").
+   int friendly_suggestion_text_prefix_length_;
+ 
++  // aerographene (C6): command bar look for "t:" (command line) and "o:"
++  // (vault search). 0 = normal, 1 = t:, 2 = o:. The regular font list is kept
++  // while a mode is on, to restore it.
++  int aero_command_mode_ = 0;
++  std::optional<gfx::FontList> aero_base_font_list_;
++  void AeroApplyCommandLook(const std::u16string& text);
++
+   // Used to track whether focus indicators have been changed to show the AI
+   // mode page action icon as focused. Only used when keyboard accessibility is
+   // disabled (which currently only happens on Mac).
+--- a/chrome/browser/ui/views/omnibox/omnibox_view_views.cc
++++ b/chrome/browser/ui/views/omnibox/omnibox_view_views.cc
+@@ -476,6 +476,46 @@
+   const std::u16string text = GetText();
+   UpdateTextStyle(text, text_is_url,
+                   controller()->client()->GetSchemeClassifier());
++  AeroApplyCommandLook(text);
++}
++
++void OmniboxViewViews::AeroApplyCommandLook(const std::u16string& text) {
++  // "t:" reads as a command line (monospace), "o:" as the vault search
++  // (italic); the prefix takes the link accent. Same prefix rule as the
++  // parsers (aero_terminal_command.h, aero_notes_command.h), but only the
++  // look: what Enter does is still decided by BuiltinProvider.
++  const std::u16string_view t = base::TrimWhitespace(
++      std::u16string_view(text), base::TRIM_LEADING);
++  const size_t lead = text.size() - t.size();
++  int mode = 0;
++  if (t.size() >= 2 && t[1] == u':') {
++    if (t[0] == u't' || t[0] == u'T') {
++      mode = 1;
++    } else if (t[0] == u'o' || t[0] == u'O') {
++      mode = 2;
++    }
++  }
++  if (mode != aero_command_mode_) {
++    if (aero_command_mode_ == 0) {
++      aero_base_font_list_ = GetFontList();
++    }
++    if (mode == 1) {
++      SetFontList(gfx::FontList({"monospace"}, gfx::Font::NORMAL,
++                                aero_base_font_list_->GetFontSize(),
++                                gfx::Font::Weight::NORMAL));
++    } else if (aero_base_font_list_) {
++      SetFontList(*aero_base_font_list_);
++    }
++    if (mode == 0) {
++      aero_base_font_list_.reset();
++    }
++    aero_command_mode_ = mode;
++  }
++  SetStyle(gfx::TEXT_STYLE_ITALIC, mode == 2);
++  if (mode != 0 && GetColorProvider()) {
++    ApplyColor(GetColorProvider()->GetColor(kColorOmniboxResultsUrl),
++               gfx::Range(lead, lead + 2));
++  }
+ }
+ 
+ void OmniboxViewViews::Update() {

@@ -1,0 +1,807 @@
+aerographene: terminal — command bar t: com canal de uso único, aba nova para t: e o: (v0.3, fatia C6).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/terminal-c5b.patch (cadeia terminal-*),
+aerographene/notes-b6.patch (hunk vizinho em builtin_provider.cc e
+aero_notes_command.h, usado em chrome_omnibox_client.cc) e
+aerographene/branding-version.patch (chrome/common/aero_version.h).
+Propósito: (1) "t:" ou "t: <comando>" (espaço opcional, "t" sem distinção de
+caixa) substitui o "-t N" da C4: sugestão padrão do BuiltinProvider que abre
+chrome://terminal/?new=1. Comando aparado, até 1024 unidades, sem caracteres
+de controle. (2) ChromeOmniboxClient::OnAutocompleteAccept: só para o match
+do próprio BuiltinProvider, "t:" e "o:" sozinho abrem aba NOVA
+(CURRENT_TAB vira NEW_FOREGROUND_TAB); o comando é reinterpretado do texto
+digitado e preso à WebContents da aba aberta (terminal_launch.h:
+SetPendingTerminalCommand), nunca na URL. (3) TerminalHandler ganha
+start(cb, wanted) -> {workspace, command, info}: reserva o número do
+workspace (WorkspaceRegistry por perfil; 0 = menor livre), pega o comando uma
+vez só (TakePendingTerminalCommand: uso único, validade de 60 s) e devolve o
+resumo do sistema (versões do Chromium e do aerographene, CPU, GPU, RAM,
+discos "/" e HOME; base::SysInfo e GpuDataManager, nada sai da máquina).
+Testes: AeroTerminalCommandTest.*, TerminalLaunchTest.*.
+
+--- a/components/omnibox/browser/aero_terminal_command.h
++++ b/components/omnibox/browser/aero_terminal_command.h
+@@ -4,21 +4,27 @@
+ #ifndef COMPONENTS_OMNIBOX_BROWSER_AERO_TERMINAL_COMMAND_H_
+ #define COMPONENTS_OMNIBOX_BROWSER_AERO_TERMINAL_COMMAND_H_
+ 
++#include <cstddef>
+ #include <optional>
+ #include <string>
+ #include <string_view>
+ 
+ namespace aerographene {
+ 
+-// Command bar entry `-t` (terminal workspace). Accepts "-t" or "-t N" with N
+-// in [1, kMaxTerminalWorkspace], case-insensitive, surrounded by optional
+-// whitespace, and returns the workspace number (1 for a bare "-t"). Anything
+-// else (including "-t0", "-tx", "-t 1 2") returns nullopt.
+-inline constexpr int kMaxTerminalWorkspace = 99;
+-std::optional<int> ParseTerminalCommand(std::u16string_view text);
+-
+-// The page the command opens: "chrome://terminal/?w=N".
+-std::string TerminalCommandUrl(int workspace);
++// Command bar entry `t:` (terminal workspace, fatia C6; replaces the C4
++// "-t N"). Accepts "t:" or "t: <command>" (the space after the colon is
++// optional, "t" is case-insensitive, surrounding whitespace is ignored) and
++// returns the command ("" for a bare "t:"). The command is trimmed, at most
++// kMaxTerminalCommand UTF-16 units and has no control characters; it is never
++// put in the URL: ChromeOmniboxClient hands it to the new tab through the
++// one-shot channel (chrome/browser/ui/webui/aero_terminal/terminal_launch.h).
++// Anything else ("t", "tx:", "t :", "-t") returns nullopt.
++inline constexpr size_t kMaxTerminalCommand = 1024;
++std::optional<std::u16string> ParseTerminalCommand(std::u16string_view text);
++
++// The page "t:" opens: always "chrome://terminal/?new=1" (a new workspace),
++// with or without a command.
++std::string TerminalCommandUrl();
+ 
+ }  // namespace aerographene
+ 
+--- a/components/omnibox/browser/aero_terminal_command.cc
++++ b/components/omnibox/browser/aero_terminal_command.cc
+@@ -3,44 +3,32 @@
+ 
+ #include "components/omnibox/browser/aero_terminal_command.h"
+ 
+-#include "base/strings/string_number_conversions.h"
+ #include "base/strings/string_util.h"
+-#include "base/strings/utf_string_conversions.h"
+ 
+ namespace aerographene {
+ 
+-std::optional<int> ParseTerminalCommand(std::u16string_view text) {
++std::optional<std::u16string> ParseTerminalCommand(std::u16string_view text) {
+   std::u16string_view t = base::TrimWhitespace(text, base::TRIM_ALL);
+-  if (t.size() < 2 || t[0] != u'-' || (t[1] != u't' && t[1] != u'T')) {
++  if (t.size() < 2 || (t[0] != u't' && t[0] != u'T') || t[1] != u':') {
+     return std::nullopt;
+   }
+-  std::u16string_view rest = t.substr(2);
+-  if (rest.empty()) {
+-    return 1;
+-  }
+-  // The number must come after whitespace: "-t2" and "-tx" are rejected.
+-  if (!base::IsUnicodeWhitespace(rest[0])) {
+-    return std::nullopt;
+-  }
+-  rest = base::TrimWhitespace(rest, base::TRIM_ALL);
+-  if (rest.empty() || rest.size() > 2) {
++  std::u16string_view command =
++      base::TrimWhitespace(t.substr(2), base::TRIM_ALL);
++  if (command.size() > kMaxTerminalCommand) {
+     return std::nullopt;
+   }
+-  for (char16_t c : rest) {
+-    if (c < u'0' || c > u'9') {
++  // Typed into the shell as-is: no control characters (C0, DEL, C1), so the
++  // command cannot carry its own Enter, escape sequences or ^C.
++  for (char16_t c : command) {
++    if (c < 0x20 || (c >= 0x7f && c <= 0x9f)) {
+       return std::nullopt;
+     }
+   }
+-  int n = 0;
+-  if (!base::StringToInt(base::UTF16ToUTF8(rest), &n) || n < 1 ||
+-      n > kMaxTerminalWorkspace) {
+-    return std::nullopt;
+-  }
+-  return n;
++  return std::u16string(command);
+ }
+ 
+-std::string TerminalCommandUrl(int workspace) {
+-  return "chrome://terminal/?w=" + base::NumberToString(workspace);
++std::string TerminalCommandUrl() {
++  return "chrome://terminal/?new=1";
+ }
+ 
+ }  // namespace aerographene
+--- a/components/omnibox/browser/aero_terminal_command_unittest.cc
++++ b/components/omnibox/browser/aero_terminal_command_unittest.cc
+@@ -9,23 +9,32 @@
+ namespace aerographene {
+ 
+ TEST(AeroTerminalCommandTest, Accepts) {
+-  EXPECT_EQ(ParseTerminalCommand(u"-t"), 1);
+-  EXPECT_EQ(ParseTerminalCommand(u"  -T  "), 1);
+-  EXPECT_EQ(ParseTerminalCommand(u"-t 2"), 2);
+-  EXPECT_EQ(ParseTerminalCommand(u"-t   99 "), 99);
+-  EXPECT_EQ(ParseTerminalCommand(u"-t 07"), 7);
++  EXPECT_EQ(ParseTerminalCommand(u"t:"), u"");
++  EXPECT_EQ(ParseTerminalCommand(u"  T:  "), u"");
++  EXPECT_EQ(ParseTerminalCommand(u"t: ls -la"), u"ls -la");
++  EXPECT_EQ(ParseTerminalCommand(u"t:htop"), u"htop");
++  EXPECT_EQ(ParseTerminalCommand(u" t:   git log --oneline  "),
++            u"git log --oneline");
++  EXPECT_EQ(ParseTerminalCommand(u"t: echo 'a; b' | wc -c"),
++            u"echo 'a; b' | wc -c");
++  EXPECT_EQ(ParseTerminalCommand(u"t: a\u00e7\u00e3o"), u"a\u00e7\u00e3o");
++  const std::u16string longest(kMaxTerminalCommand, u'x');
++  EXPECT_EQ(ParseTerminalCommand(u"t: " + longest), longest);
+ }
+ 
+ TEST(AeroTerminalCommandTest, Rejects) {
+   for (const char16_t* s :
+-       {u"", u"-", u"t", u"-tx", u"-t2", u"-t 0", u"-t 100", u"-t -1",
+-        u"-t 1 2", u"-t x", u"- t", u"--t", u"-tt", u"a -t", u"-t 1x"}) {
++       {u"", u"t", u"t ", u"tx:", u"t :", u"-t", u"-t 2", u":t", u"tt:",
++        u"a t:", u"o:", u"t: ls\rrm", u"t: ls\nrm", u"t: a\x1b[31m",
++        u"t: a\x03", u"t: a\x7f", u"t: a\x9b", u"t: a\tb"}) {
+     EXPECT_FALSE(ParseTerminalCommand(s)) << base::UTF16ToUTF8(s);
+   }
++  EXPECT_FALSE(ParseTerminalCommand(
++      u"t: " + std::u16string(kMaxTerminalCommand + 1, u'x')));
+ }
+ 
+ TEST(AeroTerminalCommandTest, Url) {
+-  EXPECT_EQ(TerminalCommandUrl(3), "chrome://terminal/?w=3");
++  EXPECT_EQ(TerminalCommandUrl(), "chrome://terminal/?new=1");
+ }
+ 
+ }  // namespace aerographene
+--- a/components/omnibox/browser/builtin_provider.cc
++++ b/components/omnibox/browser/builtin_provider.cc
+@@ -41,17 +41,20 @@
+     return;
+   }
+ 
+-  // aerographene command bar: "-t" / "-t N" opens the terminal workspace.
++  // aerographene command bar: "t:" / "t: <command>" opens a new terminal
++  // workspace. The command is not in the URL: ChromeOmniboxClient re-parses
++  // fill_into_edit of this (builtin) match and hands it to the new tab.
+   // The text is a QUERY for the classifier, so it is handled before the
+   // chrome:// URL completion below.
+-  if (std::optional<int> workspace =
++  if (std::optional<std::u16string> command =
+           aerographene::ParseTerminalCommand(input.text())) {
+     AutocompleteMatch match(this, 1300, false,
+                             AutocompleteMatchType::NAVSUGGEST);
+     match.suggest_type = omnibox::TYPE_NAVIGATION;
+-    match.destination_url = GURL(aerographene::TerminalCommandUrl(*workspace));
++    match.destination_url = GURL(aerographene::TerminalCommandUrl());
+     match.fill_into_edit = input.text();
+-    match.contents = u"t: workspace " + base::NumberToString16(*workspace);
++    match.contents = command->empty() ? u"terminal: workspace novo"
++                                      : u"terminal: " + *command;
+     match.contents_class = {{0, ACMatchClassification::URL}};
+     match.allowed_to_be_default_match = true;
+     matches_.push_back(match);
+@@ -59,7 +62,8 @@
+   }
+ 
+   // "o:" / "o: <term>" opens the notes tab with no document: with a term it
+-  // runs the vault search, bare it opens a new tab (see browser_navigator.cc).
++  // runs the vault search, bare it opens a new tab (ChromeOmniboxClient and
++  // browser_navigator.cc).
+   // Same QUERY caveat as above.
+   if (std::optional<std::u16string> note =
+           aerographene::ParseNotesCommand(input.text())) {
+--- a/chrome/browser/ui/omnibox/BUILD.gn
++++ b/chrome/browser/ui/omnibox/BUILD.gn
+@@ -212,6 +212,10 @@
+       "//ui/views/controls/webview",
+       "//url",
+     ]
++    if (is_linux) {
++      # aerographene: "t: <command>" one-shot channel (fatia C6).
++      deps += [ "//chrome/browser/ui/webui/aero_terminal:launch" ]
++    }
+   }
+ }
+ 
+--- a/chrome/browser/ui/omnibox/chrome_omnibox_client.cc
++++ b/chrome/browser/ui/omnibox/chrome_omnibox_client.cc
+@@ -23,6 +23,7 @@
+ #include "base/strings/strcat.h"
+ #include "base/strings/string_util.h"
+ #include "base/strings/utf_string_conversions.h"
++#include "build/build_config.h"
+ #include "base/task/bind_post_task.h"
+ #include "base/task/sequenced_task_runner.h"
+ #include "base/trace_event/typed_macros.h"
+@@ -83,8 +84,11 @@
+ #include "components/bookmarks/browser/bookmark_model.h"
+ #include "components/favicon/content/content_favicon_driver.h"
+ #include "components/favicon/core/favicon_service.h"
++#include "components/omnibox/browser/aero_notes_command.h"
++#include "components/omnibox/browser/aero_terminal_command.h"
+ #include "components/omnibox/browser/autocomplete_controller_emitter.h"
+ #include "components/omnibox/browser/autocomplete_match.h"
++#include "components/omnibox/browser/autocomplete_provider.h"
+ #include "components/omnibox/browser/autocomplete_result.h"
+ #include "components/omnibox/browser/base_search_provider.h"
+ #include "components/omnibox/browser/location_bar_model.h"
+@@ -129,6 +133,10 @@
+ #include "ui/gfx/vector_icon_types.h"
+ #include "url/gurl.h"
+ 
++#if BUILDFLAG(IS_LINUX)
++#include "chrome/browser/ui/webui/aero_terminal/terminal_launch.h"
++#endif
++
+ #if BUILDFLAG(ENABLE_EXTENSIONS)
+ #include "chrome/browser/ui/extensions/settings_api_bubble_helpers.h"
+ 
+@@ -957,6 +965,29 @@
+               text, "match", match, "alternative_nav_match",
+               alternative_nav_match);
+ 
++  // aerographene (C6): "t:" / "t: <command>" and a bare "o:" open a new tab
++  // instead of replacing the current one. Only the builtin provider's own
++  // match counts (never history, bookmarks or anything a site influenced);
++  // the command is re-parsed from what was typed and goes to the new tab by
++  // the one-shot channel below, never in the URL.
++  std::optional<std::u16string> aero_terminal_command;
++  if (match.provider &&
++      match.provider->type() == AutocompleteProvider::TYPE_BUILTIN) {
++    bool aero_new_tab = false;
++    if (destination_url == GURL(aerographene::TerminalCommandUrl())) {
++      aero_terminal_command =
++          aerographene::ParseTerminalCommand(match.fill_into_edit);
++      aero_new_tab = aero_terminal_command.has_value();
++    } else if (destination_url ==
++               GURL(aerographene::NotesCommandUrl(std::u16string()))) {
++      aero_new_tab =
++          aerographene::ParseNotesCommand(match.fill_into_edit).has_value();
++    }
++    if (aero_new_tab && disposition == WindowOpenDisposition::CURRENT_TAB) {
++      disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
++    }
++  }
++
+   std::string extra_headers;
+   for (const auto& header : match.extra_headers) {
+     base::StrAppend(&extra_headers,
+@@ -971,6 +1002,16 @@
+ 
+   if (browser_) {
+     auto navigation = chrome::OpenCurrentURL(browser_);
++#if BUILDFLAG(IS_LINUX)
++    // Bound to the tab that is loading chrome://terminal; its
++    // TerminalHandler takes it once (terminal_launch.h).
++    if (navigation && aero_terminal_command &&
++        !aero_terminal_command->empty()) {
++      aerographene::SetPendingTerminalCommand(
++          navigation->GetWebContents(),
++          base::UTF16ToUTF8(*aero_terminal_command));
++    }
++#endif
+     if (navigation) {
+       if (ui::PageTransitionCoreTypeIs(transition, ui::PAGE_TRANSITION_TYPED)) {
+         AttachOmniboxDirectUrlInputNavigationHandleUserData(*navigation);
+--- a/chrome/browser/ui/webui/aero_terminal/BUILD.gn
++++ b/chrome/browser/ui/webui/aero_terminal/BUILD.gn
+@@ -17,8 +17,12 @@
+   deps = [
+     ":access",
+     ":host",
++    ":launch",
+     "//base",
++    "//base/version_info",
+     "//chrome/browser:resources",
++    "//chrome/common:non_code_constants",
++    "//gpu/config",
+     "//url",
+     "//chrome/browser/profiles:profile",
+     "//services/network/public/mojom",
+@@ -39,6 +43,16 @@
+   ]
+ }
+ 
++# "t: <command>" one-shot channel and workspace numbers (fatia C6). Only
++# base, so ChromeOmniboxClient can depend on it.
++source_set("launch") {
++  sources = [
++    "terminal_launch.cc",
++    "terminal_launch.h",
++  ]
++  public_deps = [ "//base" ]
++}
++
+ # pty session (fatia C2), used by TerminalHost (C3).
+ source_set("session") {
+   sources = [
+@@ -65,11 +79,13 @@
+   sources = [
+     "terminal_access_unittest.cc",
+     "terminal_host_unittest.cc",
++    "terminal_launch_unittest.cc",
+     "terminal_session_unittest.cc",
+   ]
+   deps = [
+     ":access",
+     ":host",
++    ":launch",
+     ":session",
+     "//base",
+     "//components/profile_metrics",
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_launch.h
+@@ -0,0 +1,68 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_AERO_TERMINAL_TERMINAL_LAUNCH_H_
++#define CHROME_BROWSER_UI_WEBUI_AERO_TERMINAL_TERMINAL_LAUNCH_H_
++
++#include <map>
++#include <optional>
++#include <set>
++#include <string>
++
++#include "base/time/time.h"
++
++namespace base {
++class SupportsUserData;
++}
++
++namespace aerographene {
++
++// One-shot channel for the "t: <command>" command bar entry (fatia C6). The
++// command never travels in the URL or in anything another origin could
++// forge: ChromeOmniboxClient attaches it to the WebContents (a
++// base::SupportsUserData) of the tab it just opened at chrome://terminal, and
++// the TerminalHandler of that same tab takes it once. The page then types it
++// into the first terminal like the user would (no exec, no argv).
++//
++// SetPendingTerminalCommand refuses a null tab, an empty command and
++// anything longer than kMaxLaunchCommandBytes; a newer command replaces an
++// older one. TakePendingTerminalCommand returns the command at most once and
++// only within kLaunchCommandLifetime of being set (a tab that navigated
++// elsewhere and came back later must not run a stale command); taking always
++// clears it.
++inline constexpr size_t kMaxLaunchCommandBytes = 4096;
++inline constexpr base::TimeDelta kLaunchCommandLifetime = base::Seconds(60);
++
++bool SetPendingTerminalCommand(base::SupportsUserData* tab,
++                               std::string command,
++                               base::TimeTicks now = base::TimeTicks::Now());
++std::optional<std::string> TakePendingTerminalCommand(
++    base::SupportsUserData* tab,
++    base::TimeTicks now = base::TimeTicks::Now());
++
++// Workspace numbers in use, per profile (key: any stable per-profile
++// pointer). Claim(key, n) with n in [1, kMaxWorkspace] registers that
++// workspace (several tabs may show the same one); Claim(key, 0) picks the
++// smallest number no tab of that profile uses, or returns 0 when all are in
++// use. Anything else returns 0. Release undoes one Claim. UI thread only.
++class WorkspaceRegistry {
++ public:
++  static constexpr int kMaxWorkspace = 99;
++
++  WorkspaceRegistry();
++  WorkspaceRegistry(const WorkspaceRegistry&) = delete;
++  WorkspaceRegistry& operator=(const WorkspaceRegistry&) = delete;
++  ~WorkspaceRegistry();
++
++  static WorkspaceRegistry& Get();
++
++  int Claim(const void* key, int wanted);
++  void Release(const void* key, int workspace);
++
++ private:
++  std::map<const void*, std::multiset<int>> used_;
++};
++
++}  // namespace aerographene
++
++#endif  // CHROME_BROWSER_UI_WEBUI_AERO_TERMINAL_TERMINAL_LAUNCH_H_
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_launch.cc
+@@ -0,0 +1,102 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "chrome/browser/ui/webui/aero_terminal/terminal_launch.h"
++
++#include <memory>
++#include <utility>
++
++#include "base/no_destructor.h"
++#include "base/supports_user_data.h"
++
++namespace aerographene {
++
++namespace {
++
++const char kPendingCommandKey[] = "aero_terminal_pending_command";
++
++struct PendingCommand : public base::SupportsUserData::Data {
++  PendingCommand(std::string c, base::TimeTicks t)
++      : command(std::move(c)), set_at(t) {}
++  std::string command;
++  base::TimeTicks set_at;
++};
++
++}  // namespace
++
++bool SetPendingTerminalCommand(base::SupportsUserData* tab,
++                               std::string command,
++                               base::TimeTicks now) {
++  if (!tab || command.empty() || command.size() > kMaxLaunchCommandBytes) {
++    return false;
++  }
++  tab->SetUserData(kPendingCommandKey,
++                   std::make_unique<PendingCommand>(std::move(command), now));
++  return true;
++}
++
++std::optional<std::string> TakePendingTerminalCommand(
++    base::SupportsUserData* tab,
++    base::TimeTicks now) {
++  if (!tab) {
++    return std::nullopt;
++  }
++  std::unique_ptr<base::SupportsUserData::Data> data =
++      tab->TakeUserData(kPendingCommandKey);
++  if (!data) {
++    return std::nullopt;
++  }
++  auto* pending = static_cast<PendingCommand*>(data.get());
++  if (now < pending->set_at || now - pending->set_at > kLaunchCommandLifetime) {
++    return std::nullopt;
++  }
++  return std::move(pending->command);
++}
++
++WorkspaceRegistry::WorkspaceRegistry() = default;
++WorkspaceRegistry::~WorkspaceRegistry() = default;
++
++// static
++WorkspaceRegistry& WorkspaceRegistry::Get() {
++  static base::NoDestructor<WorkspaceRegistry> registry;
++  return *registry;
++}
++
++int WorkspaceRegistry::Claim(const void* key, int wanted) {
++  if (!key || wanted < 0 || wanted > kMaxWorkspace) {
++    return 0;
++  }
++  std::multiset<int>& used = used_[key];
++  int n = wanted;
++  if (n == 0) {
++    for (int i = 1; i <= kMaxWorkspace && n == 0; ++i) {
++      if (!used.contains(i)) {
++        n = i;
++      }
++    }
++    if (n == 0) {
++      if (used.empty()) {
++        used_.erase(key);
++      }
++      return 0;
++    }
++  }
++  used.insert(n);
++  return n;
++}
++
++void WorkspaceRegistry::Release(const void* key, int workspace) {
++  auto it = used_.find(key);
++  if (it == used_.end()) {
++    return;
++  }
++  auto one = it->second.find(workspace);
++  if (one != it->second.end()) {
++    it->second.erase(one);
++  }
++  if (it->second.empty()) {
++    used_.erase(it);
++  }
++}
++
++}  // namespace aerographene
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_launch_unittest.cc
+@@ -0,0 +1,93 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "chrome/browser/ui/webui/aero_terminal/terminal_launch.h"
++
++#include <string>
++
++#include "base/supports_user_data.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace aerographene {
++
++namespace {
++
++// Stands in for the WebContents of a tab (a base::SupportsUserData too).
++class FakeTab : public base::SupportsUserData {};
++
++}  // namespace
++
++TEST(TerminalLaunchTest, RefusesWithoutTab) {
++  EXPECT_FALSE(SetPendingTerminalCommand(nullptr, "ls"));
++  EXPECT_FALSE(TakePendingTerminalCommand(nullptr));
++}
++
++TEST(TerminalLaunchTest, RefusesEmptyOrHuge) {
++  FakeTab tab;
++  EXPECT_FALSE(SetPendingTerminalCommand(&tab, ""));
++  EXPECT_FALSE(SetPendingTerminalCommand(
++      &tab, std::string(kMaxLaunchCommandBytes + 1, 'x')));
++  EXPECT_FALSE(TakePendingTerminalCommand(&tab));
++  EXPECT_TRUE(SetPendingTerminalCommand(
++      &tab, std::string(kMaxLaunchCommandBytes, 'x')));
++}
++
++TEST(TerminalLaunchTest, OneShot) {
++  FakeTab tab;
++  ASSERT_TRUE(SetPendingTerminalCommand(&tab, "htop"));
++  EXPECT_EQ(TakePendingTerminalCommand(&tab), "htop");
++  EXPECT_FALSE(TakePendingTerminalCommand(&tab));
++}
++
++TEST(TerminalLaunchTest, BoundToItsTab) {
++  FakeTab opened;
++  FakeTab other;
++  ASSERT_TRUE(SetPendingTerminalCommand(&opened, "ls"));
++  EXPECT_FALSE(TakePendingTerminalCommand(&other));
++  EXPECT_EQ(TakePendingTerminalCommand(&opened), "ls");
++}
++
++TEST(TerminalLaunchTest, NewerReplacesOlder) {
++  FakeTab tab;
++  ASSERT_TRUE(SetPendingTerminalCommand(&tab, "a"));
++  ASSERT_TRUE(SetPendingTerminalCommand(&tab, "b"));
++  EXPECT_EQ(TakePendingTerminalCommand(&tab), "b");
++  EXPECT_FALSE(TakePendingTerminalCommand(&tab));
++}
++
++TEST(TerminalLaunchTest, ExpiresAndIsClearedAnyway) {
++  FakeTab tab;
++  const base::TimeTicks t0 = base::TimeTicks() + base::Seconds(100);
++  ASSERT_TRUE(SetPendingTerminalCommand(&tab, "ls", t0));
++  EXPECT_FALSE(TakePendingTerminalCommand(
++      &tab, t0 + kLaunchCommandLifetime + base::Seconds(1)));
++  // Expired take still consumed it.
++  EXPECT_FALSE(TakePendingTerminalCommand(&tab, t0));
++  ASSERT_TRUE(SetPendingTerminalCommand(&tab, "ls", t0));
++  EXPECT_EQ(TakePendingTerminalCommand(&tab, t0 + kLaunchCommandLifetime),
++            "ls");
++}
++
++TEST(TerminalLaunchTest, WorkspaceRegistry) {
++  WorkspaceRegistry r;
++  int p1 = 0;
++  int p2 = 0;
++  EXPECT_EQ(r.Claim(&p1, 0), 1);
++  EXPECT_EQ(r.Claim(&p1, 0), 2);
++  EXPECT_EQ(r.Claim(&p2, 0), 1);  // per profile
++  EXPECT_EQ(r.Claim(&p1, 5), 5);
++  EXPECT_EQ(r.Claim(&p1, 5), 5);  // same workspace twice is fine
++  r.Release(&p1, 1);
++  EXPECT_EQ(r.Claim(&p1, 0), 1);
++  EXPECT_EQ(r.Claim(&p1, 100), 0);
++  EXPECT_EQ(r.Claim(&p1, -1), 0);
++  EXPECT_EQ(r.Claim(nullptr, 0), 0);
++  r.Release(&p1, 42);  // unknown: no-op
++  int p3 = 0;
++  for (int i = 1; i <= WorkspaceRegistry::kMaxWorkspace; ++i) {
++    EXPECT_EQ(r.Claim(&p3, 0), i);
++  }
++  EXPECT_EQ(r.Claim(&p3, 0), 0);
++}
++
++}  // namespace aerographene
+--- a/chrome/browser/ui/webui/aero_terminal/terminal_handler.h
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_handler.h
+@@ -30,7 +30,11 @@
+ //
+ // Messages (args[0] is the callback id when a reply is expected):
+ //   open(cb, cols, rows) -> id or null; write(id, text); resize(id, c, r);
+-//   foreground(cb, id) -> process name or ""; close(id); ack(id, bytes) after the page rendered `bytes` of output (at
++//   foreground(cb, id) -> process name or ""; close(id);
++//   start(cb, wanted) -> {workspace, command, info} (C6): claims workspace
++//   `wanted` (1..99) or the smallest free one (0), takes the one-shot
++//   "t: <command>" of this tab (string or null) and returns the system
++//   summary printed at the top of every terminal; ack(id, bytes) after the page rendered `bytes` of output (at
+ //   most one read chunk per ack). Events: "output"(id, base64 bytes),
+ //   "exit"(id, code), "writeDropped"(id) when the input queue is full.
+ class TerminalHandler : public content::WebUIMessageHandler {
+@@ -55,16 +59,24 @@
+   void HandleClose(const base::ListValue& args);
+   void HandleAck(const base::ListValue& args);
+   void HandleForeground(const base::ListValue& args);
++  void HandleStart(const base::ListValue& args);
++  void ReleaseWorkspace();
+ 
+   void OnOpened(base::Value callback_id, int32_t id, bool ok);
+   void OnWritten(int32_t id, bool accepted);
+   void OnForeground(base::Value callback_id, std::string name);
++  void OnStart(base::Value callback_id, base::Value command,
++               base::DictValue info);
+   void OnOutput(int32_t id, std::string bytes);
+   void OnExit(int32_t id, int code);
+ 
+   base::SequenceBound<TerminalHost> host_;
+   std::set<int32_t> open_ids_;
+   int32_t next_id_ = 1;
++  // Workspace claimed by start() in WorkspaceRegistry (0: none), per
++  // profile (workspace_key_ is the BrowserContext, only compared).
++  int workspace_ = 0;
++  const void* workspace_key_ = nullptr;
+   base::WeakPtrFactory<TerminalHandler> weak_ptr_factory_{this};
+ };
+ 
+--- a/chrome/browser/ui/webui/aero_terminal/terminal_handler.cc
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_handler.cc
+@@ -7,14 +7,23 @@
+ #include <utility>
+ 
+ #include "base/base64.h"
++#include "base/files/file_path.h"
++#include "base/files/file_util.h"
+ #include "base/functional/bind.h"
++#include "base/system/sys_info.h"
+ #include "base/task/bind_post_task.h"
+ #include "base/task/thread_pool.h"
++#include "base/version_info/version_info.h"
+ #include "chrome/browser/ui/webui/aero_terminal/terminal_access.h"
++#include "chrome/browser/ui/webui/aero_terminal/terminal_launch.h"
++#include "chrome/common/aero_version.h"
+ #include "content/public/browser/browser_context.h"
++#include "content/public/browser/gpu_data_manager.h"
+ #include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/web_contents.h"
+ #include "content/public/browser/web_ui.h"
+ #include "content/public/common/url_constants.h"
++#include "gpu/config/gpu_info.h"
+ #include "url/gurl.h"
+ #include "url/origin.h"
+ 
+@@ -30,6 +39,34 @@
+   return static_cast<uint16_t>(*i);
+ }
+ 
++// Summary printed at the top of every terminal (fatia C6, fastfetch style).
++// Local only: nothing leaves the machine. Runs on a MayBlock task (disks).
++base::DictValue CollectSystemInfo() {
++  base::DictValue info;
++  info.Set("chromium", std::string(version_info::GetVersionNumber()));
++  info.Set("aerographene", std::string(aero::kVersion));
++  info.Set("cpu", base::SysInfo::CPUModelName());
++  info.Set("cores", base::SysInfo::NumberOfProcessors());
++  info.Set("ram", static_cast<double>(
++                      base::SysInfo::AmountOfTotalPhysicalMemory().InBytes()));
++  base::ListValue disks;
++  for (const base::FilePath& path :
++       {base::FilePath("/"), base::GetHomeDir()}) {
++    std::optional<int64_t> total = base::SysInfo::AmountOfTotalDiskSpace(path);
++    std::optional<int64_t> free = base::SysInfo::AmountOfFreeDiskSpace(path);
++    if (!total || !free || *total <= 0) {
++      continue;
++    }
++    base::DictValue disk;
++    disk.Set("path", path.value());
++    disk.Set("total", static_cast<double>(*total));
++    disk.Set("free", static_cast<double>(*free));
++    disks.Append(std::move(disk));
++  }
++  info.Set("disks", std::move(disks));
++  return info;
++}
++
+ }  // namespace
+ 
+ TerminalHandler::TerminalHandler() {
+@@ -53,7 +90,17 @@
+ 
+ // Destroying host_ posts ~TerminalHost to its sequence, which kills the
+ // process groups of every session of this tab.
+-TerminalHandler::~TerminalHandler() = default;
++TerminalHandler::~TerminalHandler() {
++  ReleaseWorkspace();
++}
++
++void TerminalHandler::ReleaseWorkspace() {
++  if (workspace_) {
++    WorkspaceRegistry::Get().Release(workspace_key_, workspace_);
++  }
++  workspace_ = 0;
++  workspace_key_ = nullptr;
++}
+ 
+ void TerminalHandler::RegisterMessages() {
+   web_ui()->RegisterMessageCallback(
+@@ -74,11 +121,15 @@
+   web_ui()->RegisterMessageCallback(
+       "ack", base::BindRepeating(&TerminalHandler::HandleAck,
+                                  base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "start", base::BindRepeating(&TerminalHandler::HandleStart,
++                                   base::Unretained(this)));
+ }
+ 
+ void TerminalHandler::OnJavascriptDisallowed() {
+   // Page reloaded or navigated away: its sessions must not outlive it.
+   open_ids_.clear();
++  ReleaseWorkspace();
+   weak_ptr_factory_.InvalidateWeakPtrs();
+   host_.Reset();  // ~TerminalHost kills what is left
+   CreateHost();
+@@ -184,6 +235,59 @@
+   }
+ }
+ 
++void TerminalHandler::HandleStart(const base::ListValue& args) {
++  if (args.size() != 2 || !FromTerminalPage()) {
++    return;
++  }
++  std::optional<int> wanted = args[1].GetIfInt();
++  AllowJavascript();
++  // One workspace per page load; later calls just report it.
++  if (!workspace_ && wanted) {
++    workspace_key_ = web_ui()->GetWebContents()->GetBrowserContext();
++    workspace_ = WorkspaceRegistry::Get().Claim(workspace_key_, *wanted);
++    if (!workspace_) {
++      workspace_key_ = nullptr;
++    }
++  }
++  // One-shot: only the tab ChromeOmniboxClient opened for "t: <command>"
++  // has one, and only the first start() of that tab gets it.
++  std::optional<std::string> command =
++      TakePendingTerminalCommand(web_ui()->GetWebContents());
++  // GPU info lives on the UI thread; the rest may block (disks).
++  const gpu::GPUInfo gpu_info =
++      content::GpuDataManager::GetInstance()->GetGPUInfo();
++  std::string gpu = gpu_info.gl_renderer;
++  if (gpu.empty()) {
++    gpu = gpu_info.active_gpu().device_string;
++  }
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&CollectSystemInfo),
++      base::BindOnce(
++          [](std::string gpu, base::DictValue info) {
++            info.Set("gpu", std::move(gpu));
++            return info;
++          },
++          std::move(gpu))
++          .Then(base::BindOnce(
++              &TerminalHandler::OnStart, weak_ptr_factory_.GetWeakPtr(),
++              args[0].Clone(),
++              command ? base::Value(std::move(*command)) : base::Value())));
++}
++
++void TerminalHandler::OnStart(base::Value callback_id,
++                              base::Value command,
++                              base::DictValue info) {
++  if (!IsJavascriptAllowed()) {
++    return;
++  }
++  base::DictValue reply;
++  reply.Set("workspace", workspace_);
++  reply.Set("command", std::move(command));
++  reply.Set("info", std::move(info));
++  ResolveJavascriptCallback(callback_id, reply);
++}
++
+ void TerminalHandler::HandleResize(const base::ListValue& args) {
+   if (args.size() != 3 || !FromTerminalPage()) {
+     return;
