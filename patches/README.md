@@ -78,6 +78,10 @@ Nomes de processo legíveis no Linux. Toca `base/process/set_process_title.cc` e
 - privacidade: o nome do space fica visível a qualquer usuário local via `ps`/`/proc/<pid>/cmdline` (já era o caso para os demais switches). Em máquina multiusuário, nomes de space revelam contexto; aceito para uso pessoal.
 - limites: o crash handler no Linux é binário separado (`chrome_crashpad_handler`) e não passa por `SetProcessTitleFromCommandLine`; o rótulo só vale se rodar via `--type=crashpad-handler`. Compilação e runtime não verificados.
 
+### `aerographene/windows-disable-rlz.patch` (BSD-3-Clause ungoogled-chromium-windows + GPL-3.0, fatia D3a)
+
+Copiado de `windows-disable-rlz.patch` do ungoogled-chromium-windows (commit `989b438`): tira a dep `rlz_lib_no_network` de `chrome/installer/setup/BUILD.gn` e o `ClearRlzProductState()` de `setup/uninstall.cc`. Acréscimo próprio: `rlz_id` em `rlz/BUILD.gn` só existe com `enable_rlz_support` (o ungoogled força `false`). Sem efeito no Linux (setup não compila lá, `rlz_id` não é referenciado).
+
 ### `aerographene/toolbar-compact-width.patch` (GPL-3.0)
 
 Declara `kPreferredCompactWidth = 350` (valor do `helium/ui/layout/compact.patch`, não portado) em `toolbar_view.cc`; `helium/ui/layout/toolbar-layout.patch` usa a constante e o build quebrava sem ela (run 37312463487). Remover se `compact.patch` for portado.
