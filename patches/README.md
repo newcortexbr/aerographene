@@ -431,6 +431,10 @@ v0.3, fatia B5, no fim da série (depende de `notes-webui`, `notes-vault-reader`
 
 v0.3, fatia C3. `chrome/browser/resources/aero_terminal/xterm.{mjs,css}` e `XTERM_LICENSE` do pacote npm `@xterm/xterm` 6.0.0 (sha256 do tgz `908e66e04af6c8dc6b00dd3b54de088e2e81e5ed866284fd6c2fb3c2d1c7a3f6`), sem a linha `sourceMappingURL`. Só arquivos novos; ligado ao grd em `terminal-bridge`.
 
+### `aerographene/terminal-c5b.patch` (GPL-3.0)
+
+v0.3, fatia C5b. `TerminalSession::Terminate` passa a encerrar toda a sessão do shell (varre `/proc/*/stat` por sid, ignora zumbis) após SIGHUP e espera curta, não só o grupo; jobs em outro grupo que ignoram HUP (`nohup sleep &`) morrem ao fechar a aba. Espera pós-SIGKILL limitada a 2 s. Teste `TerminateKillsJobInOtherProcessGroup`. Depende de `terminal-c4`; fim da série do terminal.
+
 ### `aerographene/terminal-c5.patch` (GPL-3.0)
 
 v0.3, fatia C5. Hardening: alvo `aero_terminal:access` (`TerminalAllowedForContext`, só perfil `kRegular`, usado no `IsWebUIEnabled` e em cada mensagem; `IsTerminalFrame`, frame principal + origem `chrome://terminal`) com `terminal_access_unittest.cc`; `linkHandler` próprio no `terminal.js` (OSC 8 só http(s), `noopener,noreferrer`). Depende de `terminal-c4`; fim da série do terminal.

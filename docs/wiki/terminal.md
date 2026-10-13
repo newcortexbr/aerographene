@@ -13,6 +13,7 @@ validado até aqui (Chromium 154, Cezanne, overlay): os patches aplicam sem fuzz
 - feito (C3, `patches/aerographene/terminal-xterm.patch` e `terminal-bridge.patch`): xterm.js 6.0.0 vendorizado (MIT) em cada janela, ligado ao shell; título da janela pelo OSC 0/2; recarregar ou fechar a página mata os shells.
 - feito (correções do review de segurança de 13/10/2026): escrita no pty nunca bloqueia, controle de fluxo da saída e limite global de sessões (ver abaixo).
 - feito (C4, `patches/aerographene/terminal-c4.patch`): pan e zoom do workspace, layout persistido, título da aba `t: workspace N` e entrada `-t` na command bar (seção abaixo). Overlay do Cezanne: `aero_ui_tests` 47/47; `builtin_provider.cc` e `terminal_handler.cc` passam `-fsyntax-only` com os flags da `out/Default`.
+- feito (C5b, `terminal-c5b.patch`): fechar a aba encerra todos os processos da sessão do shell (varredura de `/proc` por sid, não só o grupo); `aero_ui_tests` 50/50.
 - feito (C5, `patches/aerographene/terminal-c5.patch`): só perfil normal (nem anônimo, nem convidado, nem perfil de sistema), checagem de frame/origem num helper testado, e links OSC 8 abrindo só http(s) numa aba nova sem `opener` (seção "revisão de segurança C5"). Overlay do Cezanne: `aero_ui_tests` 49/49.
 - falta: review opus e teste negativo no navegador (página web e extensão de teste), a página aberta no navegador (pan/zoom, restauração, tooltip, `-t` na omnibox) e a migração para Mojo (hoje usa mensagens WebUI).
 
