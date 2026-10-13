@@ -51,7 +51,9 @@
 ## repositório público, README, release e wiki
 
 - o repo `newcortexbr/aerographene` é público: tudo em `main` fica visível; nada de dados privados, caminhos pessoais ou segredos.
-- ao entregar função nova ou mudar estado do projeto, atualize o README abaixo da linha "Content above was 100% human-written" (roadmap, docs, thanks). Nunca edite o texto humano acima dessa linha.
+- ao entregar função nova ou mudar estado do projeto, atualize o README abaixo da linha "Content above was 100% human-written" (roadmap, docs, thanks). Nunca edite o texto humano acima dessa linha; única exceção autorizada pelo dono: o bloco de gráficos de benchmark no topo do README.
+- vault (`~/vault`, MCP `vault`): registre fatos, decisões, runs e aprendizados duráveis sempre que puder, com o máximo de tags de assunto pertinentes, para achar depois.
+- nomes de assets de release: `aerographene-vX.Y.Z-avx2-linux.tar.zst`, `-avx1-linux`, `-windows` etc.
 - ao criar ou editar release, consulte no vault `agents/procedimentos/navegador-fork-formato-release.md` e siga o formato; se mudar o formato, atualize a nota.
 - documente cada função nova em `docs/wiki/` (pt-BR, uma página por assunto, com seção final "resumo para agentes") e linke na seção docs do README.
 
