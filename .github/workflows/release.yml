@@ -1,15 +1,22 @@
 name: release
 
 # ADR 0004: só o dono dispara. Nunca adicionar pull_request/pull_request_target.
+# Gera release em DRAFT (nunca publica). Um dispatch por cpu: rodar com avx2 e depois com avx1
+# para a mesma tag acrescenta os assets avx1 ao mesmo draft.
 on:
   workflow_dispatch:
     inputs:
       run_id:
-        description: "run_id do workflow build com o artifact"
+        description: "run_id do workflow build com o artifact da cpu escolhida"
         required: true
       tag:
         description: "tag da release (vX.Y.Z)"
         required: true
+      cpu:
+        description: "cpu do artifact: avx2 (x86-64-v3) ou avx1 (ivybridge)"
+        type: choice
+        options: [avx2, avx1]
+        default: avx2
 
 permissions:
   contents: write
@@ -24,25 +31,57 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: '[[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]'
 
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
-          name: aerographene-linux-x86_64
+          # build.yml: avx2 mantém o nome histórico; avx1 leva sufixo
+          name: ${{ inputs.cpu == 'avx1' && 'aerographene-linux-x86_64-avx1' || 'aerographene-linux-x86_64' }}
           run-id: ${{ inputs.run_id }}
           github-token: ${{ github.token }}
-          path: dist
+          path: art
 
-      - name: renomeia
+      - name: pacotes (tar.zst, pkg.tar.zst, deb, rpm)
         env:
           TAG: ${{ inputs.tag }}
+          CPU: ${{ inputs.cpu }}
         run: |
-          set -e
-          mv dist/*.tar.zst "dist/aerographene-${TAG#v}-x86_64_linux.tar.zst"
-          (cd dist && sha256sum *.tar.zst > SHA256SUMS)
+          set -euo pipefail
+          mkdir dist
+          base="aerographene-${TAG}-${CPU}-linux"
+          cp art/*.tar.zst "dist/${base}.tar.zst"
+          # makepkg (PKGBUILD) e nfpm em containers; saída em dist/
+          bash packaging/build-native.sh "dist/${base}.tar.zst" "$CPU" "${TAG#v}" dist
+          rm -f dist/manifest-*.tsv
+
+      - name: SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          CPU: ${{ inputs.cpu }}
+        run: |
+          set -euo pipefail
+          # junta com o SHA256SUMS de um dispatch anterior (outra cpu) da mesma tag, se houver
+          mkdir old
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p SHA256SUMS -D old 2>/dev/null || true
+          (cd dist && sha256sum "aerographene-${TAG}-${CPU}-linux".{tar.zst,pkg.tar.zst,deb,rpm}) > new.sums
+          { grep -v -- "-${CPU}-linux\." old/SHA256SUMS 2>/dev/null || true; cat new.sums; } | sort -k2 > dist/SHA256SUMS
+          rm -f dist/SHA256SUMS.native-* new.sums
+          cat dist/SHA256SUMS
 
       - name: release (draft)
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
         run: |
-          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" \
-            --draft --title "aerographene $TAG" --target "$GITHUB_SHA"
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # só acrescenta ao draft existente; recusa mexer em release já publicada
+            [ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft -q .isDraft)" = true ] \
+              || { echo "erro: $TAG já está publicada" >&2; exit 1; }
+            gh release upload "$TAG" dist/aerographene-* dist/SHA256SUMS dist/namcap-*.txt \
+              --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" dist/aerographene-* dist/SHA256SUMS dist/namcap-*.txt \
+              --repo "$GITHUB_REPOSITORY" --draft --title "aerographene $TAG" --target "$GITHUB_SHA"
+          fi
