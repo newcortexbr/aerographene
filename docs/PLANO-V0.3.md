@@ -130,6 +130,48 @@ Fatias:
 
 Se D1 não sair ou D2 mostrar bloqueio estrutural, cai para o ADR 0008 opção 1a (máquina Windows).
 
+### status D em 13/10/2026 (D0, D1, D2)
+
+- D1 feito pelo dono: `cezanne-wsl:~/win-toolchain/b353c3b35e.zip` (VS 2026 + SDK 10.0.28000, `--noarm`). Fica fora do git, artifact e release (licenciado).
+- D0 feito: árvore `~/aerographene-win/src` = `cp -al` da árvore base (sem `out/`), ~0 GB extra; toolchain extraído (`vs_files.ciopfs` 4,4 GB). `gn gen out/Win` passa: 36219 alvos.
+- D2 feito: `base` compila (`obj/base/base.lib`, 2543 passos, ~5 min a -j8); `crashpad_handler.exe` (`PE32+ executable (GUI) x86-64, for MS Windows`) e `chrome_elf.dll` (`PE32+ executable (DLL) (GUI) x86-64`) linkam com lld-link. `base_unittests` falha (erro 9). `out/Win` 4,4 GB; espaço livre do host caiu de 97 para 85 GB no total (toolchain, `out/Win`, cópia do llvm-build, CI de outros projetos no mesmo host).
+- procedimento completo e comandos em [docs/wiki/windows.md](wiki/windows.md).
+
+args de `out/Win/args.gn` (os do Linux menos `use_sysroot`, `use_vaapi`, `rtc_use_pipewire`, `use_kerberos`, `use_system_libffi`, `pgo_data_path`, `cc_wrapper`):
+
+```
+target_os="win"  target_cpu="x64"  is_official_build=true  is_debug=false  is_component_build=false
+is_clang=true  chrome_pgo_phase=0  symbol_level=0  blink_symbol_level=0  v8_symbol_level=0
+use_thin_lto=true  thin_lto_enable_optimizations=true  use_icf=true  clang_use_chrome_plugins=false
+disable_fieldtrial_testing_config=true  enable_hangout_services_extension=false  enable_mdns=false
+enable_remoting=false  enable_reporting=false  enable_service_discovery=false  enable_widevine=true
+exclude_unwind_tables=true  google_api_key=""  google_default_client_id=""  google_default_client_secret=""
+safe_browsing_mode=0  treat_warnings_as_errors=false  use_official_google_api_keys=false
+use_unofficial_version_number=false  blink_enable_generated_code_formatting=false  ffmpeg_branding="Chrome"
+proprietary_codecs=true  fatal_linker_warnings=false  enable_rust=true  enable_rlz=false
+```
+
+erros encontrados e tratamento (todos só na árvore Win, nenhum patch da série alterado):
+
+1. `vs_toolchain.py update`: `build/ciopfs` ausente (hook `ciopfs_linux` do DEPS não roda no tarball). Baixado de `chromium-browser-clang/ciopfs/<build/ciopfs.sha1>`; precisa de `libfuse.so.2`/`libulockmgr.so.1`, extraídos de `libfuse2t64` com `apt-get download` + `dpkg-deb -x` em `~/aerographene-win/root` (sem sudo) e `LD_LIBRARY_PATH`.
+2. `gn gen` com `use_sysroot=false` (flag do ungoogled-windows): a toolchain host Linux pede glib via `pkg-config` do host. Removido; usa o sysroot Debian da árvore.
+3. `gn gen`: `//chrome/installer/setup:setup` e `//rlz:rlz_id` dependem de `//rlz:rlz_lib*`, que não existem porque o ungoogled força `enable_rlz_support = false`. Contorno local: dep removida de `chrome/installer/setup/BUILD.gn` e `rlz_id` condicionado a `enable_rlz_support` em `rlz/BUILD.gn`. `setup/uninstall.cc` ainda inclui headers do RLZ: vira patch na série Windows (D3), como no ungoogled-windows.
+4. ninja em laço de "Regenerating ninja files": arquivos editados com mtime no futuro (relógio). `touch -d "2 minutes ago"` resolveu.
+5. `clang_rt.builtins-x86_64.lib` ausente: o LLVM do tarball só tem runtimes Linux. Baixado `Win/clang-win-runtime-library-llvmorg-24-init-3796-g20e97c4b-27.tar.xz` (mesmo que `tools/clang/scripts/update.py` baixa com `target_os` win) em cópia real de `third_party/llvm-build` (a hardlinkada ficou em `llvm-build.hardlink-ci`).
+6. `buildtools/linux64-format/clang-format` é symlink para `/usr/bin/clang-format` do container; o crubit precisa dele. Baixado de `chromium-clang-format/f5485c39…` (sha256 confere com o DEPS).
+7. `build/toolchain/win/rc/linux64/rc` ausente (hook `rc_linux`). Baixado de `chromium-browser-clang/rc/<rc.sha1>` (sha1 confere).
+8. `windows.0.52.0.lib` do crate vendorizado `windows_x86_64_msvc-v0_52` podado pelo ungoogled (binário). Recuperado do `.crate` 0.52.6 do crates.io.
+
+9. `base_unittests`: `base/i18n/rtl_unittest.cc` com `hex escape sequence out of range`, porque a substituição de domínios do ungoogled troca `google.com` por `9oo91e.qjz9zk` logo após `\x202e`. Só testes; não afeta o navegador. Por isso o PE de prova foi `crashpad_handler`/`chrome_elf`.
+
+aviso no link: `lld-link: warning: ignoring unknown argument '-Wl,--icf=all'` (flag ICF de ELF chegando ao link Windows); investigar em D4, o ICF do Windows é `/OPT:ICF`.
+
+Rust std `x86_64-pc-windows-msvc` é compilado da fonte pela build (`local_rustc_sysroot`): não falta toolchain Rust.
+
+deps só-Windows vazias no tarball, prováveis bloqueios de D4: `third_party/microsoft_dxheaders/src`, `microsoft_webauthn/src`, `microsoft_multimedia_redirection/src`, `widevine/cdm/win`, `wix` (instalador MSI, dispensável). Outros binários podados pelo ungoogled podem aparecer em D4.
+
+próximos passos: D3 (série Windows: patch RLZ do setup, tirar patches Linux-only, versões Windows de branding/tema; preparar script que reproduz os itens 1–8), depois obter as deps acima e tentar `chrome` + `mini_installer` (D4), só com runner livre.
+
 ## E. pacotes nativos sem recompilar
 
 Objetivo: do `.tar.zst` já gerado, produzir no CI o `.pkg.tar.zst` (asset da release, `pacman -U`), o `.deb` e o `.rpm`; avaliar instalador Windows. Correção do dono (13/10/2026): o pacote Arch sai do próprio `packaging/arch/PKGBUILD` rodado no CI sobre o binário compilado; não haverá PKGBUILD `-bin` que baixa da release.
