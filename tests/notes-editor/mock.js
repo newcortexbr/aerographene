@@ -38,5 +38,24 @@ window.chrome = {send(name, args) {
     files[a[1]] = files[a[0]]; delete files[a[0]]; return res('ok', files[a[1]].m);
   }
   if (name === 'deleteNote') { if (!files[a[0]]) return res('notFound'); delete files[a[0]]; return res('ok'); }
+  if (name === 'watchVault') return ok(window.watchOk !== false);
+  if (name === 'searchVault') {
+    const q = a[0].toLowerCase();
+    const hits = [];
+    for (const [p, f] of Object.entries(files)) {
+      const nm = p.toLowerCase().includes(q);
+      const at = f.t.toLowerCase().indexOf(q);
+      if (nm || at >= 0) hits.push({path: p, nameMatch: nm, snippet: at >= 0 ? f.t.split('\n').find((l) => l.toLowerCase().includes(q)) : ''});
+    }
+    return ok({hits, truncated: false});
+  }
+  if (name === 'readImage') {
+    const f = (window.images || {})[a[1] + a[0]] || (window.images || {})[a[0]];
+    return f ? ok({mime: 'image/png', data: f}) : bad('notFound');
+  }
   bad('unknown');
 }};
+
+// 1x1 png
+window.images = {'pic.png': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAwS2OUAAAAABJRU5ErkJggg=='};
+window.fire = (name, ...args) => window.cr.webUIListenerCallback(name, ...args);
