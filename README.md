@@ -90,7 +90,8 @@ I IMMENSELY thank projects such as Ungoogled-Chromium, Helium, Thorium and Brave
   - ⬜ Windows 11 ([ADR 0008](docs/adr/0008-windows-11.md))
   - 🚧 x86-64-v2 + AVX build for CPUs without AVX2 ([ADR 0009](docs/adr/0009-build-ivy-bridge.md)): build input `cpu=avx1` (separate `out/` and ccache) written; the first avx1 build has not run
   - 🚧 native packages from the compiled tarball: `.pkg.tar.zst` (PKGBUILD), `.deb`, `.rpm` ([pacotes](docs/wiki/pacotes.md)); install/remove/`--version` tested in Arch, Ubuntu 24.04 and Fedora containers, release workflow not yet run
-  - ⬜ Obsidian and terminals inside workspaces
+  - 🚧 notes page `aerographene://notes` (Obsidian-style vault) ([notas](docs/wiki/notas.md)): folder picker, lazy vault tree and safe Markdown view wired in code; unit tests pass; not tested in the browser yet, no editing
+  - 🚧 terminal board `aerographene://terminal` ([terminal](docs/wiki/terminal.md)): board of draggable windows, each an xterm.js wired to a local shell (pty in the browser process, restricted to that page); unit tests pass; not tested in the browser yet, security review pending
   - ⬜ Google Sync with own API keys ([ADR 0006](docs/adr/0006-google-sync-com-chaves-proprias.md))
 
 ## docs
@@ -99,6 +100,10 @@ the wiki lives in [`docs/wiki/`](docs/wiki/), in pt-BR.
 
 - [temas](docs/wiki/temas.md): how themes load (built-in theme, `theme.json` tokens, extension themes), where to change them and how to make your own. Ends with a dense spec you can paste into your AI agent so it writes a valid theme for you.
 - [benchmark](docs/wiki/benchmark.md): how the startup/memory baseline is measured and charted.
+
+- [notas](docs/wiki/notas.md): the notes page (`aerographene://notes`), what exists today and how vault access is confined. Ends with a summary for agents.
+
+- [terminal](docs/wiki/terminal.md): the terminal board (`aerographene://terminal`), the pty session and its security rules. Ends with a summary for agents.
 
 - [pacotes](docs/wiki/pacotes.md): release assets (`tar.zst`, `pkg.tar.zst`, `deb`, `rpm`, per CPU target), how to install and remove, what gets installed, how the packages are built. Ends with a summary for agents.
 

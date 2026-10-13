@@ -1,0 +1,541 @@
+aerographene: sessão pty local do terminal (v0.3, fatia C2).
+
+Origem: aerographene (original); padrão de pty copiado de
+remoting/host/terminal_session_linux.cc (BSD, Chromium). Licença: GPL-3.0.
+Depende de: aerographene/terminal-webui.patch e
+aerographene/notes-vault-reader.patch (mesmo bloco em chrome/test/BUILD.gn).
+Propósito: aerographene::TerminalSession (aero_terminal/terminal_session.*),
+ainda sem Mojo nem WebUI (C3). Start(): posix_openpt(O_RDWR|O_NOCTTY|
+O_CLOEXEC) + grantpt/unlockpt/ptsname_r, escravo O_CLOEXEC, TIOCSWINSZ
+inicial; filho por base::LaunchProcess com só o escravo em 0/1/2
+(fds_to_remap; o resto é fechado), pre_exec_delegate com setsid() +
+TIOCSCTTY (o filho lidera sessão e grupo), ambiente limpo (TERM,
+COLORTERM, HOME, SHELL, PATH, USER, LOGNAME, LANG, LC_ALL), cwd = HOME.
+argv vem só do browser (padrão: shell do passwd, $SHELL, /bin/sh).
+Mestre O_NONBLOCK; WriteSome() escreve o que o pty aceita e nunca
+bloqueia (programa que não lê enche o buffer em ~22 KiB). Resize valida
+1..1000. Terminate(): SIGHUP+SIGCONT ao grupo, espera o líder
+sem colher (waitid WNOWAIT, o pgid não pode ser reutilizado), SIGKILL ao
+grupo, depois colhe; idempotente; o destrutor chama. Start/Terminate
+bloqueiam: usar em sequência MayBlock/WithBaseSyncPrimitives. Testes em
+terminal_session_unittest.cc (alvo aero_terminal:unit_tests).
+
+--- a/chrome/browser/ui/webui/aero_terminal/BUILD.gn
++++ b/chrome/browser/ui/webui/aero_terminal/BUILD.gn
+@@ -18,3 +18,22 @@
+     "//services/network/public/mojom",
+   ]
+ }
++
++# pty session (fatia C2). Not used by the WebUI yet; Mojo comes in C3.
++source_set("session") {
++  sources = [
++    "terminal_session.cc",
++    "terminal_session.h",
++  ]
++  public_deps = [ "//base" ]
++}
++
++source_set("unit_tests") {
++  testonly = true
++  sources = [ "terminal_session_unittest.cc" ]
++  deps = [
++    ":session",
++    "//base",
++    "//testing/gtest",
++  ]
++}
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_session.cc
+@@ -0,0 +1,224 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "chrome/browser/ui/webui/aero_terminal/terminal_session.h"
++
++#include <errno.h>
++#include <fcntl.h>
++#include <pwd.h>
++#include <signal.h>
++#include <stdlib.h>
++#include <sys/ioctl.h>
++#include <sys/types.h>
++#include <sys/wait.h>
++#include <termios.h>
++#include <unistd.h>
++
++#include <utility>
++
++#include "base/environment.h"
++#include "base/files/file_util.h"
++#include "base/logging.h"
++#include "base/memory/ptr_util.h"
++#include "base/path_service.h"
++#include "base/posix/eintr_wrapper.h"
++#include "base/process/launch.h"
++#include "base/threading/platform_thread.h"
++
++namespace aerographene {
++
++namespace {
++
++constexpr char kFallbackShell[] = "/bin/sh";
++constexpr char kDefaultPath[] = "/usr/local/bin:/usr/bin:/bin";
++
++// Runs in the child between fork and exec: new session, pty as the
++// controlling terminal. Only async-signal-safe calls.
++class PtyPreExecDelegate : public base::LaunchOptions::PreExecDelegate {
++ public:
++  void RunAsyncSafe() override {
++    setsid();
++    ioctl(STDIN_FILENO, TIOCSCTTY, 0);
++  }
++};
++
++bool ValidSize(uint16_t cols, uint16_t rows) {
++  return cols > 0 && rows > 0 && cols <= TerminalSession::kMaxCols &&
++         rows <= TerminalSession::kMaxRows;
++}
++
++bool SetWindowSize(int fd, uint16_t cols, uint16_t rows) {
++  struct winsize ws = {};
++  ws.ws_col = cols;
++  ws.ws_row = rows;
++  return HANDLE_EINTR(ioctl(fd, TIOCSWINSZ, &ws)) == 0;
++}
++
++// True when the leader has exited (zombie, not yet reaped).
++bool LeaderExited(pid_t pid) {
++  siginfo_t info = {};
++  if (HANDLE_EINTR(waitid(P_PID, pid, &info, WEXITED | WNOHANG | WNOWAIT)) !=
++      0) {
++    return true;  // ECHILD: already reaped elsewhere.
++  }
++  return info.si_pid == pid;
++}
++
++}  // namespace
++
++TerminalSession::Options::Options() = default;
++TerminalSession::Options::Options(const Options&) = default;
++TerminalSession::Options& TerminalSession::Options::operator=(
++    const Options&) = default;
++TerminalSession::Options::~Options() = default;
++
++// static
++std::string TerminalSession::DefaultShell() {
++  if (const struct passwd* pw = getpwuid(getuid());
++      pw && pw->pw_shell && pw->pw_shell[0] == '/') {
++    return pw->pw_shell;
++  }
++  std::optional<std::string> shell = base::Environment::Create()->GetVar(
++      "SHELL");
++  if (shell && !shell->empty() && (*shell)[0] == '/') {
++    return *shell;
++  }
++  return kFallbackShell;
++}
++
++// static
++std::unique_ptr<TerminalSession> TerminalSession::Start(
++    const Options& options) {
++  if (!ValidSize(options.cols, options.rows)) {
++    return nullptr;
++  }
++
++  base::ScopedFD master(
++      HANDLE_EINTR(posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC)));
++  if (!master.is_valid()) {
++    PLOG(ERROR) << "posix_openpt";
++    return nullptr;
++  }
++  if (grantpt(master.get()) != 0 || unlockpt(master.get()) != 0) {
++    PLOG(ERROR) << "grantpt/unlockpt";
++    return nullptr;
++  }
++  // Never block the owning sequence on the master (see WriteSome()).
++  if (!base::SetNonBlocking(master.get())) {
++    PLOG(ERROR) << "O_NONBLOCK";
++    return nullptr;
++  }
++  char name[128];
++  if (ptsname_r(master.get(), name, sizeof(name)) != 0) {
++    PLOG(ERROR) << "ptsname_r";
++    return nullptr;
++  }
++  base::ScopedFD slave(HANDLE_EINTR(open(name, O_RDWR | O_NOCTTY | O_CLOEXEC)));
++  if (!slave.is_valid()) {
++    PLOG(ERROR) << "open pty slave";
++    return nullptr;
++  }
++  if (!SetWindowSize(master.get(), options.cols, options.rows)) {
++    PLOG(ERROR) << "TIOCSWINSZ";
++    return nullptr;
++  }
++
++  const std::string shell = DefaultShell();
++  std::vector<std::string> argv = options.argv;
++  if (argv.empty()) {
++    argv.push_back(shell);
++  }
++
++  base::FilePath home;
++  base::PathService::Get(base::DIR_HOME, &home);
++
++  std::unique_ptr<base::Environment> env = base::Environment::Create();
++  base::LaunchOptions launch;
++  launch.clear_environment = true;
++  launch.environment["TERM"] = "xterm-256color";
++  launch.environment["COLORTERM"] = "truecolor";
++  launch.environment["HOME"] = home.value();
++  launch.environment["SHELL"] = shell;
++  launch.environment["PATH"] = env->GetVar("PATH").value_or(kDefaultPath);
++  for (const std::string name_var : {"USER", "LOGNAME", "LANG", "LC_ALL"}) {
++    if (std::optional<std::string> v = env->GetVar(name_var)) {
++      launch.environment[name_var] = *v;
++    }
++  }
++  launch.current_directory = options.cwd.empty() ? home : options.cwd;
++  // Only the slave goes to the child; LaunchProcess closes every other fd.
++  launch.fds_to_remap.emplace_back(slave.get(), STDIN_FILENO);
++  launch.fds_to_remap.emplace_back(slave.get(), STDOUT_FILENO);
++  launch.fds_to_remap.emplace_back(slave.get(), STDERR_FILENO);
++  // setsid() in the child already creates a new process group whose id is
++  // the child's pid; new_process_group would make setsid() fail.
++  PtyPreExecDelegate delegate;
++  launch.pre_exec_delegate = &delegate;
++
++  base::Process process = base::LaunchProcess(argv, launch);
++  if (!process.IsValid()) {
++    LOG(ERROR) << "launch failed: " << argv[0];
++    return nullptr;
++  }
++  return base::WrapUnique(
++      new TerminalSession(std::move(master), std::move(process)));
++}
++
++TerminalSession::TerminalSession(base::ScopedFD master, base::Process process)
++    : master_(std::move(master)), process_(std::move(process)) {}
++
++TerminalSession::~TerminalSession() {
++  Terminate(base::Milliseconds(200));
++}
++
++std::optional<size_t> TerminalSession::WriteSome(std::string_view bytes) {
++  if (terminated_) {
++    return std::nullopt;
++  }
++  size_t done = 0;
++  while (done < bytes.size()) {
++    const ssize_t n = HANDLE_EINTR(
++        write(master_.get(), bytes.data() + done, bytes.size() - done));
++    if (n < 0) {
++      if (errno == EAGAIN || errno == EWOULDBLOCK) {
++        break;
++      }
++      return std::nullopt;
++    }
++    done += static_cast<size_t>(n);
++  }
++  return done;
++}
++
++bool TerminalSession::Resize(uint16_t cols, uint16_t rows) {
++  if (terminated_ || !ValidSize(cols, rows)) {
++    return false;
++  }
++  return SetWindowSize(master_.get(), cols, rows);
++}
++
++std::optional<int> TerminalSession::Terminate(base::TimeDelta grace) {
++  if (terminated_) {
++    return std::nullopt;
++  }
++  terminated_ = true;
++  const pid_t pid = process_.Pid();
++  // The leader is not reaped until the end, so `pid` (also the process group
++  // id) cannot be reused while we signal the group.
++  kill(-pid, SIGHUP);
++  kill(-pid, SIGCONT);
++  const base::TimeTicks deadline = base::TimeTicks::Now() + grace;
++  while (!LeaderExited(pid) && base::TimeTicks::Now() < deadline) {
++    base::PlatformThread::Sleep(base::Milliseconds(10));
++  }
++  kill(-pid, SIGKILL);
++  int code = -1;
++  std::optional<int> result;
++  if (process_.WaitForExit(&code)) {
++    result = code;
++  }
++  master_.reset();
++  return result;
++}
++
++}  // namespace aerographene
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_session.h
+@@ -0,0 +1,92 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_AERO_TERMINAL_TERMINAL_SESSION_H_
++#define CHROME_BROWSER_UI_WEBUI_AERO_TERMINAL_TERMINAL_SESSION_H_
++
++#include <stdint.h>
++
++#include <memory>
++#include <optional>
++#include <string>
++#include <string_view>
++#include <vector>
++
++#include "base/files/file_path.h"
++#include "base/files/scoped_file.h"
++#include "base/process/process.h"
++#include "base/time/time.h"
++
++namespace aerographene {
++
++// One local shell attached to a pseudo terminal (Linux only). The browser
++// owns the master side; the child is a session leader with the slave as its
++// controlling terminal, in its own process group, with a clean environment.
++// Start() and Terminate() block (open, waitpid) and must run on a MayBlock
++// sequence; I/O on the master never blocks. Not exposed over Mojo yet
++// (fatia C3).
++class TerminalSession {
++ public:
++  struct Options {
++    Options();
++    Options(const Options&);
++    Options& operator=(const Options&);
++    ~Options();
++
++    // Program and arguments. Always chosen by the browser, never by the
++    // renderer. Empty means the user's login shell (DefaultShell()).
++    std::vector<std::string> argv;
++    // Working directory; empty means $HOME.
++    base::FilePath cwd;
++    uint16_t cols = 80;
++    uint16_t rows = 24;
++  };
++
++  // Upper bounds accepted by Start() and Resize().
++  static constexpr uint16_t kMaxCols = 1000;
++  static constexpr uint16_t kMaxRows = 1000;
++
++  // Returns nullptr when the pty or the child cannot be created.
++  static std::unique_ptr<TerminalSession> Start(const Options& options);
++
++  // Shell from the passwd entry, then $SHELL, then /bin/sh.
++  static std::string DefaultShell();
++
++  TerminalSession(const TerminalSession&) = delete;
++  TerminalSession& operator=(const TerminalSession&) = delete;
++
++  // Kills the process group (see Terminate()).
++  ~TerminalSession();
++
++  // Master side of the pty (O_CLOEXEC | O_NONBLOCK). Readers and writers
++  // should watch it with base::FileDescriptorWatcher; EIO means the slave
++  // side is closed.
++  int master_fd() const { return master_.get(); }
++  base::ProcessId pid() const { return process_.Pid(); }
++
++  // Writes as many bytes as the pty accepts now, never blocking (a program
++  // that does not read its input fills the pty buffer). Returns the number
++  // written (0 when the buffer is full: wait for writability), or nullopt on
++  // error or after Terminate().
++  std::optional<size_t> WriteSome(std::string_view bytes);
++
++  // TIOCSWINSZ on the master (the kernel sends SIGWINCH to the foreground
++  // group). False for out-of-range sizes or ioctl failure.
++  bool Resize(uint16_t cols, uint16_t rows);
++
++  // Sends SIGHUP to the whole process group, waits up to `grace` for the
++  // leader, then SIGKILLs the group and reaps the leader. Idempotent.
++  // Returns the leader's exit code when it was reaped.
++  std::optional<int> Terminate(base::TimeDelta grace = base::Seconds(1));
++
++ private:
++  TerminalSession(base::ScopedFD master, base::Process process);
++
++  base::ScopedFD master_;
++  base::Process process_;
++  bool terminated_ = false;
++};
++
++}  // namespace aerographene
++
++#endif  // CHROME_BROWSER_UI_WEBUI_AERO_TERMINAL_TERMINAL_SESSION_H_
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_session_unittest.cc
+@@ -0,0 +1,153 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "chrome/browser/ui/webui/aero_terminal/terminal_session.h"
++
++#include <errno.h>
++#include <poll.h>
++#include <signal.h>
++#include <unistd.h>
++
++#include <string>
++
++#include "base/posix/eintr_wrapper.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/time/time.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace aerographene {
++namespace {
++
++// Reads the master until `needle` shows up, EOF/EIO, or timeout.
++std::string ReadUntil(int fd, std::string_view needle,
++                      base::TimeDelta timeout = base::Seconds(10)) {
++  std::string out;
++  const base::TimeTicks deadline = base::TimeTicks::Now() + timeout;
++  while (out.find(needle) == std::string::npos) {
++    const int ms = (deadline - base::TimeTicks::Now()).InMilliseconds();
++    if (ms <= 0) {
++      break;
++    }
++    struct pollfd p = {fd, POLLIN, 0};
++    if (HANDLE_EINTR(poll(&p, 1, ms)) <= 0) {
++      break;
++    }
++    char buf[4096];
++    const ssize_t n = HANDLE_EINTR(read(fd, buf, sizeof(buf)));
++    if (n <= 0) {
++      break;  // EIO once the slave side is closed.
++    }
++    out.append(buf, static_cast<size_t>(n));
++  }
++  return out;
++}
++
++std::unique_ptr<TerminalSession> StartSh(const std::string& script,
++                                         uint16_t cols = 80,
++                                         uint16_t rows = 24) {
++  TerminalSession::Options o;
++  o.argv = {"/bin/sh", "-c", script};
++  o.cols = cols;
++  o.rows = rows;
++  return TerminalSession::Start(o);
++}
++
++TEST(TerminalSessionTest, EchoOk) {
++  auto s = StartSh("echo ok");
++  ASSERT_TRUE(s);
++  EXPECT_NE(ReadUntil(s->master_fd(), "ok").find("ok"), std::string::npos);
++  EXPECT_EQ(s->Terminate(), 0);
++}
++
++TEST(TerminalSessionTest, IsSessionLeaderWithControllingTty) {
++  // $$ is the shell pid: it must lead its own session and process group.
++  // /proc/<pid>/stat after "comm": state ppid pgrp session tty_nr ...
++  auto s = StartSh("tty; sed 's/.*) //' /proc/$$/stat; echo end");
++  ASSERT_TRUE(s);
++  const std::string pid = base::NumberToString(s->pid());
++  std::string out = ReadUntil(s->master_fd(), "end");
++  EXPECT_NE(out.find("/dev/pts/"), std::string::npos) << out;
++  // " <pgrp> <session> " must both equal the shell pid.
++  EXPECT_NE(out.find(" " + pid + " " + pid + " "), std::string::npos) << out;
++  s->Terminate();
++}
++
++TEST(TerminalSessionTest, InitialSizeAndResize) {
++  auto s = StartSh("stty size; read x; stty size; echo done", 100, 30);
++  ASSERT_TRUE(s);
++  EXPECT_NE(ReadUntil(s->master_fd(), "30 100").find("30 100"),
++            std::string::npos);
++  ASSERT_TRUE(s->Resize(132, 43));
++  ASSERT_EQ(s->WriteSome("\n"), 1u);
++  std::string out = ReadUntil(s->master_fd(), "done");
++  EXPECT_NE(out.find("43 132"), std::string::npos) << out;
++  s->Terminate();
++}
++
++TEST(TerminalSessionTest, RejectsBadSizes) {
++  EXPECT_FALSE(StartSh("true", 0, 24));
++  EXPECT_FALSE(StartSh("true", 80, TerminalSession::kMaxRows + 1));
++  auto s = StartSh("sleep 5");
++  ASSERT_TRUE(s);
++  EXPECT_FALSE(s->Resize(0, 10));
++  EXPECT_FALSE(s->Resize(TerminalSession::kMaxCols + 1, 10));
++  s->Terminate();
++}
++
++TEST(TerminalSessionTest, CleanEnvironment) {
++  setenv("AERO_SECRET_SHOULD_NOT_LEAK", "1", 1);
++  auto s = StartSh("echo T=$TERM; echo L=${AERO_SECRET_SHOULD_NOT_LEAK-none}");
++  unsetenv("AERO_SECRET_SHOULD_NOT_LEAK");
++  ASSERT_TRUE(s);
++  std::string out = ReadUntil(s->master_fd(), "L=");
++  out += ReadUntil(s->master_fd(), "\n", base::Seconds(2));
++  EXPECT_NE(out.find("T=xterm-256color"), std::string::npos) << out;
++  EXPECT_NE(out.find("L=none"), std::string::npos) << out;
++  s->Terminate();
++}
++
++TEST(TerminalSessionTest, TerminateKillsWholeGroup) {
++  // The background child ignores SIGHUP; SIGKILL to the group must get it.
++  auto s = StartSh("trap '' HUP; sleep 100 & echo bg=$!; trap '' HUP; wait");
++  ASSERT_TRUE(s);
++  const pid_t pgid = s->pid();
++  std::string out = ReadUntil(s->master_fd(), "\n");
++  ASSERT_NE(out.find("bg="), std::string::npos) << out;
++  s->Terminate(base::Milliseconds(100));
++  // Orphans may be zombies briefly until init reaps them; poll.
++  bool gone = false;
++  for (int i = 0; i < 200 && !gone; ++i) {
++    gone = kill(-pgid, 0) != 0 && errno == ESRCH;
++    if (!gone) {
++      usleep(10000);
++    }
++  }
++  EXPECT_TRUE(gone);
++}
++
++TEST(TerminalSessionTest, WriteNeverBlocks) {
++  // `sleep` never reads its input: the pty buffer fills up and WriteSome()
++  // must return a short count instead of blocking, then 0.
++  auto s = StartSh("sleep 100");
++  ASSERT_TRUE(s);
++  const std::string chunk(1024 * 1024, 'x');
++  std::optional<size_t> n = s->WriteSome(chunk);
++  ASSERT_TRUE(n);
++  EXPECT_LT(*n, chunk.size());
++  EXPECT_EQ(s->WriteSome(chunk), 0u);
++  const base::TimeTicks start = base::TimeTicks::Now();
++  s->Terminate(base::Milliseconds(50));
++  EXPECT_LT(base::TimeTicks::Now() - start, base::Seconds(5));
++}
++
++TEST(TerminalSessionTest, TerminateIsIdempotentAndBlocksIo) {
++  auto s = StartSh("sleep 100");
++  ASSERT_TRUE(s);
++  s->Terminate(base::Milliseconds(50));
++  EXPECT_EQ(s->Terminate(), std::nullopt);
++  EXPECT_EQ(s->WriteSome("x"), std::nullopt);
++  EXPECT_FALSE(s->Resize(80, 24));
++}
++
++}  // namespace
++}  // namespace aerographene
+--- a/chrome/test/BUILD.gn
++++ b/chrome/test/BUILD.gn
+@@ -6949,8 +6949,11 @@
+   if (is_linux) {
+     deps += [ "//chrome/browser:shell_integration_linux" ]
+ 
+-    # aerographene: notes vault reader.
+-    deps += [ "//chrome/browser/ui/webui/aero_notes:unit_tests" ]
++    # aerographene: notes vault reader and terminal pty session.
++    deps += [
++      "//chrome/browser/ui/webui/aero_notes:unit_tests",
++      "//chrome/browser/ui/webui/aero_terminal:unit_tests",
++    ]
+   }
+ 
+   if (is_chromeos) {

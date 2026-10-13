@@ -114,3 +114,10 @@ aerographene/theme-repo.patch
 aerographene/settings-theme-picker.patch
 aerographene/settings-theme-import.patch
 aerographene/theme-import-cli.patch
+aerographene/notes-webui.patch
+aerographene/terminal-webui.patch
+aerographene/notes-vault-reader.patch
+aerographene/terminal-pty.patch
+aerographene/notes-render.patch
+aerographene/terminal-xterm.patch
+aerographene/terminal-bridge.patch
