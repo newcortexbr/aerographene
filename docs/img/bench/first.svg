@@ -1,21 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="900" height="362" viewBox="0 0 900 362" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
-<rect width="900" height="362" rx="14" fill="#14161c"/>
-<text x="28" y="40" font-size="22" font-weight="700" fill="#f2f4f8">abertura com perfil novo</text>
-<text x="28" y="64" font-size="14" fill="#9aa3b2">ms (mediana) · menor é melhor · aerographene v0.2</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="376" viewBox="0 0 900 376" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+<rect width="900" height="376" rx="14" fill="#14161c"/>
+<text x="28" y="40" font-size="22" font-weight="700" fill="#f2f4f8">Startup, new profile</text>
+<text x="28" y="64" font-size="14" fill="#9aa3b2">median, in ms · lower is better</text>
 <text x="196" y="119" text-anchor="end" font-size="15" fill="#c3cad6" font-weight="400">Thorium</text>
-<rect x="210" y="102" width="482.5" height="28" rx="5" fill="#3a4152"/>
-<text x="702.5" y="122" font-size="15" font-weight="400" fill="#f2f4f8">460,1</text>
+<rect x="210" y="102" width="457.1" height="28" rx="5" fill="#3a4152"/>
+<text x="677.1" y="122" font-size="15" font-weight="400" fill="#f2f4f8">460.1 ms</text>
 <text x="196" y="163" text-anchor="end" font-size="15" fill="#ffffff" font-weight="700">aerographene</text>
-<rect x="210" y="146" width="518.4" height="28" rx="5" fill="#7c9cff"/>
-<text x="738.4" y="166" font-size="15" font-weight="700" fill="#f2f4f8">494,4</text>
+<rect x="210" y="146" width="491.1" height="28" rx="5" fill="#7c9cff"/>
+<text x="711.1" y="166" font-size="15" font-weight="700" fill="#f2f4f8">494.4 ms</text>
 <text x="196" y="207" text-anchor="end" font-size="15" fill="#c3cad6" font-weight="400">Helium</text>
-<rect x="210" y="190" width="531.1" height="28" rx="5" fill="#3a4152"/>
-<text x="751.1" y="210" font-size="15" font-weight="400" fill="#f2f4f8">506,5</text>
+<rect x="210" y="190" width="503.1" height="28" rx="5" fill="#3a4152"/>
+<text x="723.1" y="210" font-size="15" font-weight="400" fill="#f2f4f8">506.5 ms</text>
 <text x="196" y="251" text-anchor="end" font-size="15" fill="#c3cad6" font-weight="400">Google Chrome</text>
-<rect x="210" y="234" width="568.8" height="28" rx="5" fill="#3a4152"/>
-<text x="788.8" y="254" font-size="15" font-weight="400" fill="#f2f4f8">542,5</text>
+<rect x="210" y="234" width="538.9" height="28" rx="5" fill="#3a4152"/>
+<text x="758.9" y="254" font-size="15" font-weight="400" fill="#f2f4f8">542.5 ms</text>
 <text x="196" y="295" text-anchor="end" font-size="15" fill="#c3cad6" font-weight="400">ungoogled-chromium</text>
-<rect x="210" y="278" width="570.0" height="28" rx="5" fill="#3a4152"/>
-<text x="790.0" y="298" font-size="15" font-weight="400" fill="#f2f4f8">543,5</text>
-<text x="28" y="346" font-size="12" fill="#7a8394">Comet Lake i3-10110U · perfil performance · 13/10/2026 · ordem intercalada</text>
+<rect x="210" y="278" width="540.0" height="28" rx="5" fill="#3a4152"/>
+<text x="760.0" y="298" font-size="15" font-weight="400" fill="#f2f4f8">543.5 ms</text>
+<text x="28" y="342" font-size="12" fill="#7a8394">Test machine: Intel Core i3-10110U · 16 GB RAM · CachyOS (kernel 7.3.0-rc6) · power profile: performance</text>
+<text x="28" y="360" font-size="12" fill="#7a8394">Comet Lake · v0.2 baseline · 2026-10-13 · interleaved runs</text>
 </svg>

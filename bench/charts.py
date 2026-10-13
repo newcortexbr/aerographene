@@ -12,10 +12,10 @@ from xml.sax.saxutils import escape
 LABEL = {"aerographene": "aerographene", "helium": "Helium", "thorium": "Thorium",
          "chrome": "Google Chrome", "ungoogled": "ungoogled-chromium"}
 METRICS = [  # chave, bloco, campo, título, unidade
-    ("warm", "warm", "first_ms", "abertura com perfil já criado", "ms"),
-    ("first", "first", "first_ms", "abertura com perfil novo", "ms"),
-    ("tabs_all", "tabs", "all_ms", "10 abas: tempo até todas carregarem", "ms"),
-    ("tabs_pss", "tabs", "pss_mib", "10 abas: memória (PSS total)", "MiB"),
+    ("warm", "warm", "first_ms", "Startup, existing profile", "ms"),
+    ("first", "first", "first_ms", "Startup, new profile", "ms"),
+    ("tabs_all", "tabs", "all_ms", "10 tabs: time until all loaded", "ms"),
+    ("tabs_pss", "tabs", "pss_mib", "10 tabs: memory (total PSS)", "MiB"),
 ]
 
 
@@ -70,20 +70,23 @@ def summarize(data):
     return out
 
 
+MACHINE = "Test machine: Intel Core i3-10110U · 16 GB RAM · CachyOS (kernel 7.3.0-rc6) · power profile: performance"
+
+
 def fmt(x, unit):
-    return f"{x:,.0f}".replace(",", ".") if x >= 1000 else f"{x:.1f}".replace(".", ",")
+    return (f"{x:,.0f}" if x >= 1000 else f"{x:.1f}") + f" {unit}"
 
 
 def svg(key, m, title, note):
     rows = sorted(m["browsers"].items(), key=lambda kv: kv[1]["median"])
-    W, left, right, top, rh = 900, 210, 120, 96, 44
-    H = top + rh * len(rows) + 46
+    W, left, right, top, rh = 900, 210, 150, 96, 44
+    H = top + rh * len(rows) + 60
     mx = max(v["median"] for _, v in rows) * 1.0
     bw = W - left - right
     o = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">',
          f'<rect width="{W}" height="{H}" rx="14" fill="#14161c"/>',
          f'<text x="28" y="40" font-size="22" font-weight="700" fill="#f2f4f8">{escape(m["title"])}</text>',
-         f'<text x="28" y="64" font-size="14" fill="#9aa3b2">{escape(m["unit"])} (mediana) · menor é melhor · {escape(title)}</text>']
+         f'<text x="28" y="64" font-size="14" fill="#9aa3b2">median, in {escape(m["unit"])} · lower is better</text>']
     for i, (br, v) in enumerate(rows):
         y = top + i * rh
         w = max(2, bw * v["median"] / mx)
@@ -92,6 +95,7 @@ def svg(key, m, title, note):
         o.append(f'<text x="{left-14}" y="{y+23}" text-anchor="end" font-size="15" fill="{"#ffffff" if hl else "#c3cad6"}" font-weight="{700 if hl else 400}">{escape(LABEL.get(br, br))}</text>')
         o.append(f'<rect x="{left}" y="{y+6}" width="{w:.1f}" height="28" rx="5" fill="{col}"/>')
         o.append(f'<text x="{left+w+10:.1f}" y="{y+26}" font-size="15" font-weight="{700 if hl else 400}" fill="#f2f4f8">{fmt(v["median"], m["unit"])}</text>')
+    o.append(f'<text x="28" y="{H-34}" font-size="12" fill="#7a8394">{escape(MACHINE)}</text>')
     o.append(f'<text x="28" y="{H-16}" font-size="12" fill="#7a8394">{escape(note)}</text>')
     o.append('</svg>')
     return "\n".join(o)

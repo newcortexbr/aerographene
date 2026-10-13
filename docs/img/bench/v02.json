@@ -1,7 +1,7 @@
 {
- "_note": "Comet Lake i3-10110U · perfil performance · 13/10/2026 · ordem intercalada",
+ "_note": "Comet Lake · v0.2 baseline · 2026-10-13 · interleaved runs",
  "warm": {
-  "title": "abertura com perfil já criado",
+  "title": "Startup, existing profile",
   "unit": "ms",
   "browsers": {
    "aerographene": {
@@ -151,7 +151,7 @@
   }
  },
  "first": {
-  "title": "abertura com perfil novo",
+  "title": "Startup, new profile",
   "unit": "ms",
   "browsers": {
    "aerographene": {
@@ -281,7 +281,7 @@
   }
  },
  "tabs_all": {
-  "title": "10 abas: tempo até todas carregarem",
+  "title": "10 tabs: time until all loaded",
   "unit": "ms",
   "browsers": {
    "aerographene": {
@@ -431,7 +431,7 @@
   }
  },
  "tabs_pss": {
-  "title": "10 abas: memória (PSS total)",
+  "title": "10 tabs: memory (total PSS)",
   "unit": "MiB",
   "browsers": {
    "aerographene": {
