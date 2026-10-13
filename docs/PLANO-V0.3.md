@@ -182,6 +182,10 @@ Não cabe na noite: B2+ e C3+ funcionando no navegador, D com toolchain (depende
 6. Windows: dono confirma que pode gerar o pacote VS+SDK numa máquina Windows e aceita os termos; senão, ADR 0008 opção 1a.
 7. terminal habilitado por padrão ou atrás de opção em configurações: recomendo opção ligada por padrão, mas desligada em convidado/incógnito e sem nada no startup.
 
+## estado 13/10 manhã (B e C)
+
+B1–B3 e C1–C3 integradas na `v0.3` (`f42ef0a`); build avx2 38383483649, smoke 38385650767, release (draft) 38385920951. Smoke headless: `chrome://notes` e `chrome://terminal` carregam sem erro CSP; recusa em incognito não confirmada (headless). Resta uso real e atualizar o texto de esqueleto da página de notas. Detalhes em `docs/NOITE-20261013.md`.
+
 ## resumo para agentes
 
 - v0.3 = A (avx1), B (`chrome://notes`), C (`chrome://terminal` com pty), D (Windows cross), E (pkg via PKGBUILD no CI, deb, rpm). Google Sync fora.
