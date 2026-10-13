@@ -17,6 +17,7 @@ validado até aqui (Chromium 154, Cezanne, overlay): os patches aplicam sem fuzz
 - feito (C5, `patches/aerographene/terminal-c5.patch`): só perfil normal (nem anônimo, nem convidado, nem perfil de sistema), checagem de frame/origem num helper testado, e links OSC 8 abrindo só http(s) numa aba nova sem `opener` (seção "revisão de segurança C5"). Overlay do Cezanne: `aero_ui_tests` 49/49.
 - feito (C6, `terminal-c6.patch`, `terminal-c6-page.patch`, `terminal-c6-look.patch`): `t:` na command bar (substitui o `-t`), canal de uso único para `t: <comando>`, workspace novo, resumo estilo fastfetch com o gatinho, cantos com sidebar e `+`, barra de título só com `×`, foco e atalhos (seção "command bar `t:` e workspace (C6)").
 - feito (C6b, `terminal-c6b.patch`): `t: <comando>` só roda sozinho quando foi digitado; colado, solto ou "colar e acessar" só fica escrito no prompt, sem Enter. O comando pendente cai se a navegação falhar, for cancelada ou a aba for para outro lugar, e só a página carregada como `?new=1` o pega (seção "segurança: colar e soltar (C6b)").
+- feito (D3e, `terminal-win.patch`, fim da série): Windows 10 1809+ e 11 com ConPTY (seção "Windows (D3e)"). Objetos Windows compilam no Cezanne; Linux `aero_ui_tests` 70/70. Não executado no Windows.
 - falta: review opus e teste negativo no navegador (página web e extensão de teste), a página aberta no navegador (pan/zoom, restauração, tooltip, `-t` na omnibox) e a migração para Mojo (hoje usa mensagens WebUI).
 
 ## command bar `t:` e workspace (C6)
@@ -92,11 +93,20 @@ revisão dos patches `terminal-*` contra os itens 1 a 8 do plano (13/10/2026):
 
 abrir o navegador com `--remote-debugging-port` (ou `--remote-debugging-pipe`) dá a qualquer programa local que fale CDP controle total do navegador, inclusive desta página: isso equivale a execução de código como o usuário, com ou sem terminal. O mesmo vale para `--extensions-on-chrome-urls`. Não use essas opções num perfil do dia a dia.
 
+## Windows (D3e)
+
+- `terminal_session_win.cc`: `CreatePseudoConsole` com dois pipes nomeados overlapped, `CreateProcessW` com `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE`, `ResizePseudoConsole`. O shell e tudo que ele abrir ficam num Job Object com `KILL_ON_JOB_CLOSE`: fechar a aba ou o navegador mata a árvore inteira.
+- shell: `pwsh.exe` (PATH, depois `%ProgramFiles%\PowerShell\7`) → Windows PowerShell (System32) → `%ComSpec%` → `System32\cmd.exe`; só caminhos absolutos existentes. Ambiente mínimo, nenhum handle do navegador herdado.
+- `TerminalHost` usa `base::win::ObjectWatcher` (leitura, escrita, fim do processo; ConPTY não dá EOF, o fim vem do handle do processo, com 100 ms para a última saída). Mesmos limites de fila, créditos e sessões do Linux.
+- banner lista discos fixos (`GetLogicalDriveStringsW` + `DRIVE_FIXED`); `t:` na command bar igual ao Linux.
+- validado: patch aplica sem fuzz; objetos Windows compilam com os flags de `out/Win`. Não testado: execução no Windows (testes `terminal_session_win_unittest.cc` só compilados), link do `chrome.exe` (D4).
+
 ## arquivos
 
 - `chrome/browser/ui/webui/aero_terminal/aero_terminal_ui.{h,cc}`: configuração e controlador.
 - `chrome/browser/resources/aero_terminal/terminal.{html,css,js}`: quadro.
 - `chrome/browser/ui/webui/aero_terminal/terminal_session.{h,cc}` e `terminal_session_unittest.cc`: pty e testes.
+- `chrome/browser/ui/webui/aero_terminal/terminal_session_win.cc` e `terminal_session_win_unittest.cc`: ConPTY e testes (Windows).
 - `chrome/browser/ui/webui/aero_terminal/terminal_host.{h,cc}` e `terminal_host_unittest.cc`: sessões de uma aba numa sequência de I/O, e testes.
 - `chrome/browser/ui/webui/aero_terminal/terminal_handler.{h,cc}`: mensagens da página.
 - `components/omnibox/browser/aero_terminal_command.{h,cc}` e `_unittest.cc`: parser do `t:` (antes `-t`).
@@ -114,3 +124,4 @@ abrir o navegador com `--remote-debugging-port` (ou `--remote-debugging-pipe`) d
 - C4 (`terminal-c4.patch`, depois de `terminal-bridge`): título da aba fixo `t: workspace N` (N = `?w=N`, 1..99); processo em primeiro plano só no tooltip (`TerminalSession::ForegroundProcessName`, `TerminalHost::Foreground`, mensagem `foreground(cb, id)` -> string); pan/zoom por transform em `#world`; layout em `localStorage` `aero-terminal-layout-N` (validado, máx. 16 janelas); `-t`/`-t N` em `BuiltinProvider::Start` via `aerographene::ParseTerminalCommand`/`TerminalCommandUrl` (nota: a omnibox trata "-t" como QUERY). Teste de JS só com DOM falso (fora do repo); `aero_ui_tests` do overlay inclui os testes do parser por fonte temporária.
 - validação: ver `docs/PLANO-V0.3.md`, seção C (status). Não testado no navegador.
 - C6 (`terminal-c6.patch` + `-page` + `-look`, fim da série): `aerographene::ParseTerminalCommand(text)` -> `optional<u16string>` (comando; `""` para `t:`), `TerminalCommandUrl()` = `chrome://terminal/?new=1`. Em `ChromeOmniboxClient::OnAutocompleteAccept`, match com `provider->type() == TYPE_BUILTIN` e destino do `t:` ou `NotesCommandUrl(u"")`: `CURRENT_TAB` -> `NEW_FOREGROUND_TAB`; comando não vazio vai por `SetPendingTerminalCommand(navigation->GetWebContents(), ...)` (alvo `aero_terminal:launch`, só base; chave de `SupportsUserData`). Handler: mensagem `start(cb, wanted)` -> `{workspace, command, info}` (`WorkspaceRegistry::Claim/Release` por BrowserContext; `TakePendingTerminalCommand`; `CollectSystemInfo` em tarefa MayBlock + GPU no UI). Página: `boot()` em `terminal.js`, `banner(info)` em `banner.js` (`IDR_AERO_TERMINAL_BANNER_JS`), `keyHandler` via `attachCustomKeyEventHandler`, `renderSide`/`centreOn`. Teste da página: `tests/terminal-page/run.sh <dir aero_terminal> <chrome>` (gancho em `Terminal.prototype.write` lê o buffer inteiro).
+- D3e (`terminal-win.patch`): no Windows `TerminalSession` expõe `ReadSome(out,max)`→`kData/kPending/kClosed`, `read_event()`, `write_event()`, `process_handle()` em vez de `master_fd()`; `DefaultShellPath()`; `TerminalHost::Watch` embrulha `ObjectWatcher`. Guardas `IS_LINUX || IS_WIN` em `aero_terminal/BUILD.gn`, `webui/BUILD.gn`, `omnibox/BUILD.gn`, `chrome_omnibox_client.cc`, `chrome_web_ui_configs.cc`, grd; testes Win em `chrome/test:unit_tests`.

@@ -13,7 +13,7 @@ uma só série de patches para Linux e Windows; Windows não perde função. Pat
 - `gn gen out/Win` passa sem passo manual; `chrome_elf.dll` linka com lld-link (`PE32+ ... x86-64`).
 - D3b: espaços (uma janela por space, troca no lugar), raio e fonte do tema, `--import-theme`, repositório de temas, tokens e import `.aerotheme` valem no Windows; o código compila no `out/Win` (objetos, sem link do `chrome`). Dados do tema no Windows: `%LOCALAPPDATA%\aerographene\theme.json` e `...\themes\` (provisório até a D3d). Fonte reserva do pixelized no Windows: Consolas.
 - leitura de arquivos de tema no Windows (`theme.json`, `.aerotheme`, `theme.json` do repositório): `CreateFileW` com `FILE_FLAG_OPEN_REPARSE_POINT`; recusa pipe/console/dispositivo, symlink/junção e diretório (mais estrito que o Linux). Linux mantém `S_ISREG`, `O_NONBLOCK`, `lstat` e `O_NOFOLLOW`.
-- notas (`chrome://notes`) registradas no Windows, mas sem leitura da vault: o leitor confinado Windows é a D3c; até lá a página mostra "leitura da vault ainda não disponível neste sistema". Terminal continua só Linux (D3e).
+- notas (`chrome://notes`) registradas no Windows, mas sem leitura da vault: o leitor confinado Windows é a D3c; até lá a página mostra "leitura da vault ainda não disponível neste sistema". Terminal: ConPTY + Job Object (D3e, `terminal-win.patch`; ver [terminal](terminal.md)), compila mas não foi executado no Windows.
 
 ## o que não está no repositório
 
