@@ -140,12 +140,23 @@ Revogado: a fatia D3 anterior deste plano ("série Windows: lista derivada sem `
 subfatias:
 
 1. D3a `build/win/prepare.sh` (reproduz os contornos 1–8 abaixo, com hash conferido) + `aerographene/windows-disable-rlz.patch` (substitui o contorno manual do erro 3). Feito em 13/10/2026, ver status abaixo.
-2. D3b guardas `BUILDFLAG(IS_LINUX)` → `IS_LINUX || IS_WIN` em space-one-window, space-switch-in-place, theme-radius, theme-font, theme-import-cli, notes-webui/notes-render; POSIX cru trocado por `base::File` em theme-tokens, theme-repo, settings-theme-import.
+2. D3b (feito em 13/10/2026, ver status abaixo) guardas `BUILDFLAG(IS_LINUX)` → `IS_LINUX || IS_WIN` em space-one-window, space-switch-in-place, theme-radius, theme-font, theme-import-cli, notes-webui/notes-render; POSIX cru trocado por `base::File` em theme-tokens, theme-repo, settings-theme-import. Na prática a leitura Windows é Win32 (`CreateFileW`), não `base::File`, para não disparar as asserções de bloqueio na thread de UI.
 3. D3c confinamento Windows de notes-vault-reader e theme-repo: reparse points (abrir com `FILE_FLAG_OPEN_REPARSE_POINT`), só arquivo regular, nomes reservados (CON, NUL...), ADS (`:`), nomes 8.3, UNC e `\\?\`, comparação sem caixa, ponto/espaço final; com testes.
 4. D3d branding Windows: install_static, `aerographene.exe`, `.ico`, VERSIONINFO, AppUserModelID, dados em `%LOCALAPPDATA%\aerographene`; theme-scheme no ThemeService Windows; ícones da barra de título em `WindowsCaptionButton`/`BrowserFrameViewWin`; JetBrains Mono embarcada.
 5. D3e `TerminalSession` com ConPTY (`CreatePseudoConsole`, `CreateProcessW` + `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE`, `ResizePseudoConsole`, Job Object com `KILL_ON_JOB_CLOSE`, shell pwsh → powershell → `ComSpec`), mesma interface do Linux; review opus.
 
 D4 (`chrome.exe`) e D5 (instalador) seguem depois do D3.
+
+### status D3b em 13/10/2026
+
+- 12 patches da série alterados (mesma série Linux+Windows): guardas `IS_LINUX || IS_WIN` em space-one-window, space-switch-in-place, theme-radius, theme-font, theme-import-cli; ramo Win32 de leitura em theme-tokens, theme-repo e settings-theme-import (archive); página de notas registrada no Windows (notes-webui, notes-render, notes-vault-reader), com `kVaultReadSupported = false` no Windows: `listDir`/`readNote` respondem "unsupported" e `vault_reader` devolve `nullopt` até a D3c (nunca lê sem confinamento); terminal-webui só ajuste de contexto. Dados do tema no Windows em `%LOCALAPPDATA%\aerographene\` (provisório até a D3d); fonte reserva do pixelized: Consolas.
+- ramo Windows das leituras de arquivo: `CreateFileW` com `FILE_FLAG_OPEN_REPARSE_POINT`, recusa o que não for `FILE_TYPE_DISK`, reparse point (symlink/junction) e diretório, teto de tamanho antes e durante a leitura. É mais estrito que o Linux (que segue symlink em `theme.json` e `.aerotheme`); o confinamento do repositório (nomes reservados, ADS, 8.3, UNC, caixa) segue na D3c.
+- Linux inalterado: `S_ISREG`, `O_NONBLOCK` contra FIFO, `lstat` sem seguir symlink em `.install-*`, `O_NOFOLLOW` na vault; nenhuma linha dessas foi removida dos patches.
+- cadeia: série completa aplica numa árvore Win nova (123 patches); os 12 patches aplicam com `--fuzz=0` (os 4 do Helium já exigiam fuzz, como no CI). `gn gen out/Win` passa; 18 objetos afetados compilam no `out/Win` (3 deles recompilados depois do endurecimento de reparse point). Sem link do `chrome` (D4).
+- Linux: alvo temporário `aero_ui_tests` (só num overlay da árvore do CI, não vai para a série) com os testes de VaultReader, TerminalSession, TerminalHost e, novos no conjunto, os de tema (archive 7 e repo 11): 42 de 42 passam em `out/T`. Rodar sem init no container dá 1 falha de instrumento (`TerminateKillsWholeGroup` espera que o PID 1 colha zumbis; `sleep infinity` não colhe); com `docker run --init` passa.
+- não verificado: execução no Windows (nenhum teste roda lá; a árvore só compila objetos), `link` do `chrome`, build oficial com ThinLTO/PGO.
+
+pendências para D3c: leitor confinado Windows para `notes-vault-reader` (ativar `kVaultReadSupported`), confinamento do repositório de temas (nomes reservados, ADS, 8.3, UNC/`\\?\`, caixa, ponto/espaço final, reparse point em diretórios intermediários), testes Windows dos dois; teste de junção `.install-*` no Windows (hoje só POSIX).
 
 ### status D3a em 13/10/2026
 

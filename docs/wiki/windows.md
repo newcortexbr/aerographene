@@ -11,6 +11,9 @@ uma só série de patches para Linux e Windows; Windows não perde função. Pat
 - árvore separada por hardlink da árvore do CI (sem `out/`), com a série completa aplicada, inclusive `aerographene/windows-disable-rlz.patch`.
 - `build/win/prepare.sh` repõe sozinho, com hash conferido, o que o tarball do ungoogled/portablelinux não traz e extrai o toolchain VS 2026 + SDK 10.0.28000 em sistema de arquivos insensível a caixa (ciopfs).
 - `gn gen out/Win` passa sem passo manual; `chrome_elf.dll` linka com lld-link (`PE32+ ... x86-64`).
+- D3b: espaços (uma janela por space, troca no lugar), raio e fonte do tema, `--import-theme`, repositório de temas, tokens e import `.aerotheme` valem no Windows; o código compila no `out/Win` (objetos, sem link do `chrome`). Dados do tema no Windows: `%LOCALAPPDATA%\aerographene\theme.json` e `...\themes\` (provisório até a D3d). Fonte reserva do pixelized no Windows: Consolas.
+- leitura de arquivos de tema no Windows (`theme.json`, `.aerotheme`, `theme.json` do repositório): `CreateFileW` com `FILE_FLAG_OPEN_REPARSE_POINT`; recusa pipe/console/dispositivo, symlink/junção e diretório (mais estrito que o Linux). Linux mantém `S_ISREG`, `O_NONBLOCK`, `lstat` e `O_NOFOLLOW`.
+- notas (`chrome://notes`) registradas no Windows, mas sem leitura da vault: o leitor confinado Windows é a D3c; até lá a página mostra "leitura da vault ainda não disponível neste sistema". Terminal continua só Linux (D3e).
 
 ## o que não está no repositório
 
@@ -55,6 +58,7 @@ arquivo novo sempre entra por temporário + `mv`, então nada é escrito atravé
 - quatro patches do Helium (`keyboard-shortcuts`, `ublock-install-as-component`, `crash-reporting-prefs`, `toolbar-button-prefs`) só aplicam com o fuzz padrão do `patch`, porque a domain substitution muda linhas de contexto; o CI aplica assim. Os patches próprios novos devem aplicar com `--fuzz=0`.
 - `base_unittests` não compila (substituição de domínios do ungoogled em `rtl_unittest.cc`); só testes.
 - `lld-link: warning: ignoring unknown argument '-Wl,--icf=all'`: flag ICF de ELF chegando ao link Windows; tratar em D4.
+- compilar objetos do `chrome` no `out/Win` exige rodar o ninja dentro do `aerographene-builder:v2` (node, tsc etc. do container; montar `~/aerographene-win` no mesmo caminho) e falha em ações MIDL (`third_party/win_build_output/midl/...tlb` "needs to be generated from Windows first", podado no tarball). Contorno para checar compilação: comando do objeto via `ninja -t commands <obj>` com `mkdir -p` do diretório de saída. Bloqueio real para D4.
 - deps só-Windows vazias no tarball (`microsoft_dxheaders`, `microsoft_webauthn`, `microsoft_multimedia_redirection`, `widevine/cdm/win`, `wix`) devem bloquear o `chrome` (D4).
 
 ## resumo para agentes
@@ -62,5 +66,7 @@ arquivo novo sempre entra por temporário + `mv`, então nada é escrito atravé
 - cross Linux→Windows no Cezanne: árvore própria por `cp -al` da árvore do CI, saída `out/Win`; não tocar `out/Default`, `out/Avx1` nem a árvore do CI; nunca escrever através de hardlink.
 - preparo: `AERO_WIN_TOOLCHAIN_DIR=<dir do zip> build/win/prepare.sh <src>`; idempotente, confere hash de tudo, rodar de novo após reboot (ciopfs). Depois `gn gen out/Win` e `ninja`.
 - args em `build/win/args.gn`; RLZ resolvido por `patches/aerographene/windows-disable-rlz.patch` (série única).
-- série única Linux+Windows (dono, 13/10/2026); próximas subfatias D3b–D3e no plano.
+- série única Linux+Windows (dono, 13/10/2026); D3b feita (guardas `IS_LINUX || IS_WIN`, POSIX sob `#if`, ramo Win32 equivalente); próximas D3c–D3e no plano.
+- testes D3b no Linux: alvo temporário `aero_ui_tests` (overlay, fora da série), 42/42; `TerminateKillsWholeGroup` exige init que colhe zumbis (`docker run --init`).
+- notas no Windows: `kVaultReadSupported` false até a D3c; nunca ler sem confinamento.
 - o zip do toolchain é licenciado: nunca commitar, copiar para o repo ou publicar.
