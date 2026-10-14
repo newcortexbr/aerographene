@@ -3,10 +3,6 @@
 
   "IDS_SETTINGS_APPEARANCE_AND_BEHAVIOR": "Aparência e comportamento",
   "IDS_SETTINGS_BEHAVIOR": "Comportamento",
-  "IDS_SETTINGS_ACCESSIBILITY_COPY_PAGE_URL_SHORTCUT": "Ativar cópia rápida do link da página com Ctrl+Shift+C",
-  "IDS_SETTINGS_NEW_TAB_NEXT_TO_ACTIVE_BUTTON": "Abrir novas guias ao lado da guia ativa",
-  "IDS_SETTINGS_CYCLE_TABS_IN_MRU_ORDER": "Alternar entre as guias na ordem de uso mais recente com Ctrl+Tab",
-  "IDS_SETTINGS_SHIFT_RIGHT_CLICK_CONTEXT_MENU": "Forçar o menu de contexto com Shift+clique com o botão direito",
   "IDS_SETTINGS_ROUNDED_FRAME": "Mostrar uma moldura arredondada ao redor do conteúdo da web",
   "IDS_SETTINGS_BROWSER_LAYOUT": "Layout do navegador",
   "IDS_SETTINGS_BROWSER_LAYOUT_CLASSIC": "Clássico",
