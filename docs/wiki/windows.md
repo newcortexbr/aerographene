@@ -15,6 +15,8 @@ uma só série de patches para Linux e Windows; Windows não perde função. Pat
 - leitura de arquivos de tema no Windows (`theme.json`, `.aerotheme`, `theme.json` do repositório): `CreateFileW` com `FILE_FLAG_OPEN_REPARSE_POINT`; recusa pipe/console/dispositivo, symlink/junção e diretório (mais estrito que o Linux). Linux mantém `S_ISREG`, `O_NONBLOCK`, `lstat` e `O_NOFOLLOW`.
 - D3c (13/10/2026): notas no Windows com leitura confinada (lista, leitura, busca, imagens, vigia); escrita responde "não suportado" (a página mostra "escrita ainda não disponível neste sistema"). Repositório de temas confinado. Detalhe em "confinamento (D3c)" abaixo. Terminal: ConPTY + Job Object (D3e, `terminal-win.patch`; ver [terminal](terminal.md)), compila mas não foi executado no Windows.
 
+- D4 (14/10/2026): `chrome` e `mini_installer` linkam no Cezanne (`aerographene.exe` 5,3 MB, `chrome.dll` 337 MB, `mini_installer.exe` 136 MB, todos `PE32+ x86-64`; ThinLTO, sem PGO). Args sem mudança (`build/win/args.gn`, `safe_browsing_mode=0`). Patches para isso: `windows-ungoogled-prefs` e `windows-safe-browsing-dummy` (trechos do ungoogled-chromium-windows 154) e correção `wstring` em `notes-b5` (`vault_watcher.cc`). Não executado no Windows.
+
 ## branding Windows (D3d)
 
 `aerographene/windows-branding.patch` (último da série) + `build/win/apply_assets.sh` (chamado por `prepare.sh`, passo 9):
@@ -76,6 +78,9 @@ o `prepare.sh` faz, nesta ordem (cobre os erros 1, 2, 4, 5, 6, 7 e 8 da seção 
 6. toolchain: `build/vs_toolchain.py update --force` com `DEPOT_TOOLS_WIN_TOOLCHAIN=1`, `DEPOT_TOOLS_WIN_TOOLCHAIN_BASE_URL=$AERO_WIN_TOOLCHAIN_DIR` e `GYP_MSVS_HASH_<TOOLCHAIN_HASH do vs_toolchain.py>=<hash do zip>`.
 7. arquivos com mtime no futuro: link quebrado e `touch` (senão o ninja regenera em laço).
 8. `out/Win/args.gn` copiado de `build/win/args.gn` se não existir; recusa `use_sysroot=false`.
+9. ativos Windows (`apply_assets.sh`).
+10. `.tlb` (MIDL) e `.bin` (mc) podados de `third_party/win_build_output` e `chrome/app/etw_events`: baixados do gitiles do Chromium na tag de `chrome/VERSION`, cada blob conferido pelo id git da listagem da árvore. No Linux o `midl.py`/`rc` só copiam esses arquivos.
+11. `third_party/lzma_sdk/bin/host_platform/7za` (CIPD `infra/3pp/tools/7z/linux-amd64`, versão do `DEPS`), sha256 fixado por versão; usado pelo `mini_installer`.
 
 arquivo novo sempre entra por temporário + `mv`, então nada é escrito através de hardlink do CI.
 
@@ -85,8 +90,9 @@ arquivo novo sempre entra por temporário + `mv`, então nada é escrito atravé
 - quatro patches do Helium (`keyboard-shortcuts`, `ublock-install-as-component`, `crash-reporting-prefs`, `toolbar-button-prefs`) só aplicam com o fuzz padrão do `patch`, porque a domain substitution muda linhas de contexto; o CI aplica assim. Os patches próprios novos devem aplicar com `--fuzz=0`.
 - `base_unittests` não compila (substituição de domínios do ungoogled em `rtl_unittest.cc`); só testes.
 - `lld-link: warning: ignoring unknown argument '-Wl,--icf=all'`: flag ICF de ELF chegando ao link Windows; tratar em D4.
-- compilar objetos do `chrome` no `out/Win` exige rodar o ninja dentro do `aerographene-builder:v2` (node, tsc etc. do container; montar `~/aerographene-win` no mesmo caminho) e falha em ações MIDL (`third_party/win_build_output/midl/...tlb` "needs to be generated from Windows first", podado no tarball). Contorno para checar compilação: comando do objeto via `ninja -t commands <obj>` com `mkdir -p` do diretório de saída. Bloqueio real para D4.
-- deps só-Windows vazias no tarball (`microsoft_dxheaders`, `microsoft_webauthn`, `microsoft_multimedia_redirection`, `widevine/cdm/win`, `wix`) devem bloquear o `chrome` (D4).
+- o ninja do `out/Win` roda dentro do `aerographene-builder:v2` (node, tsc etc. do container; montar `~/aerographene-win` no mesmo caminho) com `--ulimit nofile=65536:65536`: com o limite padrão os objetos bluetooth WinRT falham com "Too many open files".
+- binários pré-gerados podados no tarball (`.tlb` do MIDL, `.bin`/`.BIN` do mc em `third_party/win_build_output` e `chrome/app/etw_events`): repostos pelo passo 10 do `prepare.sh`. Se o ninja já tinha rodado a ação mc antes, a cópia em `out/Win/gen/.../eventlog_messages.*` fica velha: mover para fora e rodar o ninja de novo.
+- deps só-Windows do `DEPS` (`microsoft_dxheaders`, `microsoft_webauthn`, `microsoft_multimedia_redirection`) vêm por git no commit exato do `DEPS`, fora do script (D4, 13/10/2026); `widevine/cdm/win` e `wix` são `src_internal` e não fazem falta ao `chrome`/`mini_installer`.
 
 ## resumo para agentes
 
@@ -97,4 +103,5 @@ arquivo novo sempre entra por temporário + `mv`, então nada é escrito atravé
 - testes D3b no Linux: alvo temporário `aero_ui_tests` (overlay, fora da série), 42/42; `TerminateKillsWholeGroup` exige init que colhe zumbis (`docker run --init`).
 - D3d: branding no `windows-branding.patch` (nomes `aerographene`/`aerographene.exe`, dados em `%LOCALAPPDATA%\aerographene`, ícones do tema nos botões da janela, JetBrains Mono em `<exe>\fonts`); `.ico` e fontes entram por `build/win/apply_assets.sh`.
 - notas no Windows: leitura confinada ativa (D3c, `kVaultReadSupported` true), escrita não (`kVaultWriteSupported` false → "unsupported"). Patch `aerographene/windows-confine.patch` (fim da série) concentra o ramo Win32 da vault e do repositório de temas; testes Windows em `vault_reader_win_unittest.cc` e `aerographene_theme_repo_unittest.cc` (`Windows*`), escritos mas não executados (sem Windows no host).
+- D4: `ninja -C out/Win chrome mini_installer` passa (14/10/2026); falta smoke test no Windows 11. Ninja no container com `--ulimit nofile=65536:65536` e `flock /tmp/aero-win-ninja.lock`.
 - o zip do toolchain é licenciado: nunca commitar, copiar para o repo ou publicar.
