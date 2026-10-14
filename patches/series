@@ -2,9 +2,7 @@ brave/chrome-importer-files.patch
 brave/custom-importer.patch
 brave/tab-cycling-mru-impl.patch
 helium/core/add-arc-importer.patch
-helium/core/services-prefs.patch
 helium/core/override-chrome-protocol.patch
-helium/core/onboarding-page.patch
 helium/settings/setup-behavior-settings-page.patch
 helium/core/keyboard-shortcuts.patch
 helium/core/memory-saving-by-default.patch
@@ -142,3 +140,4 @@ aerographene/settings-f5.patch
 aerographene/terminal-f1.patch
 aerographene/commandbar-f3.patch
 aerographene/defaults-f4.patch
+aerographene/first-run-off.patch

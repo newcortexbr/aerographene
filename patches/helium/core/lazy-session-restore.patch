@@ -1,4 +1,4 @@
-# aerographene: patch portado sem alteração do conteúdo do diff.
+# aerographene: contexto do include components/helium_services/pref_names.h (startup_browser_creator_impl.cc) removido; onboarding-page.patch saiu da série.
 # Origem: https://github.com/imputnet/helium (tag 0.18.3, Chromium 154.0.8037.97)
 # Commit: 57a40ad82583d21787cff0500150539ce54c5960
 # Caminho original: patches/helium/core/lazy-session-restore.patch
@@ -530,9 +530,8 @@
  #include "chrome/browser/ui/browser_tabstrip.h"
  #include "chrome/browser/ui/browser_window.h"
  #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
-@@ -64,6 +66,8 @@
+@@ -64,5 +66,7 @@
  #include "components/custom_handlers/protocol_handler_registry.h"
- #include "components/helium_services/pref_names.h"
  #include "components/prefs/pref_service.h"
 +#include "components/sessions/core/serialized_navigation_entry.h"
 +#include "components/sessions/core/serialized_user_agent_override.h"

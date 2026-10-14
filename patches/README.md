@@ -12,9 +12,7 @@ Estado: aplicação não verificada; será verificada no primeiro build (o Chrom
 | `brave/custom-importer.patch` | Helium `patches/brave/custom-importer.patch` | MPL-2.0 ou GPL-3.0 | framework de importador customizado (Brave) | - | 7/32 arquivos também tocados por outros patches portados |
 | `brave/tab-cycling-mru-impl.patch` | Helium `patches/brave/tab-cycling-mru-impl.patch` | MPL-2.0 ou GPL-3.0 | implementação de ciclo MRU de abas (Brave) | - | 4/4 arquivos também tocados por outros patches portados; dep. de tab-cycling-mru |
 | `helium/core/add-arc-importer.patch` | Helium `patches/helium/core/add-arc-importer.patch` | GPL-3.0 | importador do Arc | `brave/chrome-importer-files.patch`, `brave/custom-importer.patch` | 4/6 arquivos também tocados por outros patches portados |
-| `helium/core/services-prefs.patch` | Helium `patches/helium/core/services-prefs.patch` | GPL-3.0 | prefs/componente helium_services; dependência de contexto de lazy-session-restore | - | 11/24 arquivos também tocados por outros patches portados; traz UI de settings (services_page) que o aerographene talvez não queira |
 | `helium/core/override-chrome-protocol.patch` | Helium `patches/helium/core/override-chrome-protocol.patch` | GPL-3.0 | dep. de copy-url-tab-context-menu | - | 2/21 arquivos também tocados por outros patches portados |
-| `helium/core/onboarding-page.patch` | Helium `patches/helium/core/onboarding-page.patch` | GPL-3.0 | página de onboarding; dependência de contexto de lazy-session-restore (include em startup_browser_creator_impl.cc) | `helium/core/services-prefs.patch` | 13/26 arquivos também tocados por outros patches portados; muda o primeiro uso; avaliar rebasear o hunk de lazy-session-restore e remover |
 | `helium/settings/setup-behavior-settings-page.patch` | Helium `patches/helium/settings/setup-behavior-settings-page.patch` | GPL-3.0 | cria a página de comportamento em settings; base para prefs de UI | - | 6/12 arquivos também tocados por outros patches portados |
 | `helium/core/keyboard-shortcuts.patch` | Helium `patches/helium/core/keyboard-shortcuts.patch` | GPL-3.0 | atalhos de teclado e prefs correlatas | `helium/settings/setup-behavior-settings-page.patch` | 12/16 arquivos também tocados por outros patches portados |
 | `helium/core/memory-saving-by-default.patch` | Helium `patches/helium/core/memory-saving-by-default.patch` | GPL-3.0 | Memory Saver ligado por padrão | - | 0/1 arquivos também tocados por outros patches portados |
@@ -32,7 +30,7 @@ Estado: aplicação não verificada; será verificada no primeiro build (o Chrom
 | `helium/core/copy-url-tab-context-menu.patch` | Helium `patches/helium/core/copy-url-tab-context-menu.patch` | GPL-3.0 | item copiar URL no menu da aba | `helium/core/override-chrome-protocol.patch`, `helium/core/hibernate-tab-context-menu.patch` | 5/10 arquivos também tocados por outros patches portados |
 | `helium/core/shift-right-click-context-menu.patch` | Helium `patches/helium/core/shift-right-click-context-menu.patch` | GPL-3.0 | Shift+clique direito abre o menu nativo | `helium/settings/setup-behavior-settings-page.patch`, `helium/core/keyboard-shortcuts.patch`, `helium/core/open-new-tabs-next-to-active-tab-option.patch`, `helium/core/tab-cycling-mru.patch` | 6/20 arquivos também tocados por outros patches portados |
 | `helium/core/crash-reporting-prefs.patch` | Helium `patches/helium/core/crash-reporting-prefs.patch` | GPL-3.0 | prefs de crash reporting; dep. de toolbar-button-prefs | hunk crash_reporter_client.cc rebaseado sobre disable-crash-reporter (ungoogled); upload Helium desligado | 1/15 arquivos também tocados por outros patches portados |
-| `helium/core/lazy-session-restore.patch` | Helium `patches/helium/core/lazy-session-restore.patch` | GPL-3.0 | restaura abas da sessão sob demanda (sem carregar tudo) | `helium/core/onboarding-page.patch` | 3/15 arquivos também tocados por outros patches portados; grande (680 linhas), toca startup/sessions |
+| `helium/core/lazy-session-restore.patch` | Helium `patches/helium/core/lazy-session-restore.patch` | GPL-3.0 | restaura abas da sessão sob demanda (sem carregar tudo) | - (contexto do include de `components/helium_services/pref_names.h` removido após a saída do onboarding-page) | 3/15 arquivos também tocados por outros patches portados; grande (680 linhas), toca startup/sessions |
 | `helium/ui/tabs.patch` | Helium `patches/helium/ui/tabs.patch` | GPL-3.0 | ajustes visuais de abas | - | 1/14 arquivos também tocados por outros patches portados |
 | `helium/ui/toolbar-button-prefs.patch` | Helium `patches/helium/ui/toolbar-button-prefs.patch` | GPL-3.0 | prefs de botões da toolbar | `helium/core/crash-reporting-prefs.patch` | 8/16 arquivos também tocados por outros patches portados |
 | `helium/ui/remove-split-view-mini-toolbar.patch` | Helium `patches/helium/ui/remove-split-view-mini-toolbar.patch` | GPL-3.0 | remove a mini toolbar do split view | - | 9/9 arquivos também tocados por outros patches portados |
@@ -62,11 +60,20 @@ Estado: aplicação não verificada; será verificada no primeiro build (o Chrom
 - `brave/fix-component-content-settings-store`, e o restante de `helium/ui` (compact, toolbar-actions, horizontal-tabs, etc.): sem dependência achada.
 - `brave/*` entram só como dependência: `tab-cycling-mru-impl` (UI) e `chrome-importer-files`/`custom-importer` (importador do Arc).
 
+## removidos da série
+
+- `helium/core/services-prefs.patch` e `helium/core/onboarding-page.patch` (Helium, GPL-3.0), removidos por decisão do dono em 14/10/2026. O primeiro criava `components/helium_services` (prefs `helium.services.*`, origem padrão `services.helium.imput.net`) e a página de serviços nas configurações; o segundo criava `chrome://setup`, redirecionava todo perfil novo para ele (`helium.completed_onboarding` é por perfil) e dependia do pacote helium-onboarding (Svelte) baixado por `build/inner.sh`. Motivo: o aerographene não usa os servidores do Helium e terá onboarding próprio. Os arquivos ficam em `patches/helium/core/` só como referência; não entram na série.
+- ajustes: `lazy-session-restore.patch` perdeu a linha de contexto do include removido; o hunk de `first_run_service.cc` do onboarding-page virou `aerographene/first-run-off.patch`. `components/helium_services/extension_ids.h` continua: é criado por `ublock-install-as-component.patch`, não pelos patches removidos.
+
 ## Recursos externos ao `patches/`
 
-- `helium/core/onboarding-page.patch` exige `components/helium_onboarding` (BUILD.gn, grdp, fontes). `build/inner.sh` baixa o release `202609160835` de imputnet/helium-onboarding (versão e sha256 de `deps.ini` do Helium) para essa pasta antes do `gn gen`.
+- uBlock Origin (`third_party/ublock`) e chromium-web-store são baixados por `build/inner.sh`. O helium-onboarding deixou de ser baixado (ver "removidos da série").
 
 ## patches próprios do aerographene
+
+### `aerographene/first-run-off.patch` (GPL-3.0)
+
+`IsFirstRunEligibleProcess()` (`first_run_service.cc`) devolve `false`: sem a FRE nativa do Chromium (seletor de perfil), também com `--force-first-run`. Perfil novo abre a página nova aba até existir onboarding próprio. Mesmo efeito do hunk que estava em `helium/core/onboarding-page.patch`. Compilado com `-fsyntax-only`; não testado no navegador.
 
 ### `aerographene/process-names.patch` (GPL-3.0, SCOPE item 9)
 
