@@ -185,6 +185,53 @@ fi
 echo "== 9. ativos Windows (.ico do app e JetBrains Mono; D3d)"
 bash "$here/apply_assets.sh" "$src"
 
+echo "== 10. saídas MIDL/mc pré-geradas (.tlb, .bin) de third_party/win_build_output (podadas pelo ungoogled)"
+# no Linux o midl.py/rc só copiam estes binários; sem eles as ações *_idl e eventlog falham.
+# Fonte: chromium/src na tag da versão; cada blob é conferido pelo id git da listagem da árvore.
+python3 - "$src" <<'PY'
+import base64, hashlib, json, os, re, sys, time, urllib.error, urllib.request
+src = sys.argv[1]
+ver = ".".join(re.search(rf"^{k}=(\d+)", open(f"{src}/chrome/VERSION").read(), re.M).group(1)
+               for k in ("MAJOR", "MINOR", "BUILD", "PATCH"))
+base = f"https://chromium.googlesource.com/chromium/src/+/refs/tags/{ver}/"
+wbo = "third_party/win_build_output"
+need = {}
+for root, _, files in os.walk(f"{src}/{wbo}"):
+    rel = os.path.relpath(root, src)
+    if root.endswith("/x64"):
+        for f in files:
+            if f.endswith(".h"):
+                need.setdefault(rel, set()).add(f[:-2] + ".tlb")
+    for f in files:
+        if f.endswith(".rc"):
+            need.setdefault(rel, set()).update(re.findall(r"[\w]+\.bin", open(f"{root}/{f}", errors="replace").read()))
+def get(url):
+    for i in range(8):  # o gitiles devolve 429/503 em rajada
+        try:
+            with urllib.request.urlopen(url, timeout=60) as r:
+                return r.read()
+        except urllib.error.HTTPError as e:
+            if e.code not in (429, 500, 502, 503) or i == 7:
+                raise
+            time.sleep(2 ** i)
+n = 0
+for d, names in sorted(need.items()):
+    missing = [x for x in sorted(names) if not os.path.isfile(f"{src}/{d}/{x}")]
+    if not missing:
+        continue
+    tree = json.loads(get(base + d + "?format=JSON")[4:])  # remove o prefixo )]}'
+    ids = {e["name"]: e["id"] for e in tree["entries"]}
+    for x in missing:
+        if x not in ids:
+            continue  # .tlb que o upstream também não gera
+        data = base64.b64decode(get(base + f"{d}/{x}?format=TEXT"))
+        if hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest() != ids[x]:
+            sys.exit(f"erro: blob de {d}/{x} não confere")
+        tmp = f"{src}/{d}/{x}.aero-new"
+        open(tmp, "wb").write(data); os.replace(tmp, f"{src}/{d}/{x}"); n += 1
+print(f"   {n} arquivo(s) reposto(s) (tag {ver})")
+PY
+
 echo "== pronto. Próximo:"
 echo "   export LD_LIBRARY_PATH=$fuse_lib   # só para remontar o ciopfs (rode este script de novo após reboot)"
 echo "   gn gen $out_rel && nice -n 19 ninja -C $out_rel -j8 chrome_elf"
