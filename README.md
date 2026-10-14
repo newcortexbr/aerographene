@@ -14,6 +14,7 @@
 <p align="center">
   <img src="docs/img/bench/startup.svg" alt="startup: existing profile and new profile" width="440">
   <img src="docs/img/bench/tabs.svg" alt="10 tabs: load time and memory" width="440">
+  <img src="docs/img/bench/speed.svg" alt="Speedometer 3.1 score" width="440">
 </p>
 <p align="center"><sub>v0.2 baseline, Comet Lake i3-10110U, interleaved runs, median, lower is better. Details and limits: <a href="docs/BASELINE.md">BASELINE</a>.</sub></p>
 

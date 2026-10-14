@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="332" viewBox="0 0 900 332" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+<rect width="900" height="332" rx="14" fill="#14161c"/>
+<text x="28" y="40" font-size="22" font-weight="700" fill="#f2f4f8">Speedometer 3.1</text>
+<text x="28" y="64" font-size="14" fill="#9aa3b2">median score (runs per minute) · higher is better</text>
+<text x="196" y="119" text-anchor="end" font-size="15" fill="#c3cad6" font-weight="400">Thorium</text>
+<rect x="210" y="102" width="540.0" height="28" rx="5" fill="#3a4152"/>
+<text x="760.0" y="122" font-size="15" font-weight="400" fill="#f2f4f8">15.6 score</text>
+<text x="196" y="163" text-anchor="end" font-size="15" fill="#ffffff" font-weight="700">aerographene</text>
+<rect x="210" y="146" width="510.2" height="28" rx="5" fill="#7c9cff"/>
+<text x="730.2" y="166" font-size="15" font-weight="700" fill="#f2f4f8">14.8 score</text>
+<text x="196" y="207" text-anchor="end" font-size="15" fill="#c3cad6" font-weight="400">Helium</text>
+<rect x="210" y="190" width="494.8" height="28" rx="5" fill="#3a4152"/>
+<text x="714.8" y="210" font-size="15" font-weight="400" fill="#f2f4f8">14.3 score</text>
+<text x="196" y="251" text-anchor="end" font-size="15" fill="#c3cad6" font-weight="400">ungoogled-chromium</text>
+<rect x="210" y="234" width="428.9" height="28" rx="5" fill="#3a4152"/>
+<text x="648.9" y="254" font-size="15" font-weight="400" fill="#f2f4f8">12.4 score</text>
+<text x="28" y="298" font-size="12" fill="#7a8394">Test machine: Intel Core i3-10110U · 16 GB RAM · CachyOS (kernel 7.3.0-rc6) · power profile: performance</text>
+<text x="28" y="316" font-size="12" fill="#7a8394">Speedometer 3.1, aerographene v0.3.1, 5 laps, 1280x800</text>
+</svg>

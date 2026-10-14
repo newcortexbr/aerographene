@@ -30,6 +30,6 @@ Páginas sintéticas em `pages/` (sem rede externa), para não medir a internet.
 ## limites conhecidos
 
 - "cold" real exige limpar o page cache: `--drop-caches` usa `sudo -n`. Sem isso, `first` mede perfil novo, não disco frio.
-- Speedometer 3.1 ainda não é automatizado.
+- Speedometer 3.1: `bench/speedometer.py` (ver BASELINE).
 - PSS conta só os descendentes do processo lançado.
 - Zen é Gecko: é régua de comparação, não alvo de patch.

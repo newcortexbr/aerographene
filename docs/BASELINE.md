@@ -206,3 +206,18 @@ A mediana de PSS com 10 abas é bimodal em aero e Helium, não no ungoogled (IQR
 - A atribuição de PSS por processo é de uma execução por navegador; uma repetição (3 execuções, só pelo total) deu 713,0 / 721,8 / 637,6.
 - Sem drop de page cache (exige sudo), Speedometer não automatizado, sem controle de temperatura/throttling; perfil novo não é disco frio.
 - Chrome é 155; first (n=6) tem IC largo.
+
+## Speedometer 3.1 (14/10/2026, aerographene v0.3.1)
+
+- Comando: `python3 bench/speedometer.py --laps 5 --browsers aerographene,helium,thorium,ungoogled --bin aerographene=<pacote v0.3.1 avx2>/chrome`; rodadas intercaladas e rotacionadas, perfil novo por execução, janela 1280x800, 10 iterações, perfil de energia `performance`, Comet Lake i3-10110U, gate de ociosidade (load1 < 1).
+- Navegadores: aerographene v0.3.1 (avx2), Helium 0.18.3.1, Thorium 154.0.8037.45 AVX2, ungoogled 154.0.8037.97-1. Chrome oficial não entrou (sem binário local).
+
+| navegador | mediana (score) | vs Helium |
+|---|---|---|
+| Thorium | 15,62 | +9,1% |
+| aerographene | 14,76 | +3,1% |
+| Helium | 14,31 | 0 |
+| ungoogled | 12,41 | -13,3% |
+
+- Gráfico: `docs/img/bench/speed.svg`. Maior é melhor.
+- Limites: n=5 por navegador. A volta 0 de aerographene (11,24), Helium (12,24) e Thorium (13,00) ficou bem abaixo das demais (provável aquecimento do sistema na primeira rodada; ungoogled não teve o efeito), o que alarga o IC95; a mediana não é afetada. Sem JetStream, sem Chrome, sem controle de temperatura; não comparar com medições no Cezanne.
