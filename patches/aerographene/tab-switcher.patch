@@ -1,0 +1,784 @@
+aerographene: Ctrl+Tab abre o seletor de abas MRU com miniaturas (estilo Arc).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: IDC_CYCLE_TO_NEXT_TAB/PREV_TAB (Ctrl+Tab, Ctrl+Shift+Tab) abrem
+um painel centrado na janela (views::Widget TYPE_BUBBLE, sem ativação) com
+todas as abas da janela, fixadas incluídas, em ordem MRU
+(WebContents::GetLastActiveTimeTicks): grade de cards com miniatura, favicon,
+título e host, contador "3 / 8" e legenda de atalhos. A 2ª aba MRU já vem
+selecionada; Tab com Ctrl segurado avança, Shift+Tab volta; soltar Ctrl
+(views::EventMonitor, kKeyReleased) troca; Esc, clique fora, perda de foco
+ou mudança na tab strip cancelam; clique num card troca para ele.
+Miniaturas: só as já capturadas pelo ThumbnailTabHelper (hover card); não
+força captura; aba descartada ou sem miniatura mostra o favicon grande.
+Ctrl+PgDn/PgUp seguem IDC_SELECT_NEXT/PREVIOUS_TAB. Com 1 aba cai no
+comportamento original. Arquivos novos em views/frame/aerographene_tab_switcher.*.
+Depende de: aerographene/pinned-context-menu.patch (contexto do BUILD.gn),
+aerographene/commandbar-f3.patch (contexto do browser_command_controller.cc).
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -2555,6 +2555,8 @@
+       "views/frame/aerographene_pinned_menu.h",
+       "views/frame/aerographene_topbar_row.cc",
+       "views/frame/aerographene_topbar_row.h",
++      "views/frame/aerographene_tab_switcher.cc",
++      "views/frame/aerographene_tab_switcher.h",
+       "views/frame/horizontal_tab_strip_region_view.cc",
+       "views/frame/horizontal_tab_strip_region_view.h",
+       "views/frame/immersive_mode_controller_factory_views.cc",
+--- a/chrome/browser/ui/browser_command_controller.cc
++++ b/chrome/browser/ui/browser_command_controller.cc
+@@ -96,6 +96,7 @@
+ #include "chrome/browser/ui/tabs/vertical_tab_strip_state_controller.h"
+ #include "chrome/browser/ui/toolbar/chrome_labs/chrome_labs_utils.h"
+ #include "chrome/browser/ui/ui_features.h"
++#include "chrome/browser/ui/views/frame/aerographene_tab_switcher.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "chrome/browser/ui/views/side_panel/tabs_from_other_devices/tabs_from_other_devices_side_panel_coordinator.h"
+ #include "chrome/browser/ui/web_applications/app_browser_controller.h"
+@@ -803,6 +804,11 @@
+               TabStripUserGestureDetails::GestureType::kKeyboard, time_stamp));
+       break;
+     case IDC_CYCLE_TO_NEXT_TAB:
++      // aerographene: Ctrl+Tab / Ctrl+Shift+Tab open the MRU tab switcher;
++      // Ctrl+PgDn/PgUp stay plain IDC_SELECT_NEXT/PREVIOUS_TAB.
++      if (aerographene::ShowOrAdvanceTabSwitcher(browser_, /*forward=*/true)) {
++        break;
++      }
+       if (IsCtrlTabMruEnabled(browser_)) {
+         base::RecordAction(base::UserMetricsAction("Accel_CycleToNextTab"));
+         CycleToMruTab(browser_,
+@@ -818,6 +824,11 @@
+       }
+       break;
+     case IDC_CYCLE_TO_PREV_TAB:
++      // aerographene: Ctrl+Tab / Ctrl+Shift+Tab open the MRU tab switcher;
++      // Ctrl+PgDn/PgUp stay plain IDC_SELECT_NEXT/PREVIOUS_TAB.
++      if (aerographene::ShowOrAdvanceTabSwitcher(browser_, /*forward=*/false)) {
++        break;
++      }
+       if (IsCtrlTabMruEnabled(browser_)) {
+         base::RecordAction(base::UserMetricsAction("Accel_CycleToPrevTab"));
+         CycleToMruTab(browser_,
+--- /dev/null
++++ b/chrome/browser/ui/views/frame/aerographene_tab_switcher.cc
+@@ -0,0 +1,693 @@
++// Copyright 2026 The Aerographene Authors
++// You can use, redistribute, and/or modify this source code under
++// the terms of the GPL-3.0 license that can be found in the LICENSE file.
++
++#include "chrome/browser/ui/views/frame/aerographene_tab_switcher.h"
++
++#include <algorithm>
++#include <memory>
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "base/check.h"
++#include "base/functional/bind.h"
++#include "base/functional/callback.h"
++#include "base/memory/raw_ptr.h"
++#include "base/memory/scoped_refptr.h"
++#include "base/scoped_observation.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/utf_string_conversions.h"
++#include "base/task/sequenced_task_runner.h"
++#include "base/time/time.h"
++#include "cc/paint/paint_flags.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/color/chrome_color_id.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
++#include "chrome/browser/ui/thumbnails/thumbnail_image.h"
++#include "chrome/browser/ui/thumbnails/thumbnail_tab_helper.h"
++#include "chrome/browser/ui/views/frame/browser_view.h"
++#include "components/favicon/content/content_favicon_driver.h"
++#include "content/public/browser/web_contents.h"
++#include "third_party/skia/include/core/SkColor.h"
++#include "ui/base/metadata/metadata_header_macros.h"
++#include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/color/color_id.h"
++#include "ui/color/color_provider.h"
++#include "ui/events/event.h"
++#include "ui/events/event_observer.h"
++#include "ui/events/keycodes/keyboard_codes.h"
++#include "ui/gfx/canvas.h"
++#include "ui/gfx/font_list.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/gfx/geometry/rect_f.h"
++#include "ui/gfx/image/image.h"
++#include "ui/gfx/image/image_skia.h"
++#include "ui/gfx/paint_vector_icon.h"
++#include "ui/gfx/text_elider.h"
++#include "ui/gfx/text_utils.h"
++#include "ui/views/controls/scroll_view.h"
++#include "ui/views/event_monitor.h"
++#include "ui/views/layout/layout_provider.h"
++#include "ui/views/vector_icons.h"
++#include "ui/views/view.h"
++#include "ui/views/widget/widget.h"
++#include "ui/views/widget/widget_observer.h"
++#include "url/gurl.h"
++
++namespace aerographene {
++
++namespace {
++
++constexpr int kMaxColumns = 4;
++constexpr int kCardWidth = 208;
++constexpr int kCardInset = 6;
++constexpr int kThumbHeight = 112;
++constexpr int kCardHeight = 166;
++constexpr int kCardGap = 10;
++constexpr int kPanelPadding = 14;
++constexpr int kHeaderHeight = 30;
++constexpr int kFooterHeight = 38;
++constexpr int kMaxVisibleRows = 3;
++constexpr int kWindowMargin = 16;
++constexpr int kFaviconSize = 16;
++constexpr int kBigFaviconSize = 32;
++constexpr int kPinIconSize = 12;
++constexpr int kKeyPadding = 5;
++constexpr int kKeyHeight = 18;
++
++int GetRadius() {
++  const int radius = views::LayoutProvider::GetAerographeneControlRadius();
++  return radius >= 0 ? radius : 4;
++}
++
++const gfx::FontList& TitleFont() {
++  static const gfx::FontList font = gfx::FontList().DeriveWithSizeDelta(0);
++  return font;
++}
++
++const gfx::FontList& SmallFont() {
++  static const gfx::FontList font = gfx::FontList().DeriveWithSizeDelta(-2);
++  return font;
++}
++
++const gfx::FontList& MonoFont() {
++  static const gfx::FontList font("monospace, 11px");
++  return font;
++}
++
++std::u16string GetHost(const GURL& url) {
++  if (url.has_host()) {
++    return base::UTF8ToUTF16(url.host());
++  }
++  return base::UTF8ToUTF16(url.possibly_invalid_spec());
++}
++
++// One tab in the grid: thumbnail (or big favicon), favicon, title and host.
++class SwitcherCard : public views::View {
++  METADATA_HEADER(SwitcherCard, views::View)
++
++ public:
++  SwitcherCard(content::WebContents* contents,
++               bool pinned,
++               base::RepeatingClosure on_click)
++      : contents_(contents), pinned_(pinned), on_click_(std::move(on_click)) {
++    title_ = contents->GetTitle();
++    if (title_.empty()) {
++      title_ = GetHost(contents->GetLastCommittedURL());
++    }
++    host_ = GetHost(contents->GetLastCommittedURL());
++    if (auto* driver =
++            favicon::ContentFaviconDriver::FromWebContents(contents)) {
++      const gfx::Image favicon = driver->GetFavicon();
++      if (!favicon.IsEmpty()) {
++        favicon_ = favicon.AsImageSkia();
++      }
++    }
++    // Only show what the hover card already captured: no capture is forced,
++    // and discarded tabs keep the placeholder (no reload, no memory).
++    ThumbnailTabHelper* const helper =
++        ThumbnailTabHelper::FromWebContents(contents);
++    scoped_refptr<ThumbnailImage> thumbnail =
++        helper ? helper->thumbnail() : nullptr;
++    if (thumbnail && thumbnail->has_data() && !contents->WasDiscarded()) {
++      subscription_ = thumbnail->Subscribe();
++      subscription_->SetSizeHint(
++          gfx::Size(kCardWidth - 2 * kCardInset, kThumbHeight));
++      subscription_->SetUncompressedImageCallback(base::BindRepeating(
++          &SwitcherCard::SetThumbnail, base::Unretained(this)));
++      thumbnail->RequestThumbnailImage();
++    }
++    SetTooltipText(title_);
++  }
++  SwitcherCard(const SwitcherCard&) = delete;
++  SwitcherCard& operator=(const SwitcherCard&) = delete;
++  ~SwitcherCard() override = default;
++
++  content::WebContents* contents() const { return contents_; }
++
++  void SetSelected(bool selected) {
++    if (selected_ == selected) {
++      return;
++    }
++    selected_ = selected;
++    SchedulePaint();
++  }
++
++  // views::View:
++  gfx::Size CalculatePreferredSize(
++      const views::SizeBounds& available_size) const override {
++    return gfx::Size(kCardWidth, kCardHeight);
++  }
++
++  bool OnMousePressed(const ui::MouseEvent& event) override {
++    return event.IsOnlyLeftMouseButton();
++  }
++
++  void OnMouseReleased(const ui::MouseEvent& event) override {
++    if (HitTestPoint(event.location())) {
++      on_click_.Run();
++    }
++  }
++
++  void OnPaint(gfx::Canvas* canvas) override {
++    const ui::ColorProvider* const colors = GetColorProvider();
++    const SkColor accent = colors->GetColor(ui::kColorSysPrimary);
++    const SkColor line = colors->GetColor(kColorToolbarSeparator);
++    const SkColor text = colors->GetColor(ui::kColorSysOnSurface);
++    const SkColor subtle = colors->GetColor(ui::kColorSysOnSurfaceSubtle);
++    const float radius = GetRadius();
++
++    gfx::RectF card(GetLocalBounds());
++    card.Inset(0.5f);
++    cc::PaintFlags fill;
++    fill.setAntiAlias(true);
++    fill.setColor(selected_ ? SkColorSetA(accent, 0x33)
++                            : colors->GetColor(ui::kColorSysSurface2));
++    canvas->DrawRoundRect(card, radius, fill);
++    cc::PaintFlags stroke;
++    stroke.setAntiAlias(true);
++    stroke.setStyle(cc::PaintFlags::kStroke_Style);
++    stroke.setStrokeWidth(selected_ ? 2 : 1);
++    stroke.setColor(selected_ ? accent : line);
++    canvas->DrawRoundRect(card, radius, stroke);
++
++    // Thumbnail area.
++    const gfx::Rect thumb(kCardInset, kCardInset, width() - 2 * kCardInset,
++                          kThumbHeight);
++    cc::PaintFlags thumb_fill;
++    thumb_fill.setAntiAlias(true);
++    thumb_fill.setColor(colors->GetColor(ui::kColorSysSurface));
++    canvas->DrawRoundRect(gfx::RectF(thumb), std::max(radius - 2, 0.0f),
++                          thumb_fill);
++    if (!thumbnail_.isNull()) {
++      canvas->Save();
++      canvas->ClipRect(thumb);
++      canvas->DrawImageInt(thumbnail_, 0, 0, thumbnail_.width(),
++                           thumbnail_.height(), thumb.x(), thumb.y(),
++                           thumb.width(), thumb.height(), /*filter=*/true);
++      canvas->Restore();
++    } else {
++      // Placeholder: the favicon large in the middle.
++      const gfx::Rect big(thumb.CenterPoint().x() - kBigFaviconSize / 2,
++                          thumb.CenterPoint().y() - kBigFaviconSize / 2,
++                          kBigFaviconSize, kBigFaviconSize);
++      PaintFavicon(canvas, big, accent);
++    }
++    cc::PaintFlags thumb_stroke = stroke;
++    thumb_stroke.setStrokeWidth(1);
++    thumb_stroke.setColor(line);
++    canvas->DrawRoundRect(gfx::RectF(thumb), std::max(radius - 2, 0.0f),
++                          thumb_stroke);
++
++    if (pinned_) {
++      const gfx::Rect pin(thumb.right() - kPinIconSize - 6, thumb.y() + 6,
++                          kPinIconSize, kPinIconSize);
++      canvas->DrawImageInt(
++          gfx::CreateVectorIcon(views::kKeepFilledIcon, kPinIconSize, text),
++          pin.x(), pin.y());
++    }
++
++    // Favicon, title and host.
++    const int text_top = thumb.bottom() + 8;
++    const gfx::Rect favicon_rect(kCardInset + 4, text_top + 6, kFaviconSize,
++                                 kFaviconSize);
++    PaintFavicon(canvas, favicon_rect, accent);
++    const int text_x = favicon_rect.right() + 8;
++    const int text_width = width() - text_x - kCardInset;
++    const int title_height = TitleFont().GetHeight();
++    canvas->DrawStringRect(
++        gfx::ElideText(title_, TitleFont(), text_width, gfx::ELIDE_TAIL),
++        TitleFont(), text, gfx::Rect(text_x, text_top, text_width,
++                                     title_height));
++    canvas->DrawStringRect(
++        gfx::ElideText(host_, MonoFont(), text_width, gfx::ELIDE_TAIL),
++        MonoFont(), subtle,
++        gfx::Rect(text_x, text_top + title_height + 1, text_width,
++                  MonoFont().GetHeight()));
++  }
++
++ private:
++  void SetThumbnail(gfx::ImageSkia image) {
++    thumbnail_ = std::move(image);
++    SchedulePaint();
++  }
++
++  void PaintFavicon(gfx::Canvas* canvas, const gfx::Rect& rect, SkColor dot) {
++    if (!favicon_.isNull()) {
++      canvas->DrawImageInt(favicon_, 0, 0, favicon_.width(), favicon_.height(),
++                           rect.x(), rect.y(), rect.width(), rect.height(),
++                           /*filter=*/true);
++      return;
++    }
++    cc::PaintFlags flags;
++    flags.setAntiAlias(true);
++    flags.setColor(dot);
++    canvas->DrawCircle(gfx::PointF(rect.CenterPoint()), rect.width() / 2.0f,
++                       flags);
++  }
++
++  const raw_ptr<content::WebContents> contents_;
++  const bool pinned_;
++  base::RepeatingClosure on_click_;
++  std::u16string title_;
++  std::u16string host_;
++  gfx::ImageSkia favicon_;
++  gfx::ImageSkia thumbnail_;
++  std::unique_ptr<ThumbnailImage::Subscription> subscription_;
++  bool selected_ = false;
++};
++
++BEGIN_METADATA(SwitcherCard)
++END_METADATA
++
++// The panel: header with counter, scrollable grid, footer with the keys.
++class SwitcherPanel : public views::View {
++  METADATA_HEADER(SwitcherPanel, views::View)
++
++ public:
++  SwitcherPanel(int columns, int visible_rows, int total_rows)
++      : columns_(columns) {
++    const int grid_width =
++        columns * kCardWidth + (columns - 1) * kCardGap;
++    const int grid_height =
++        total_rows * kCardHeight + (total_rows - 1) * kCardGap;
++    const int visible_height =
++        visible_rows * kCardHeight + (visible_rows - 1) * kCardGap;
++    size_ = gfx::Size(grid_width + 2 * kPanelPadding,
++                      kHeaderHeight + visible_height + kPanelPadding +
++                          kFooterHeight);
++
++    scroll_view_ = AddChildView(std::make_unique<views::ScrollView>(
++        views::ScrollView::ScrollWithLayers::kEnabled));
++    scroll_view_->SetBackgroundColor(std::nullopt);
++    scroll_view_->SetDrawOverflowIndicator(false);
++    scroll_view_->SetHorizontalScrollBarMode(
++        views::ScrollView::ScrollBarMode::kDisabled);
++    grid_ = scroll_view_->SetContents(std::make_unique<views::View>());
++    grid_->SetSize(gfx::Size(grid_width, grid_height));
++    scroll_view_->SetBounds(kPanelPadding, kHeaderHeight, grid_width,
++                            visible_height);
++  }
++  SwitcherPanel(const SwitcherPanel&) = delete;
++  SwitcherPanel& operator=(const SwitcherPanel&) = delete;
++  ~SwitcherPanel() override = default;
++
++  SwitcherCard* AddCard(std::unique_ptr<SwitcherCard> card) {
++    const int index = static_cast<int>(grid_->children().size());
++    const int column = index % columns_;
++    const int row = index / columns_;
++    SwitcherCard* const added = grid_->AddChildView(std::move(card));
++    added->SetBounds(column * (kCardWidth + kCardGap),
++                     row * (kCardHeight + kCardGap), kCardWidth, kCardHeight);
++    return added;
++  }
++
++  void SetCounter(int selected, int total) {
++    selected_ = selected;
++    total_ = total;
++    SchedulePaint();
++  }
++
++  // views::View:
++  gfx::Size CalculatePreferredSize(
++      const views::SizeBounds& available_size) const override {
++    return size_;
++  }
++
++  void OnPaint(gfx::Canvas* canvas) override {
++    const ui::ColorProvider* const colors = GetColorProvider();
++    const SkColor accent = colors->GetColor(ui::kColorSysPrimary);
++    const SkColor line = colors->GetColor(kColorToolbarSeparator);
++    const SkColor text = colors->GetColor(ui::kColorSysOnSurface);
++    const SkColor subtle = colors->GetColor(ui::kColorSysOnSurfaceSubtle);
++    const float radius = GetRadius();
++
++    gfx::RectF panel(GetLocalBounds());
++    panel.Inset(0.5f);
++    cc::PaintFlags fill;
++    fill.setAntiAlias(true);
++    fill.setColor(colors->GetColor(ui::kColorSysSurface));
++    canvas->DrawRoundRect(panel, radius + 2, fill);
++    cc::PaintFlags stroke;
++    stroke.setAntiAlias(true);
++    stroke.setStyle(cc::PaintFlags::kStroke_Style);
++    stroke.setStrokeWidth(1);
++    stroke.setColor(line);
++    canvas->DrawRoundRect(panel, radius + 2, stroke);
++
++    // Header: title and "3 / 8".
++    const gfx::Rect header(kPanelPadding, 0, width() - 2 * kPanelPadding,
++                           kHeaderHeight);
++    canvas->DrawStringRect(u"RECENT TABS", MonoFont(), subtle, header);
++    const std::u16string count = base::NumberToString16(selected_ + 1);
++    const std::u16string rest = u" / " + base::NumberToString16(total_);
++    const int rest_width = gfx::GetStringWidth(rest, MonoFont());
++    const int count_width = gfx::GetStringWidth(count, MonoFont());
++    canvas->DrawStringRect(
++        rest, MonoFont(), subtle,
++        gfx::Rect(header.right() - rest_width, header.y(), rest_width,
++                  header.height()));
++    canvas->DrawStringRect(
++        count, MonoFont(), accent,
++        gfx::Rect(header.right() - rest_width - count_width, header.y(),
++                  count_width, header.height()));
++
++    // Footer: separator and the key legend.
++    const int footer_top = height() - kFooterHeight;
++    canvas->DrawLine(gfx::Point(1, footer_top),
++                     gfx::Point(width() - 1, footer_top), line);
++    const int key_y = footer_top + (kFooterHeight - kKeyHeight) / 2;
++    int x = kPanelPadding;
++    auto key = [&](const std::u16string& label) {
++      const int w = gfx::GetStringWidth(label, MonoFont()) + 2 * kKeyPadding;
++      const gfx::RectF box(x + 0.5f, key_y + 0.5f, w - 1, kKeyHeight - 1);
++      cc::PaintFlags key_stroke = stroke;
++      canvas->DrawRoundRect(box, 3, key_stroke);
++      canvas->DrawStringRect(label, MonoFont(), text,
++                             gfx::Rect(x + kKeyPadding, key_y, w, kKeyHeight));
++      x += w + 6;
++    };
++    auto label = [&](const std::u16string& s, int after) {
++      const int w = gfx::GetStringWidth(s, SmallFont());
++      canvas->DrawStringRect(s, SmallFont(), subtle,
++                             gfx::Rect(x, key_y, w, kKeyHeight));
++      x += w + after;
++    };
++    key(u"Ctrl");
++    label(u"+", 6);
++    key(u"Tab");
++    label(u"next", 18);
++    key(u"Ctrl");
++    label(u"+", 6);
++    key(u"Shift");
++    label(u"+", 6);
++    key(u"Tab");
++    label(u"previous", 18);
++    key(u"Esc");
++    label(u"cancel", 18);
++    // Right aligned: "release Ctrl to switch", if it still fits.
++    const std::u16string release = u"release";
++    const std::u16string to_switch = u"to switch";
++    const int ctrl_width =
++        gfx::GetStringWidth(u"Ctrl", MonoFont()) + 2 * kKeyPadding;
++    const int right_width = gfx::GetStringWidth(release, SmallFont()) + 6 +
++                            ctrl_width + 6 +
++                            gfx::GetStringWidth(to_switch, SmallFont());
++    const int right_x = width() - kPanelPadding - right_width;
++    if (right_x > x) {
++      x = right_x;
++      label(release, 6);
++      key(u"Ctrl");
++      label(to_switch, 0);
++    }
++  }
++
++ private:
++  const int columns_;
++  gfx::Size size_;
++  raw_ptr<views::ScrollView> scroll_view_ = nullptr;
++  raw_ptr<views::View> grid_ = nullptr;
++  int selected_ = 0;
++  int total_ = 0;
++};
++
++BEGIN_METADATA(SwitcherPanel)
++END_METADATA
++
++class TabSwitcher;
++TabSwitcher* g_switcher = nullptr;
++
++// Owns the widget; lives while Ctrl is held. Only one exists at a time
++// (there is a single keyboard).
++class TabSwitcher : public ui::EventObserver,
++                    public views::WidgetObserver,
++                    public TabStripModelObserver {
++ public:
++  TabSwitcher(BrowserWindowInterface* browser,
++              BrowserView* browser_view,
++              bool forward)
++      : browser_(browser), model_(browser->GetTabStripModel()) {
++    // MRU: active tab first, then by last activation time.
++    const int active = model_->active_index();
++    std::vector<content::WebContents*> order;
++    for (int i = 0; i < model_->count(); ++i) {
++      if (i != active) {
++        order.push_back(model_->GetWebContentsAt(i));
++      }
++    }
++    std::stable_sort(order.begin(), order.end(),
++                     [](content::WebContents* a, content::WebContents* b) {
++                       return a->GetLastActiveTimeTicks() >
++                              b->GetLastActiveTimeTicks();
++                     });
++    if (active >= 0) {
++      order.insert(order.begin(), model_->GetWebContentsAt(active));
++    }
++    const int count = static_cast<int>(order.size());
++
++    views::Widget* const browser_widget = browser_view->GetWidget();
++    const gfx::Rect window = browser_widget->GetWindowBoundsInScreen();
++    const int fit_columns =
++        (window.width() - 2 * kWindowMargin - 2 * kPanelPadding + kCardGap) /
++        (kCardWidth + kCardGap);
++    const int columns =
++        std::clamp(std::min(fit_columns, count), 1, kMaxColumns);
++    const int total_rows = (count + columns - 1) / columns;
++    const int fit_rows =
++        (window.height() - 2 * kWindowMargin - kHeaderHeight - kPanelPadding -
++         kFooterHeight + kCardGap) /
++        (kCardHeight + kCardGap);
++    const int visible_rows =
++        std::clamp(std::min(fit_rows, total_rows), 1, kMaxVisibleRows);
++
++    auto panel =
++        std::make_unique<SwitcherPanel>(columns, visible_rows, total_rows);
++    for (int i = 0; i < count; ++i) {
++      content::WebContents* const contents = order[i];
++      cards_.push_back(panel->AddCard(std::make_unique<SwitcherCard>(
++          contents, model_->IsTabPinned(model_->GetIndexOfWebContents(contents)),
++          base::BindRepeating(&TabSwitcher::OnCardClicked,
++                              base::Unretained(this), i))));
++    }
++    const gfx::Size size = panel->GetPreferredSize({});
++
++    views::Widget::InitParams params(
++        views::Widget::InitParams::CLIENT_OWNS_WIDGET,
++        views::Widget::InitParams::TYPE_BUBBLE);
++    params.parent = browser_widget->GetNativeView();
++    params.activatable = views::Widget::InitParams::Activatable::kNo;
++    params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
++    params.shadow_type = views::Widget::InitParams::ShadowType::kDrop;
++    params.corner_radius = GetRadius() + 2;
++    params.name = "AerographeneTabSwitcher";
++    params.bounds =
++        gfx::Rect(window.CenterPoint().x() - size.width() / 2,
++                  window.CenterPoint().y() - size.height() / 2, size.width(),
++                  size.height());
++    widget_ = std::make_unique<views::Widget>();
++    widget_->Init(std::move(params));
++    panel_ = widget_->SetContentsView(std::move(panel));
++
++    selected_ = forward ? std::min(1, count - 1) : count - 1;
++    UpdateSelection();
++    widget_->ShowInactive();
++
++    event_monitor_ = views::EventMonitor::CreateWindowMonitor(
++        this, browser_widget->GetNativeWindow(),
++        {ui::EventType::kKeyPressed, ui::EventType::kKeyReleased,
++         ui::EventType::kMousePressed});
++    browser_widget_observation_.Observe(browser_widget);
++    model_->AddObserver(this);
++  }
++  TabSwitcher(const TabSwitcher&) = delete;
++  TabSwitcher& operator=(const TabSwitcher&) = delete;
++
++  ~TabSwitcher() override {
++    StopObserving();
++    event_monitor_.reset();
++    cards_.clear();
++    panel_ = nullptr;
++    widget_.reset();
++  }
++
++  BrowserWindowInterface* browser() const { return browser_; }
++
++  void Advance(bool forward) {
++    const int count = static_cast<int>(cards_.size());
++    selected_ = (selected_ + (forward ? 1 : count - 1)) % count;
++    UpdateSelection();
++  }
++
++  // Ends the switcher; activates the selected tab when |commit|.
++  void Finish(bool commit) {
++    if (finished_) {
++      return;
++    }
++    finished_ = true;
++    if (commit && model_) {
++      const int index =
++          model_->GetIndexOfWebContents(cards_[selected_]->contents());
++      if (index != TabStripModel::kNoTab) {
++        model_->ActivateTabAt(
++            index, TabStripUserGestureDetails(
++                       TabStripUserGestureDetails::GestureType::kKeyboard));
++      }
++    }
++    StopObserving();
++    if (widget_) {
++      widget_->Hide();
++    }
++    if (g_switcher == this) {
++      g_switcher = nullptr;
++    }
++    // We may be inside our own event monitor or a widget notification.
++    base::SequencedTaskRunner::GetCurrentDefault()->DeleteSoon(FROM_HERE,
++                                                               this);
++  }
++
++  // ui::EventObserver:
++  void OnEvent(const ui::Event& event) override {
++    if (finished_) {
++      return;
++    }
++    if (event.type() == ui::EventType::kMousePressed) {
++      Finish(/*commit=*/false);
++      return;
++    }
++    if (!event.IsKeyEvent()) {
++      return;
++    }
++    const ui::KeyboardCode key = event.AsKeyEvent()->key_code();
++    const bool is_ctrl = key == ui::VKEY_CONTROL || key == ui::VKEY_LCONTROL ||
++                         key == ui::VKEY_RCONTROL;
++    if (event.type() == ui::EventType::kKeyReleased) {
++      if (is_ctrl) {
++        Finish(/*commit=*/true);
++      }
++      return;
++    }
++    if (key == ui::VKEY_ESCAPE) {
++      Finish(/*commit=*/false);
++      return;
++    }
++    // A key without Ctrl means its release was missed (e.g. the Ctrl+Tab
++    // was quicker than the widget): commit like a release.
++    if (!is_ctrl && key != ui::VKEY_SHIFT && key != ui::VKEY_TAB &&
++        !(event.flags() & ui::EF_CONTROL_DOWN)) {
++      Finish(/*commit=*/true);
++    }
++  }
++
++  // views::WidgetObserver:
++  void OnWidgetActivationChanged(views::Widget* widget, bool active) override {
++    if (!active) {
++      Finish(/*commit=*/false);
++    }
++  }
++  void OnWidgetVisibilityChanged(views::Widget* widget, bool visible) override {
++    if (!visible) {
++      Finish(/*commit=*/false);
++    }
++  }
++  void OnWidgetDestroying(views::Widget* widget) override {
++    // The browser window goes away before our deferred deletion runs.
++    event_monitor_.reset();
++    Finish(/*commit=*/false);
++  }
++
++  // TabStripModelObserver:
++  void OnTabStripModelChanged(TabStripModel* tab_strip_model,
++                              const TabStripModelChange& change,
++                              const TabStripSelectionChange& selection)
++      override {
++    // Our cards hold WebContents pointers: any insert/remove/replace/move
++    // cancels instead of trying to keep the grid in sync.
++    if (change.type() != TabStripModelChange::kSelectionOnly) {
++      Finish(/*commit=*/false);
++    }
++  }
++  void OnTabStripModelDestroyed(TabStripModel* tab_strip_model) override {
++    model_ = nullptr;
++    Finish(/*commit=*/false);
++  }
++
++ private:
++  void StopObserving() {
++    browser_widget_observation_.Reset();
++    if (model_) {
++      model_->RemoveObserver(this);
++      model_ = nullptr;
++    }
++  }
++
++  void UpdateSelection() {
++    for (size_t i = 0; i < cards_.size(); ++i) {
++      cards_[i]->SetSelected(static_cast<int>(i) == selected_);
++    }
++    cards_[selected_]->ScrollViewToVisible();
++    panel_->SetCounter(selected_, static_cast<int>(cards_.size()));
++  }
++
++  void OnCardClicked(int index) {
++    if (finished_) {
++      return;
++    }
++    selected_ = index;
++    Finish(/*commit=*/true);
++  }
++
++  const raw_ptr<BrowserWindowInterface> browser_;
++  raw_ptr<TabStripModel> model_;
++  std::unique_ptr<views::Widget> widget_;
++  raw_ptr<SwitcherPanel> panel_ = nullptr;
++  std::vector<raw_ptr<SwitcherCard>> cards_;
++  std::unique_ptr<views::EventMonitor> event_monitor_;
++  base::ScopedObservation<views::Widget, views::WidgetObserver>
++      browser_widget_observation_{this};
++  int selected_ = 0;
++  bool finished_ = false;
++};
++
++}  // namespace
++
++bool ShowOrAdvanceTabSwitcher(BrowserWindowInterface* browser, bool forward) {
++  if (g_switcher && g_switcher->browser() == browser) {
++    g_switcher->Advance(forward);
++    return true;
++  }
++  if (g_switcher) {
++    g_switcher->Finish(/*commit=*/false);
++  }
++  BrowserView* const browser_view =
++      BrowserView::GetBrowserViewForBrowser(browser);
++  if (!browser_view || !browser_view->GetWidget() ||
++      browser->GetTabStripModel()->count() < 2) {
++    return false;
++  }
++  g_switcher = new TabSwitcher(browser, browser_view, forward);
++  return true;
++}
++
++}  // namespace aerographene
+--- /dev/null
++++ b/chrome/browser/ui/views/frame/aerographene_tab_switcher.h
+@@ -0,0 +1,23 @@
++// Copyright 2026 The Aerographene Authors
++// You can use, redistribute, and/or modify this source code under
++// the terms of the GPL-3.0 license that can be found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_FRAME_AEROGRAPHENE_TAB_SWITCHER_H_
++#define CHROME_BROWSER_UI_VIEWS_FRAME_AEROGRAPHENE_TAB_SWITCHER_H_
++
++class BrowserWindowInterface;
++
++namespace aerographene {
++
++// Ctrl+Tab tab switcher: a centered grid of the window's tabs in MRU order
++// (WebContents::GetLastActiveTimeTicks), with cached thumbnails. The first
++// call opens it with the previous tab selected (or the oldest one when
++// |forward| is false); later calls while it is open move the selection.
++// Releasing Ctrl activates the selected tab; Esc, a click outside, losing
++// focus or any tab strip change cancel. Returns false when nothing was shown
++// (one tab, or no views browser), so the caller can fall back.
++bool ShowOrAdvanceTabSwitcher(BrowserWindowInterface* browser, bool forward);
++
++}  // namespace aerographene
++
++#endif  // CHROME_BROWSER_UI_VIEWS_FRAME_AEROGRAPHENE_TAB_SWITCHER_H_
