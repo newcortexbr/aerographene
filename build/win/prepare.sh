@@ -204,7 +204,7 @@ for root, _, files in (w for r in (wbo, "chrome/app/etw_events") for w in os.wal
                 need.setdefault(rel, set()).add(f[:-2] + ".tlb")
     for f in files:
         if f.endswith(".rc"):
-            need.setdefault(rel, set()).update(re.findall(r"[\w]+\.bin", open(f"{root}/{f}", errors="replace").read()))
+            need.setdefault(rel, set()).update(re.findall(r"\w+\.bin", open(f"{root}/{f}", errors="replace").read(), re.I))
 def get(url):
     for i in range(8):  # o gitiles devolve 429/503 em rajada
         try:
