@@ -77,4 +77,4 @@ Esquema das páginas internas: `patches/aerographene/branding-scheme.patch` muda
 - acesso administrativo: `ssh claude@cezanne` (sudo); os runners rodam como `dasher` em `~/actions-runner-{1,2,3}`. Cache em `~/aerographene-build` (com `out/Default`) e `~/aerographene-ccache`, restaurados do WSL2: a primeira build no host novo teve 99,7% de acerto no ccache e terminou em ~20 min.
 - o smoke (`build/smoke.sh`) roda no host, fora do container: exige as libs gráficas do Chromium instaladas no Ubuntu (atk, atk-bridge, cups, asound, gbm, cairo, pango, Xcomposite/Xdamage/Xfixes/Xrandr, atspi, xkbcommon, nss). Instaladas em 10/10/2026 depois de a run 38029467766 falhar só no smoke.
 - após reboot, os runners podem ficar com sessão antiga no GitHub ("A session for this runner already exists") e o job fica na fila; se passar de ~3 min, `gh run cancel` + `gh run rerun` resolve.
-- acompanhar runs: `tools/runwatch status|wait|errors|list` (skill `run-watch`); monitor local no host: `aero-top` (`tools/cezanne/`).
+- acompanhar runs: `gh run watch`/`gh run view`; ferramentas locais do dono (runwatch, aero-top) ficam fora do repo.
