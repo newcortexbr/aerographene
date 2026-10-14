@@ -18,6 +18,11 @@ on:
         type: choice
         options: [avx2, avx1]
         default: avx2
+      o3:
+        description: "-O3 seletivo (docs/BUILD.md): off = build normal; hot = Blink platform+heap; wide = hot + base. Gera pacote -o3<perfil>"
+        type: choice
+        options: [off, hot, wide]
+        default: off
   push:
     branches: [main]
     paths:
@@ -46,6 +51,7 @@ jobs:
           NINJA_TARGET: ${{ inputs.target || 'chrome' }}
           AEROGRAPHENE_PGO: ${{ inputs.pgo || '1' }}
           AERO_CPU: ${{ inputs.cpu || 'avx2' }}
+          AERO_O3: ${{ inputs.o3 || 'off' }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           GOOGLE_DEFAULT_CLIENT_ID: ${{ secrets.GOOGLE_DEFAULT_CLIENT_ID }}
           GOOGLE_DEFAULT_CLIENT_SECRET: ${{ secrets.GOOGLE_DEFAULT_CLIENT_SECRET }}
@@ -56,7 +62,9 @@ jobs:
         id: art
         env:
           AERO_CPU: ${{ inputs.cpu || 'avx2' }}
-        run: echo "path=$(ls -1t "${AEROGRAPHENE_WORKDIR:-$HOME/aerographene-build}"/dist/*-${AERO_CPU}-x86_64_linux.tar.zst | head -1)" >> "$GITHUB_OUTPUT"
+          O3_TAG: ${{ (inputs.o3 && inputs.o3 != 'off') && format('-o3{0}', inputs.o3) || '' }}
+        # o pacote recém-gerado é o mais novo; o sufixo -o3<perfil> fica antes do cpu no nome
+        run: echo "path=$(ls -1t "${AEROGRAPHENE_WORKDIR:-$HOME/aerographene-build}"/dist/*${O3_TAG}-${AERO_CPU}-x86_64_linux.tar.zst | head -1)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         if: ${{ (inputs.target || 'chrome') == 'chrome' }}
@@ -64,7 +72,7 @@ jobs:
         continue-on-error: true
         with:
           # avx2 mantém o nome histórico (smoke.yml, release.yml); avx1 leva sufixo
-          name: ${{ inputs.cpu == 'avx1' && 'aerographene-linux-x86_64-avx1' || 'aerographene-linux-x86_64' }}
+          name: ${{ inputs.cpu == 'avx1' && 'aerographene-linux-x86_64-avx1' || 'aerographene-linux-x86_64' }}${{ (inputs.o3 && inputs.o3 != 'off') && format('-o3{0}', inputs.o3) || '' }}
           path: ${{ steps.art.outputs.path }}
           compression-level: 0
           retention-days: 14

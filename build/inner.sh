@@ -11,6 +11,16 @@ setup_paths   # _root=/work/portablelinux, _src_dir=$_root/build/src, _out_dir=$
 _out_dir="${_src_dir}/out/${AERO_OUT}"
 AERO_PATCHES=/aero/patches
 
+# -O3 seletivo (build/o3.py, docs/BUILD.md): off (padrão) | hot | wide. Não entra no hash da série:
+# é aplicado/desfeito a cada execução, só sobre BUILD.gn/.gni de alvos escolhidos.
+AERO_O3="${AERO_O3:-off}"
+case "${AERO_O3}" in
+    ""|0|off) AERO_O3=off; O3_TAG="" ;;
+    hot|wide) O3_TAG="-o3${AERO_O3}" ;;
+    *) echo "erro: AERO_O3 inválido: ${AERO_O3} (off|hot|wide)" >&2; exit 1 ;;
+esac
+AERO_O3_STATE="${_src_dir}/.aero-o3"            # originais dos arquivos que o o3.py alterou
+
 AERO_STATE="${_src_dir}/.aero-applied"          # cópia da série aplicada + BUILD.gn pré-march
 DOMSUB_CACHE="${_root}/build/domsub-cache.tar.gz"  # originais da domain substitution (permite revert)
 MTIME_SNAP="${_root}/build/aero-mtimes.tsv"
@@ -70,6 +80,8 @@ unfix_tool_downloading() {
 # Antes: mtime+sha dos arquivos afetados; no fim, restore_mtimes devolve o mtime de quem não mudou.
 # Retorna !=0 se não for possível (sem registro, sem cache de domsub, patch -R falhou): recriar.
 incremental_repatch() {
+    # antes do revert da domain substitution: base/BUILD.gn está na lista dela e o revert confere CRC
+    python3 /aero/build/o3.py --src "${_src_dir}" --state "${AERO_O3_STATE}" --restore || return 1
     [ -f "${AERO_STATE}/series" ] && [ -f "${AERO_STATE}/BUILD.gn.orig" ] || { echo "sem registro da série aplicada"; return 1; }
     [ -f "${_src_dir}/.patched.stamp" ] || return 1
     if [ -f "${_src_dir}/.domsub.stamp" ] && [ ! -f "${DOMSUB_CACHE}" ]; then
@@ -288,6 +300,9 @@ fi
 fix_tool_downloading
 restore_mtimes
 
+echo "== -O3 seletivo: ${AERO_O3}"
+python3 /aero/build/o3.py --src "${_src_dir}" --state "${AERO_O3_STATE}" --profile "${AERO_O3}"
+
 echo "== ccache"
 cc_line=""
 if [ "${AEROGRAPHENE_CCACHE:-1}" = 1 ] && command -v ccache >/dev/null; then
@@ -394,7 +409,7 @@ if [ "${target}" != "chrome chrome_sandbox" ]; then
     exit 0
 fi
 echo "== pacote"
-name="aerographene-${AERO_VERSION}-${UC_TAG}-${AERO_SHA:-local}-${AERO_CPU}-x86_64_linux"
+name="aerographene-${AERO_VERSION}-${UC_TAG}-${AERO_SHA:-local}${O3_TAG}-${AERO_CPU}-x86_64_linux"
 stage="/work/dist/${name}"
 rm -rf "$stage"; mkdir -p "$stage"
 for f in chrome chrome_100_percent.pak chrome_200_percent.pak chrome_crashpad_handler chrome-wrapper \
@@ -448,8 +463,12 @@ else
 fi
 # binário principal com nome do produto; branding completo fica para depois
 ln -sf chrome "$stage/aerographene"
-# só remove o tarball do mesmo alvo (avx2 e avx1 convivem em dist/)
-rm -f "/work/dist/aerographene-"*"-${AERO_CPU}-x86_64_linux.tar.zst"
+# só remove o tarball do mesmo alvo e da mesma variante (avx2/avx1 e normal/-o3* convivem em dist/)
+for old in /work/dist/aerographene-*"${O3_TAG}-${AERO_CPU}-x86_64_linux.tar.zst"; do
+    [ -f "$old" ] || continue
+    if [ -z "${O3_TAG}" ]; then case "$old" in *-o3*) continue ;; esac; fi
+    rm -f "$old"
+done
 tar -C /work/dist -cf - "$name" | zstd -T0 -19 -o "/work/dist/${name}.tar.zst"
 rm -rf "$stage"
 echo "ARTIFACT=/work/dist/${name}.tar.zst"

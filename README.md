@@ -96,6 +96,7 @@ I IMMENSELY thank projects such as Ungoogled-Chromium, Helium, Thorium and Brave
   - 🚧 first-use defaults: Google as default search engine in new profiles, chromium-web-store extension bundled (pinned by version + sha256) and `extension-mime-request-handling` on, so `.crx` from the Chrome Web Store can be installed ([padrões e extensões](docs/wiki/padroes-e-extensoes.md)); patch applies and the affected targets compile; not tested in the browser yet
   - 🚧 Helium services and setup page removed: a new profile opens the new tab page, with no setup page and no native Chromium first-run screen, until our own onboarding exists ([padrões e extensões](docs/wiki/padroes-e-extensoes.md)); series applies and the affected files compile (syntax-only); not tested in the browser yet
   - 🚧 Helium extras out of scope removed (MRU tab cycling, keyboard shortcuts, Shift+right-click native menu, new tabs next to the active one, window-menu customize item, crash-reporting prefs); the whole patch series now applies with `--fuzz=0`; affected files compile (syntax-only); not tested in the browser yet
+  - 🚧 optional selective `-O3` ([build](docs/BUILD.md)): V8, partition_alloc and Blink `core_hot` are already `-O3` upstream; build input `o3=hot|wide` raises Blink `platform`/`heap` (and `base`) to `-O3` and produces a `-o3<profile>` package; off by default, not measured yet
   - ⬜ Google Sync with own API keys ([ADR 0006](docs/adr/0006-google-sync-com-chaves-proprias.md))
 
 ## docs

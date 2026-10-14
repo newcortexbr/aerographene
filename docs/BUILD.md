@@ -28,12 +28,62 @@ Para forçar do zero: apagar `portablelinux/build/src`.
 
 - PGO: o ungoogled fixa `chrome_pgo_phase=0` no `flags.gn` porque o perfil é um binário do Google que não vem no tarball (o gclient hook o baixaria). Não está no `pruning.list` e o arquivo está acessível (`chrome/build/linux.pgo.txt` → `chrome-linux-8037-1790747267-…profdata`, HTTP 200 em `storage.googleapis.com/chromium-optimization-profiles/pgo_profiles/`, verificado em 05/10/2026). Então o build baixa o perfil oficial e usa `chrome_pgo_phase=2`; se o download falha, cai para `0`. Os patches do ungoogled deixam parte do perfil desatualizada (só gera avisos). Desligável com `AEROGRAPHENE_PGO=0` ou o input `pgo` do workflow.
 - `-march=x86-64-v3`: o GN do Chromium 154 não tem arg de `-march` para x86 (só `arm_arch`) nem `extra_cflags`. O `inner.sh` acrescenta `-march=x86-64-v3` (cflags, asmflags, ldflags, para o LTO) e `-Ctarget-cpu=x86-64-v3` (Rust) à `config("compiler_cpu_abi")` de `build/config/compiler/BUILD.gn`, só em `current_cpu == "x64" && is_linux`. Isso vale também para as ferramentas do host, que rodam no Cezanne (v3). Candidato a virar patch em `patches/` quando o dono da série quiser.
-- ThinLTO (`use_thin_lto`, `thin_lto_enable_optimizations`), ICF (`use_icf`), `symbol_level=0`, `is_official_build=true`; sem `-O3`.
+- ThinLTO (`use_thin_lto`, `thin_lto_enable_optimizations`), ICF (`use_icf`), `symbol_level=0`, `is_official_build=true`; sem `-O3` global (só o seletivo opcional, seção abaixo).
 - jobs: padrão `auto` = `nproc` dentro do container na hora da build (os runners dividem 5..12 CPUs dinamicamente); número explícito em `JOBS`/input `jobs` sobrepõe. O log mostra o valor e o `MemAvailable`. Sem teto por RAM, por decisão do dono: com ~13 GB e 12 jobs há risco de OOM (compilações pesadas e o link ThinLTO do `chrome`); se ocorrer, rodar com `jobs` menor.
 - RAM (~14 GB): `concurrent_links` não pode ser definido com ThinLTO (assert do GN), o Chromium calcula pela RAM. O link do `chrome` com ThinLTO é o pico de memória; se estourar, o host tem zram de 7,8 GB (zstd) e `/swap.img` de 16 GB; se ainda estourar, limitar `--thinlto-jobs`.
 - chaves Google (ADR 0006): lidas de secrets opcionais `GOOGLE_API_KEY`, `GOOGLE_DEFAULT_CLIENT_ID`, `GOOGLE_DEFAULT_CLIENT_SECRET`; ausentes, ficam os valores vazios do ungoogled. Não aparecem no log.
 - labels do runner: `[self-hosted, linux, intense]`, suposição. A API de runners da org exige permissão de admin, então os labels exatos não foram confirmados.
 - produto: o pacote se chama `aerographene-<AERO_VERSION>-<tag>-<sha>-x86_64_linux.tar.zst` (versão do produto de `build/config.sh`, tag ungoogled, SHA do repo) e tem um symlink `aerographene` → `chrome`. Ícones e nome do binário ficam para depois; versão e strings: seção "branding" abaixo.
+
+## -O3 seletivo (opcional, desligado por padrão; ainda não medido)
+
+O quê: `AERO_O3=off|hot|wide` (input `o3` do workflow `build`, padrão `off`). `build/o3.py` troca `optimize_max` (-O2) por `optimize_speed` (-O3) em alvos GN escolhidos, a cada execução do `inner.sh`, e desfaz os originais quando o perfil muda (guarda em `src/.aero-o3/`; antes do revert da domain substitution, porque `base/BUILD.gn` está na lista dela). Nada global.
+
+- `off`: build normal.
+- `hot`: Blink `platform` e `platform/heap` (`third_party/blink/renderer/platform/BUILD.gn`, `.../heap/BUILD.gn`).
+- `wide`: `hot` + `base` (`base/BUILD.gn`, o alvo `base`).
+
+Por que esses e não o V8: o V8 já compila com -O3 no upstream (`v8/gni/v8.gni:412` aplica `optimize_speed` a todos os alvos do V8 em Linux; confirmado nas linhas de comando do `out/Default`: `-O3` em `v8_compiler`, `v8_base_without_compiler`). O mesmo vale para partition_alloc (`build_overrides/partition_alloc.gni:60`) e para as fontes `core_hot` do Blink (dom, html, layout, css: `core/BUILD.gn:484-506`). O bloco do Thorium em `v8/BUILD.gn` (~1713: `-O3` + `-Wl,-O3` em build oficial) portanto não muda o código do V8 aqui. Sobram, em -O2, os alvos de hot path JS/DOM abaixo: Blink `platform` (strings/fontes/paint/scheduler), `heap` (Oilpan, ligado ao V8 por cppgc) e `base` (task runners, sequence manager). Ficam de fora: `core` inteiro (o upstream já separa o quente em `core_hot`; trocar `core.gni` duplicaria a config em `core_hot` e é o alvo que mais incha), `wtf` e `bindings` (sem `optimize_max`; exigiria inserir config, não só trocar), codecs/mídia (já em `optimize_max`, fora do caminho do Speedometer).
+
+Com PGO: o perfil PGO (`chrome_pgo_phase=2`) marca funções frias, que o clang otimiza para tamanho, e as quentes seguem o nível do alvo. Então -O3 num alvo com PGO só vale de fato para o código quente (inlining e unroll mais agressivos onde há contagem), e o custo em tamanho tende a ser menor que o medido sem PGO. É uma hipótese, não medida. O perfil oficial cobre o Chrome upstream; as partes que os patches do ungoogled/Helium/aerographene mudam não têm contagem.
+
+Artefato: variante com sufixo no nome, `aerographene-<ver>-<tag>-<sha>-o3<perfil>-<cpu>-x86_64_linux.tar.zst` (artifact do Actions `aerographene-linux-x86_64-o3<perfil>`). Convive em `dist/` com o da build normal; o `inner.sh` só apaga tarball do mesmo cpu e mesma variante. `release.yml` não conhece essas variantes (não são para release).
+
+Como ligar e desligar (não dispara nada sozinho; só o dono, ADR 0004):
+
+```
+gh workflow run build.yml -R newcortexbr/aerographene --ref <branch> -f o3=hot    # variante hot
+gh workflow run build.yml -R newcortexbr/aerographene --ref <branch> -f o3=wide   # variante wide
+gh workflow run build.yml -R newcortexbr/aerographene --ref <branch> -f o3=off    # build normal (também é o padrão)
+```
+
+Local: `AERO_O3=hot bash build/build.sh`. Valor inválido aborta antes de qualquer trabalho.
+
+Cache e custo: o perfil não entra no hash da série (sem re-patch nem recriação da árvore). Mudar de perfil muda a linha de comando só dos objetos dos alvos listados; o ninja recompila só eles e relinka (o ThinLTO do `chrome` é refeito inteiro, é o custo dominante). O ccache indexa pela linha de comando, então alternar entre `off` e `hot` volta a acertar o cache dos objetos já compilados. Estimativa, não medida: `hot` ≈ 2 mil objetos, `wide` ≈ +1 mil; compilação de dezenas de minutos mais o link. Medir na primeira execução (`ccache -s` no log). A `out/Default` é compartilhada com a build normal; depois de uma noite `-o3*`, a próxima build normal (`o3=off`) recompila esses objetos (acerta o ccache) e restaura os `BUILD.gn`.
+
+Efeito esperado: ganho pequeno em Speedometer/JetStream (o motor JS já é -O3); aumento do binário de ordem de poucos MB. Regra do produto (AGENTS.md): nenhuma mudança piora mais de 2% a linha de base. Plano de medição: duas builds `cpu=avx2` isoladas (`o3=hot`, depois `o3=wide`), cada uma contra a v0.3.2 normal, mesmo protocolo e mesmas condições do `docs/BASELINE.md` (perfil `performance`, sem carga paralela, Comet Lake), Speedometer manual repetido (não automatizado), mais tamanho do pacote e RSS/startup do harness. Um perfil só entra se o ganho superar o ruído sem violar os 2%.
+
+Tamanho de `.text` por objeto, -O2 contra -O3 (14/10/2026, Cezanne, container `aero-c4-lin`, linha de comando do `out/Default` só lida, saída em `/tmp` do container; sem ThinLTO, CFI e PGO, porque `-c` com LTO gera bitcode; o `-march` do `out/Default` naquele momento era `ivybridge`). Só indicativo: com LTO o inlining entre módulos e o ICF mudam os números, e com PGO as funções frias não crescem.
+
+```
+objeto                              .text -O2   .text -O3
+v8 turbolev-frontend-pipeline        1354165     1348718   -0,4%
+v8 machine-lowering-phase             511710      546980   +6,9%
+v8 maglev-graph-builder              1200951     1220873   +1,7%
+v8 elements                           654267      933498  +42,7%
+v8 mark-compact                       346516      364459   +5,2%
+v8 code-stub-assembler                534016      544168   +1,9%
+blink platform paint_artifact_comp.    59590       64334   +8,0%
+blink platform widget_base             42563       44707   +5,0%
+blink heap thread_state                 6823        7179   +5,2%
+blink wtf string_impl                  45607       47240   +3,6%
+base values                            46060       49723   +8,0%
+base sequence_manager_impl             46446       52997  +14,1%
+base task_queue_impl                   59745       63360   +6,1%
+blink core local_frame_view           217811      240060  +10,2%
+```
+
+Somas da amostra: V8 +7,8% (+2,0% sem `elements`, que sozinho cresce 43%); `hot` (platform+heap, 3 objetos) +6,6%; platform+heap+wtf+base (7 objetos) +7,4%. Leitura: o crescimento típico é de 4% a 8% por objeto, com caudas (V8 `elements`, `sequence_manager_impl`). No V8 o -O3 já está ativo, então esses números dizem o que o upstream já paga, não o que este recurso acrescenta. O custo real de `hot`/`wide` no binário final não foi medido (precisa de build com ThinLTO e PGO); como `platform`+`heap`+`base` são uma fração pequena do `.text` do `chrome`, o esperado é bem menos de 1% do binário, hipótese a confirmar.
 
 ## release e pacote
 
