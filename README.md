@@ -92,6 +92,7 @@ I IMMENSELY thank projects such as Ungoogled-Chromium, Helium, Thorium and Brave
   - 🚧 native packages from the compiled tarball: `.pkg.tar.zst` (PKGBUILD), `.deb`, `.rpm` ([pacotes](docs/wiki/pacotes.md)); install/remove/`--version` tested in Arch, Ubuntu 24.04 and Fedora containers, release workflow not yet run
   - 🚧 notes page `aerographene://notes` (Obsidian-style vault) ([notas](docs/wiki/notas.md)): folder picker, lazy vault tree, safe Markdown view and a live-preview editor (atomic save with conflict warning, create/rename/delete notes, no symlink following), vault watcher, search and embedded images, one notes tab per window and command bar `o:` / `o: <term>` (term = search results in the page, bare `o:` = new tab) wired in code; unit tests pass; not tested as a real `chrome://notes` page yet; the tab title is always `o: <vault name>`
   - 🚧 terminal board `aerographene://terminal` ([terminal](docs/wiki/terminal.md)): pannable and zoomable board of draggable windows with a persisted layout, each an xterm.js wired to a local shell (pty in the browser process, restricted to that page); tab title `t: workspace N`, opened in a new tab from the command bar with `t:` or `t: <command>` (the command is typed into the first terminal, never put in the URL); every terminal starts with a fastfetch-style summary with the cat; sidebar of open terminals; `o:` alone also opens a new notes tab; unit tests pass; not tested in the browser yet, security review pending
+  - 🚧 Ctrl+T opens the command bar centered in the window instead of an empty tab; Enter opens a new tab, Esc or a click outside closes it ([command bar](docs/wiki/command-bar.md)); compiled, not tested in the browser yet
   - ⬜ Google Sync with own API keys ([ADR 0006](docs/adr/0006-google-sync-com-chaves-proprias.md))
 
 ## docs
@@ -106,6 +107,8 @@ the wiki lives in [`docs/wiki/`](docs/wiki/), in pt-BR.
 - [terminal](docs/wiki/terminal.md): the terminal board (`aerographene://terminal`), the pty session and its security rules. Ends with a summary for agents.
 
 - [windows](docs/wiki/windows.md): cross-compiling the Windows 10/11 build on the Linux runner, what works, what the source tarball lacks. Ends with a summary for agents.
+
+- [command bar](docs/wiki/command-bar.md): how the command bar opens (URL click, Ctrl+L, Ctrl+T centered in the window), what Enter/Esc do. Ends with a summary for agents.
 
 - [pacotes](docs/wiki/pacotes.md): release assets (`tar.zst`, `pkg.tar.zst`, `deb`, `rpm`, per CPU target), how to install and remove, what gets installed, how the packages are built. Ends with a summary for agents.
 

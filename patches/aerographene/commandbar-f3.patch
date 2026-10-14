@@ -1,0 +1,207 @@
+aerographene: Ctrl+T abre a command bar centrada na janela (F3).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: Ctrl+T vira IDC_AERO_COMMAND_BAR (menu Nova aba e botão + seguem
+em IDC_NEW_TAB): foca a omnibox vazia e o popup (command bar) flutua com 640 px
+no centro da janela; Enter abre aba nova; Esc, clique fora ou blur fecham sem
+aba. t:/o: continuam. Depende de: aerographene/menus-command-bar.patch,
+aerographene/terminal-c6.patch, aerographene/terminal-c6b.patch.
+
+--- a/chrome/app/chrome_command_ids.h
++++ b/chrome/app/chrome_command_ids.h
+@@ -110,6 +110,8 @@
+ #define IDC_WEB_APP_SETTINGS            34073
+ #define IDC_WEB_APP_MENU_APP_INFO       34074
+ #define IDC_WEB_APP_UPGRADE_DIALOG      34075
++// aerographene (F3): Ctrl+T opens the centered command bar.
++#define IDC_AERO_COMMAND_BAR            34076
+ 
+ // Helium commands
+ #define IDC_COPY_OR_INSPECT_SHORTCUT    34080
+--- a/chrome/browser/ui/accelerator_table.cc
++++ b/chrome/browser/ui/accelerator_table.cc
+@@ -217,7 +217,9 @@
+ #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
+     {ui::VKEY_N, ui::EF_SHIFT_DOWN | ui::EF_PLATFORM_ACCELERATOR,
+      IDC_NEW_INCOGNITO_WINDOW},
+-    {ui::VKEY_T, ui::EF_PLATFORM_ACCELERATOR, IDC_NEW_TAB},
++    // aerographene (F3): Ctrl+T opens the centered command bar; the menu
++    // item and the + button keep IDC_NEW_TAB.
++    {ui::VKEY_T, ui::EF_PLATFORM_ACCELERATOR, IDC_AERO_COMMAND_BAR},
+     {ui::VKEY_N, ui::EF_PLATFORM_ACCELERATOR, IDC_NEW_WINDOW},
+     {ui::VKEY_T, ui::EF_SHIFT_DOWN | ui::EF_PLATFORM_ACCELERATOR,
+      IDC_RESTORE_TAB},
+--- a/chrome/browser/ui/browser_command_controller.cc
++++ b/chrome/browser/ui/browser_command_controller.cc
+@@ -71,8 +71,11 @@
+ #include "chrome/browser/ui/fullscreen/browser_window_fullscreen_controller.h"
+ #include "chrome/browser/ui/helium/helium_layout_state_controller.h"
+ #include "chrome/browser/ui/lens/lens_overlay_controller.h"
++#include "chrome/browser/ui/location_bar/location_bar.h"
+ #include "chrome/browser/ui/managed_ui.h"
+ #include "chrome/browser/ui/navigator/browser_navigator.h"
++#include "chrome/browser/ui/omnibox/omnibox_popup_view.h"
++#include "chrome/browser/ui/omnibox/omnibox_view.h"
+ #include "chrome/browser/ui/page_info/page_info_dialog.h"
+ #include "chrome/browser/ui/passwords/ui_utils.h"
+ #include "chrome/browser/ui/profiles/profile_picker.h"
+@@ -771,6 +774,24 @@
+       NewTabToRight(browser_);
+       break;
+     }
++    case IDC_AERO_COMMAND_BAR: {
++      // aerographene (F3): focus the omnibox empty and float its popup in the
++      // middle of the window; Enter opens a new tab, Esc or a click outside
++      // closes it without one (OmniboxPopupCloser, ChromeOmniboxClient).
++      LocationBar* location_bar = window()->GetLocationBar();
++      if (!window()->IsLocationBarVisible() || !location_bar ||
++          !location_bar->GetOmniboxView()) {
++        NewTab(browser_, NewTabTypes::kNewTabCommand);
++        break;
++      }
++      FocusLocationBar(browser_);
++      location_bar->set_aero_command_bar(true);
++      location_bar->GetOmniboxView()->SetUserText(std::u16string());
++      if (auto* popup_view = location_bar->GetOmniboxPopupView()) {
++        popup_view->UpdatePopupAppearance();
++      }
++      break;
++    }
+     case IDC_CLOSE_TAB:
+       base::RecordAction(base::UserMetricsAction("CloseTabByKey"));
+       CloseTab(browser_);
+@@ -1819,6 +1840,7 @@
+   // Window management commands
+   command_updater_->UpdateCommandEnabled(IDC_CLOSE_WINDOW, true);
+   command_updater_->UpdateCommandEnabled(IDC_NEW_TAB, true);
++  command_updater_->UpdateCommandEnabled(IDC_AERO_COMMAND_BAR, true);
+   command_updater_->UpdateCommandEnabled(IDC_CLOSE_TAB, true);
+   command_updater_->UpdateCommandEnabled(
+       IDC_DUPLICATE_TAB,
+--- a/chrome/browser/ui/location_bar/location_bar.h
++++ b/chrome/browser/ui/location_bar/location_bar.h
+@@ -79,6 +79,11 @@
+     navigation_params_ = navigation_params;
+   }
+ 
++  // aerographene (F3): true while the omnibox popup is the centered command
++  // bar opened by Ctrl+T (IDC_AERO_COMMAND_BAR).
++  bool aero_command_bar() const { return aero_command_bar_; }
++  void set_aero_command_bar(bool value) { aero_command_bar_ = value; }
++
+   // Focuses the location bar. User-initiated focuses (like pressing Ctrl+L)
+   // should have |is_user_initiated| set to true. In those cases, we want to
+   // take some extra steps, like selecting everything and maybe uneliding.
+@@ -243,6 +248,7 @@
+ 
+  private:
+   NavigationParams navigation_params_;
++  bool aero_command_bar_ = false;
+   const raw_ptr<CommandUpdater, DanglingUntriaged> command_updater_;
+   base::ObserverList<Observer> observers_;
+   base::WeakPtrFactory<LocationBar> weak_ptr_factory_{this};
+--- a/chrome/browser/ui/omnibox/chrome_omnibox_client.cc
++++ b/chrome/browser/ui/omnibox/chrome_omnibox_client.cc
+@@ -75,6 +75,7 @@
+ #include "chrome/browser/ui/navigator/browser_navigator_params.h"
+ #include "chrome/browser/ui/omnibox/chrome_omnibox_navigation_observer.h"
+ #include "chrome/browser/ui/omnibox/omnibox_next_features.h"
++#include "chrome/browser/ui/omnibox/omnibox_popup_view.h"
+ #include "chrome/browser/ui/omnibox/omnibox_tab_helper.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "chrome/browser/ui/views/omnibox/omnibox_popup_closer.h"
+@@ -987,6 +988,17 @@
+       disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
+     }
+   }
++  // aerographene (F3): what is accepted from the Ctrl+T command bar opens in
++  // a new tab; the mode ends here.
++  if (location_bar_->aero_command_bar()) {
++    location_bar_->set_aero_command_bar(false);
++    if (disposition == WindowOpenDisposition::CURRENT_TAB) {
++      disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
++    }
++    if (auto* popup_view = location_bar_->GetOmniboxPopupView()) {
++      popup_view->UpdatePopupAppearance();
++    }
++  }
+ 
+   std::string extra_headers;
+   for (const auto& header : match.extra_headers) {
+--- a/chrome/browser/ui/views/omnibox/omnibox_popup_closer.cc
++++ b/chrome/browser/ui/views/omnibox/omnibox_popup_closer.cc
+@@ -10,6 +10,8 @@
+ #include "chrome/browser/ui/omnibox/omnibox_controller.h"
+ #include "chrome/browser/ui/omnibox/omnibox_popup_state_manager.h"
+ #include "chrome/browser/ui/omnibox/omnibox_popup_view.h"
++#include "chrome/browser/ui/omnibox/omnibox_view.h"
++#include "content/public/browser/web_contents.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "chrome/browser/ui/views/omnibox/omnibox_popup_presenter_base.h"
+ 
+@@ -83,9 +85,31 @@
+       }
+     }
+   }
++  // aerographene (F3): Esc, a click outside or blur end the Ctrl+T command
++  // bar without a new tab: drop the typed text and, for Esc, give the focus
++  // back to the page. kRevertAll keeps the mode (OpenMatch reverts before
++  // OnAutocompleteAccept reads it).
++  const bool aero_command_bar_closed =
++      location_bar->aero_command_bar() && reason != PopupCloseReason::kRevertAll;
++  if (aero_command_bar_closed) {
++    location_bar->set_aero_command_bar(false);
++  }
+   // Clearing the autocomplete results closes the popup.
+   location_bar->GetOmniboxController()->StopAutocomplete(
+       /*clear_result=*/true);
++  if (aero_command_bar_closed) {
++    if (auto* popup_view = location_bar->GetOmniboxPopupView()) {
++      popup_view->UpdatePopupAppearance();
++    }
++    if (auto* omnibox_view = location_bar->GetOmniboxView()) {
++      omnibox_view->RevertAll();
++    }
++    if (reason == PopupCloseReason::kEscapeKeyPressed) {
++      if (auto* contents = location_bar->GetWebContents()) {
++        contents->Focus();
++      }
++    }
++  }
+   // Reset focus ring for the AIM button if it was set.
+   if (auto* omnibox_view = location_bar->GetOmniboxView()) {
+     omnibox_view->ApplyFocusRingToAimButton(false);
+--- a/chrome/browser/ui/views/omnibox/omnibox_popup_view_views.cc
++++ b/chrome/browser/ui/views/omnibox/omnibox_popup_view_views.cc
+@@ -351,7 +351,8 @@
+   const bool should_be_open =
+       controller()->popup_state_manager()->popup_state() !=
+           OmniboxPopupState::kAim &&
+-      !autocomplete_controller->result().empty() &&
++      (!autocomplete_controller->result().empty() ||
++       location_bar_view_->aero_command_bar()) &&
+       !omnibox_view_->IsImeShowingPopup();
+   const bool was_open = !!widget_;
+ 
+@@ -773,6 +774,21 @@
+     gfx::Rect panel(
+         bar_bounds.CenterPoint().x() - panel_width / 2, bar_bounds.bottom() + gap,
+         panel_width, rows_height ? rows_height + 2 * kAeroPanelPadding : 0);
++    // aerographene (F3): Ctrl+T command bar, 640px, centered in the window
++    // a quarter down; stays open (one empty row tall) while nothing matches.
++    if (location_bar_view_->aero_command_bar()) {
++      constexpr int kAeroCenteredWidth = 640;
++      constexpr int kAeroEmptyRowsHeight = 32;
++      const gfx::Rect window =
++          location_bar_view_->GetWidget()->GetWindowBoundsInScreen();
++      const int width = std::min(kAeroCenteredWidth, window.width() - 16);
++      panel = gfx::Rect(
++          window.CenterPoint().x() - width / 2,
++          std::max(bar_bounds.bottom() + gap, window.y() + window.height() / 4),
++          width,
++          (rows_height ? rows_height : kAeroEmptyRowsHeight) +
++              2 * kAeroPanelPadding);
++    }
+     panel.Inset(-shadow_insets);
+     return panel;
+   }
