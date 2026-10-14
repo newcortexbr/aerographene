@@ -4,7 +4,9 @@
 #   curl -fsSL https://newcortexbr.github.io/aerographene/install.sh | bash
 # options (env): AERO_VERSION=v0.3.0  AERO_CPU=avx2|avx1  AERO_FORMAT=arch|debian|fedora|linux
 set -euo pipefail
-
+# everything runs inside main so a piped script is fully read before anything
+# executes; package managers read answers from the terminal, not from the pipe.
+main() {
 REPO="newcortexbr/aerographene"
 say() { printf '\033[1;34m::\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -55,10 +57,11 @@ curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS"
 say "checksum ok"
 
 sudo_() { if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo "$@"; fi; }
+if { : </dev/tty; } 2>/dev/null; then in=/dev/tty; yes=(); else in=/dev/null; yes=(--noconfirm); fi
 case "$fmt" in
-  arch)   sudo_ pacman -U --needed "$tmp/$asset" ;;
-  debian) sudo_ apt-get install -y "$tmp/$asset" ;;
-  fedora) sudo_ dnf install -y "$tmp/$asset" ;;
+  arch)   sudo_ pacman -U --needed "${yes[@]}" "$tmp/$asset" <"$in" ;;
+  debian) sudo_ apt-get install -y "$tmp/$asset" <"$in" ;;
+  fedora) sudo_ dnf install -y "$tmp/$asset" <"$in" ;;
   linux)
     command -v zstd >/dev/null || die "zstd is required for the tarball."
     dest="${XDG_DATA_HOME:-$HOME/.local/share}/aerographene"
@@ -68,3 +71,5 @@ case "$fmt" in
     say "installed to $dest; run: aerographene" ;;
 esac
 say "done."
+}
+main "$@"
