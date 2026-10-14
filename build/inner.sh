@@ -15,7 +15,7 @@ AERO_PATCHES=/aero/patches
 # é aplicado/desfeito a cada execução, só sobre BUILD.gn/.gni de alvos escolhidos.
 AERO_O3="${AERO_O3:-off}"
 case "${AERO_O3}" in
-    ""|0|off) AERO_O3=off; O3_TAG="" ;;
+    ""|0|off|false) AERO_O3=off; O3_TAG="" ;;
     hot|wide) O3_TAG="-o3${AERO_O3}" ;;
     *) echo "erro: AERO_O3 inválido: ${AERO_O3} (off|hot|wide)" >&2; exit 1 ;;
 esac
