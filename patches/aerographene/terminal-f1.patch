@@ -1,0 +1,94 @@
+--- a/chrome/browser/resources/aero_terminal/terminal.css
++++ b/chrome/browser/resources/aero_terminal/terminal.css
+@@ -88,6 +88,25 @@
+   touch-action: none;
+   width: 14px;
+ }
++/* F1: edge handles; the corner one stays on top. */
++.win-resize-r {
++  bottom: 14px;
++  cursor: ew-resize;
++  position: absolute;
++  right: -3px;
++  top: 24px;
++  touch-action: none;
++  width: 7px;
++}
++.win-resize-b {
++  bottom: -3px;
++  cursor: ns-resize;
++  height: 7px;
++  left: 0;
++  position: absolute;
++  right: 14px;
++  touch-action: none;
++}
+ /* Workspace corners (C6): sidebar toggle and new terminal. */
+ .corner {
+   background: var(--panel);
+--- a/chrome/browser/resources/aero_terminal/terminal.html
++++ b/chrome/browser/resources/aero_terminal/terminal.html
+@@ -25,6 +25,8 @@
+       <button class="win-close" type="button" aria-label="fechar">×</button>
+     </header>
+     <div class="win-body"></div>
++    <div class="win-resize-r" aria-hidden="true"></div>
++    <div class="win-resize-b" aria-hidden="true"></div>
+     <div class="win-resize" aria-hidden="true"></div>
+   </section>
+ </template>
+--- a/chrome/browser/resources/aero_terminal/terminal.js
++++ b/chrome/browser/resources/aero_terminal/terminal.js
+@@ -83,6 +83,7 @@
+ 
+ const MIN_W = 220;
+ const MIN_H = 120;
++const MAX_SIZE = 4000;
+ const MAX_WINDOWS = 16;  // TerminalHost::kMaxSessions
+ const MIN_ZOOM = 0.25;
+ const MAX_ZOOM = 2;
+@@ -184,8 +185,8 @@
+       wins: l.wins.slice(0, MAX_WINDOWS).map((w) => ({
+         x: num(w?.x, -R, R, 24),
+         y: num(w?.y, -R, R, 24),
+-        w: num(w?.w, MIN_W, 4000, 520),
+-        h: num(w?.h, MIN_H, 4000, 300),
++        w: num(w?.w, MIN_W, MAX_SIZE, 520),
++        h: num(w?.h, MIN_H, MAX_SIZE, 300),
+       })),
+     };
+   } catch (e) {
+@@ -432,14 +433,25 @@
+     box.y = Math.round(start.y + dy / view.k);
+     apply();
+   }, scheduleSave);
+-  track(win.querySelector('.win-resize'), () => {
+-    start = {...box};
+-    focusWin(win);
+-  }, (dx, dy) => {
+-    box.w = Math.round(clamp(start.w + dx / view.k, MIN_W, 4000));
+-    box.h = Math.round(clamp(start.h + dy / view.k, MIN_H, 4000));
+-    apply();
+-  }, scheduleSave);
++  // F1: corner, right edge and bottom edge. Deltas are screen pixels, so
++  // dividing by the zoom keeps the pointer on the handle at any zoom.
++  const resizer = (sel, growW, growH) => {
++    track(win.querySelector(sel), () => {
++      start = {...box};
++      focusWin(win);
++    }, (dx, dy) => {
++      if (growW) {
++        box.w = Math.round(clamp(start.w + dx / view.k, MIN_W, MAX_SIZE));
++      }
++      if (growH) {
++        box.h = Math.round(clamp(start.h + dy / view.k, MIN_H, MAX_SIZE));
++      }
++      apply();
++    }, scheduleSave);
++  };
++  resizer('.win-resize', true, true);
++  resizer('.win-resize-r', true, false);
++  resizer('.win-resize-b', false, true);
+   win.addEventListener('pointerdown', () => focusWin(win));
+   win.querySelector('.win-close').addEventListener('click', () => {
+     if (sessionId !== null) {

@@ -93,6 +93,52 @@ try {
   body.dispatchEvent(new PointerEvent('pointermove', {bubbles: true, clientX: 400, clientY: 300, pointerId: 2}));
   body.dispatchEvent(new PointerEvent('pointerup', {bubbles: true, pointerId: 2}));
   check('conteudo nao arrasta', wins[0].style.left === left0);
+  // F1: redimensionar pela borda direita, inferior e canto; respeita o zoom
+  {
+    const win = wins[0];
+    const drag = (sel, dx, dy, pid) => {
+      const h = win.querySelector(sel);
+      const r = h.getBoundingClientRect();
+      const x = r.left + r.width / 2, y = r.top + r.height / 2;
+      // ponteiro sintetico nao tem captura real: simula so o estado
+      const cap = new Set();
+      h.setPointerCapture = (id) => cap.add(id);
+      h.releasePointerCapture = (id) => cap.delete(id);
+      h.hasPointerCapture = (id) => cap.has(id);
+      h.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true, button: 0, clientX: x, clientY: y, pointerId: pid}));
+      h.dispatchEvent(new PointerEvent('pointermove', {bubbles: true, clientX: x + dx, clientY: y + dy, pointerId: pid}));
+      h.dispatchEvent(new PointerEvent('pointerup', {bubbles: true, pointerId: pid}));
+    };
+    check('tres alcas de redimensionar', !!win.querySelector('.win-resize-r') && !!win.querySelector('.win-resize-b') && !!win.querySelector('.win-resize'));
+    const w0 = parseFloat(win.style.width), h0 = parseFloat(win.style.height);
+    const rows0 = calls.filter((c) => c[0] === 'resize').length;
+    drag('.win-resize-r', 100, 50, 11);
+    await sleep(60);
+    check('borda direita: so largura', parseFloat(win.style.width) === w0 + 100 && parseFloat(win.style.height) === h0, `${win.style.width} ${win.style.height}`);
+    drag('.win-resize-b', 50, 60, 12);
+    await sleep(60);
+    check('borda inferior: so altura', parseFloat(win.style.width) === w0 + 100 && parseFloat(win.style.height) === h0 + 60);
+    drag('.win-resize', 10, 10, 13);
+    await sleep(60);
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    await sleep(60);
+    check('canto: largura e altura', parseFloat(win.style.width) === w0 + 110 && parseFloat(win.style.height) === h0 + 70);
+    check('xterm refaz o fit e o backend recebe resize', calls.filter((c) => c[0] === 'resize').length > rows0 && calls.filter((c) => c[0] === 'resize').pop()[1] === 7, JSON.stringify(calls.filter((c) => c[0] === 'resize')));
+    drag('.win-resize', -5000, -5000, 14);
+    await sleep(30);
+    check('tamanho minimo', parseFloat(win.style.width) === 220 && parseFloat(win.style.height) === 120, `${win.style.width} ${win.style.height}`);
+    // com zoom 2x, 100 px de tela = 50 unidades
+    board.dispatchEvent(new WheelEvent('wheel', {bubbles: true, cancelable: true, ctrlKey: true, deltaY: -Math.log(2) / 0.002, clientX: 10, clientY: 10}));
+    await sleep(30);
+    const wz = parseFloat(win.style.width);
+    drag('.win-resize-r', 100, 0, 15);
+    await sleep(30);
+    const dz = parseFloat(win.style.width) - wz;
+    check('respeita o zoom', Math.abs(dz - 50) <= 1, String(dz));
+    await sleep(700);
+    const saved = JSON.parse(localStorage.getItem([...Array(localStorage.length).keys()].map((i) => localStorage.key(i)).find((k) => k.startsWith('aero-terminal-layout-'))));
+    check('tamanho salvo no layout', saved.wins.some((w) => w.w === parseFloat(win.style.width) && w.h === 120), JSON.stringify(saved.wins));
+  }
   // fechar pelo x
   wins[1].querySelector('.win-close').click(); await sleep(30);
   check('x fecha e manda close', $$('.win').length === 1 && calls.some((c) => c[0] === 'close' && c[1] === 8));
