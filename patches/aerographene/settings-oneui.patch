@@ -1,0 +1,334 @@
+aerographene: configurações no estilo One UI, só aparência (v0.3).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/settings-f5.patch (os blocos desta camada vêm depois
+dos do f5 e os sobrepõem), aerographene/webui-theme-shape.patch (cr_button,
+cr_toggle, md_select e busca da toolbar já consomem --aero-radius).
+Só CSS de recursos (settings e cr_elements); sem TS, template, string, asset
+nem BUILD.gn. Mesmo conteúdo, seções, opções, ordem e textos.
+Mecanismo: settings_vars.css define variáveis --oneui-* (só existem em
+chrome://settings); os cr_elements as consomem com o valor anterior como
+fallback, então history, extensões etc. não mudam. Superfícies (card, campo,
+divisor) saem por color-mix dos tokens do tema (--cr-primary-text-color,
+--color-settings-webui-page-background): claro e escuro seguem o navegador.
+--cr-card-* é redefinido em html:not(#a):not(#b), que vence o bloco
+html:not(#z) do colors.css (raio e sombra do tema), então todos os cards das
+páginas de settings ficam com 28px de raio e sem sombra.
+Aparência: cards arredondados, linhas de 56px, toggle ~52x30 (cr_toggle com
+zoom 1.8), select e cr-button em pílula sem borda, campo de busca em pílula,
+rótulo de seção cinza e pequeno (sem caixa alta/mono), lateral com item
+arredondado e ícone num disco colorido (CSS, cores fixas por id, glifo
+branco). Customise profile: campo de nome preenchido e arredondado, cores do
+tema e avatares em quadrados arredondados (formas por CSS; os avatares
+continuam as imagens upstream, glifos exigiriam assets novos).
+
+--- a/chrome/browser/resources/settings/people_page/manage_profile.css
++++ b/chrome/browser/resources/settings/people_page/manage_profile.css
+@@ -28,7 +28,16 @@
+   padding-top: 4px;
+ }
+ 
++/* aerographene (settings-oneui): filled rounded field, no underline. */
+ #nameInput {
++  --cr-input-background-color: var(--oneui-field);
++  --cr-input-border-bottom: none;
++  --cr-input-border-radius: 18px;
++  --cr-input-font-size: 16px;
++  --cr-input-padding-bottom: 13px;
++  --cr-input-padding-end: 18px;
++  --cr-input-padding-start: 18px;
++  --cr-input-padding-top: 13px;
+   width: 288px;
+ }
+ 
+--- a/chrome/browser/resources/settings/settings_menu/settings_menu.html
++++ b/chrome/browser/resources/settings/settings_menu/settings_menu.html
+@@ -66,6 +66,58 @@
+         outline-offset: -1px;
+       }
+ 
++      /* aerographene (settings-oneui): rounded items; each icon sits in a
++         colored disc drawn by CSS (no asset). Overrides settings-f5. */
++      .cr-nav-menu-item {
++        border-inline-start-color: transparent;
++        border-radius: var(--oneui-pill-radius, 20px);
++        font-family: inherit;
++        font-size: 14px;
++        font-weight: 400;
++        margin-inline: 8px;
++        min-height: 46px;
++        padding-block: 8px;
++        padding-inline: 12px;
++      }
++
++      .cr-nav-menu-item cr-icon {
++        --iron-icon-fill-color: #fff;
++        --iron-icon-height: 16px;
++        --iron-icon-width: 16px;
++        background: var(--oneui-disc, #6a7a92);
++        border-radius: 50%;
++        box-sizing: content-box;
++        margin-inline-end: 14px;
++        padding: 7px;
++      }
++
++      .cr-nav-menu-item:hover {
++        background: color-mix(in srgb, var(--cr-primary-text-color) 7%,
++            transparent);
++      }
++
++      .cr-nav-menu-item[selected] {
++        background: var(--oneui-field, var(--cr-hover-background-color));
++        border-inline-start-color: transparent;
++      }
++
++      #people { --oneui-disc: #3b82f6; }
++      #autofill { --oneui-disc: #8b6fe0; }
++      #privacy { --oneui-disc: #2fae66; }
++      #performance { --oneui-disc: #e08a2f; }
++      #ai { --oneui-disc: #c04fbf; }
++      #appearance { --oneui-disc: #d9559a; }
++      #search { --oneui-disc: #3aa6b8; }
++      #defaultBrowser { --oneui-disc: #6a7a92; }
++      #onStartup { --oneui-disc: #c9564a; }
++      #languages { --oneui-disc: #4f8fd8; }
++      #downloads { --oneui-disc: #4a9a7a; }
++      #accessibility { --oneui-disc: #8a6fd0; }
++      #system { --oneui-disc: #7a8696; }
++      #reset { --oneui-disc: #b86b55; }
++      #extensionsLink { --oneui-disc: #7a86d6; }
++      #about-menu { --oneui-disc: #5d6b80; }
++
+       @media (prefers-color-scheme: dark) {
+         #menu {
+           color: var(--cr-primary-text-color);
+--- a/chrome/browser/resources/settings/settings_page/settings_section.css
++++ b/chrome/browser/resources/settings/settings_page/settings_section.css
+@@ -33,6 +33,17 @@
+   text-transform: uppercase;
+ }
+ 
++/* aerographene (settings-oneui): small gray label above a rounded card. */
++#header .title {
++  color: var(--cr-secondary-text-color);
++  font-family: inherit;
++  font-size: 13px;
++  letter-spacing: 0;
++  margin-bottom: 4px;
++  padding-inline-start: 20px;
++  text-transform: none;
++}
++
+ #feedback {
+   margin-top: var(--cr-section-vertical-margin);
+ }
+@@ -42,6 +53,7 @@
+   border-radius: var(--cr-card-border-radius);
+   box-shadow: var(--cr-card-shadow);
+   flex: 1;
++  font-size: 15px;
+   overflow: hidden;
+ }
+ 
+--- a/chrome/browser/resources/settings/settings_shared_lit.css
++++ b/chrome/browser/resources/settings/settings_shared_lit.css
+@@ -34,6 +34,15 @@
+   text-transform: uppercase;
+ }
+ 
++/* aerographene (settings-oneui): sub-headers as small gray labels. */
++h2 {
++  font-family: inherit;
++  font-size: 13px;
++  letter-spacing: 0;
++  padding-top: 12px;
++  text-transform: none;
++}
++
+ cr-icon,
+ iron-icon {
+   flex-shrink: 0;  /* Prevent distortion of icons in cramped UI. */
+--- a/chrome/browser/resources/settings/settings_vars.css
++++ b/chrome/browser/resources/settings/settings_vars.css
+@@ -32,6 +32,50 @@
+   --cr-section-vertical-margin: 14px;
+ }
+ 
++html {
++  /* aerographene (settings-oneui): One UI look. Surfaces come from the
++   * theme tokens, so light and dark follow the browser theme. */
++  --oneui-page: var(--color-settings-webui-page-background,
++      var(--color-webui-page-background, Canvas));
++  --oneui-card: color-mix(in srgb, var(--cr-primary-text-color) 7%,
++      var(--oneui-page));
++  --oneui-field: color-mix(in srgb, var(--cr-primary-text-color) 13%,
++      var(--oneui-page));
++  --oneui-line: color-mix(in srgb, var(--cr-primary-text-color) 9%,
++      transparent);
++  --oneui-card-radius: 28px;
++  --oneui-pill-radius: 20px;
++  --oneui-toggle-zoom: 1.8;
++  --oneui-toggle-bar-width: 29px;
++  --oneui-toggle-knob: 12px;
++  --oneui-select-bg: var(--oneui-field);
++  --oneui-select-border: none;
++  --oneui-select-height: 40px;
++  --oneui-select-font-size: 14px;
++  --oneui-select-pad: 18px;
++  --oneui-button-bg: var(--oneui-field);
++  --oneui-swatch-radius: 18px;
++  --oneui-avatar-radius: 24px;
++  --cr-button-border: none;
++  --cr-button-height: 38px;
++  --cr-icon-button-hover-background-color: var(--oneui-field);
++  --cr-section-min-height: 56px;
++  --cr-section-two-line-min-height: 68px;
++  --cr-section-padding: 22px;
++  --cr-section-vertical-padding: 12px;
++  --cr-section-vertical-margin: 20px;
++  --cr-section-indent-width: 26px;
++  --cr-separator-color: var(--oneui-line);
++  --cr-toolbar-search-field-background: var(--oneui-card);
++}
++
++/* The theme block of colors.css is html:not(#z); two :not() win over it. */
++html:not(#a):not(#b) {
++  --cr-card-background-color: var(--oneui-card);
++  --cr-card-border-radius: var(--oneui-card-radius);
++  --cr-card-shadow: none;
++}
++
+ @media (prefers-color-scheme: dark) {
+   html {
+     --iron-icon-fill-color: var(--google-grey-500);
+--- a/ui/webui/resources/cr_components/theme_color_picker/theme_color.css
++++ b/ui/webui/resources/cr_components/theme_color_picker/theme_color.css
+@@ -8,7 +8,7 @@
+  * #css_wrapper_metadata_end */
+ 
+ :host {
+-  --cr-theme-color-border-radius: 50%;
++  --cr-theme-color-border-radius: var(--oneui-swatch-radius, 50%);
+   box-sizing: border-box;
+   cursor: pointer;
+   display: block;
+--- a/ui/webui/resources/cr_elements/cr_button/cr_button.css
++++ b/ui/webui/resources/cr_elements/cr_button/cr_button.css
+@@ -11,7 +11,7 @@
+  * #css_wrapper_metadata_end */
+ 
+ :host {
+-  --cr-button-background-color: transparent;
++  --cr-button-background-color: var(--oneui-button-bg, transparent);
+   --cr-button-border-color:  var(--color-button-border,
+       var(--cr-fallback-color-tonal-outline));
+   --cr-button-text-color: var(--color-button-foreground,
+@@ -40,7 +40,7 @@
+   user-select: none;
+   -webkit-tap-highlight-color: transparent;
+   border: var(--cr-button-border, 1px solid var(--cr-button-border-color));
+-  border-radius: var(--aero-radius, 100px);
++  border-radius: var(--oneui-pill-radius, var(--aero-radius, 100px));
+   background: var(--cr-button-background-color);
+   color: var(--cr-button-text-color);
+   font-weight: 500;
+--- a/ui/webui/resources/cr_elements/cr_profile_avatar_selector/cr_profile_avatar_selector.css
++++ b/ui/webui/resources/cr_elements/cr_profile_avatar_selector/cr_profile_avatar_selector.css
+@@ -38,7 +38,7 @@
+   background-position: center;
+   background-repeat: no-repeat;
+   border: 1px solid var(--google-grey-300);
+-  border-radius: 100%;
++  border-radius: var(--oneui-avatar-radius, 100%);
+   display: flex;
+   height: var(--avatar-size);
+   min-width: 0;
+--- a/ui/webui/resources/cr_elements/cr_toggle/cr_toggle.css
++++ b/ui/webui/resources/cr_elements/cr_toggle/cr_toggle.css
+@@ -28,8 +28,8 @@
+       --cr-active-neutral-on-subtle-background-color);
+   --cr-toggle-bar-border-color: var(--cr-toggle-unchecked-button-color);
+   --cr-toggle-bar-border: 1px solid var(--cr-toggle-bar-border-color);
+-  --cr-toggle-bar-width: 26px;
+-  --cr-toggle-knob-diameter: 8px;
++  --cr-toggle-bar-width: var(--oneui-toggle-bar-width, 26px);
++  --cr-toggle-knob-diameter: var(--oneui-toggle-knob, 8px);
+   -webkit-tap-highlight-color: transparent;
+   cursor: pointer;
+   display: block;
+@@ -39,6 +39,7 @@
+   outline: none;
+   position: relative;
+   width: fit-content;
++  zoom: var(--oneui-toggle-zoom, 1);
+ }
+ 
+ @media (forced-colors: active) {
+@@ -53,16 +54,16 @@
+ }
+ 
+ :host(:active) {
+-  --cr-toggle-knob-diameter: 10px;
++  --cr-toggle-knob-diameter: var(--oneui-toggle-knob, 10px);
+ }
+ 
+ :host([checked]) {
+   --cr-toggle-bar-border-color: var(--cr-toggle-checked-bar-color);
+-  --cr-toggle-knob-diameter: 12px;
++  --cr-toggle-knob-diameter: var(--oneui-toggle-knob, 12px);
+ }
+ 
+ :host([checked]:active) {
+-  --cr-toggle-knob-diameter: 14px;
++  --cr-toggle-knob-diameter: var(--oneui-toggle-knob, 14px);
+ }
+ 
+ :host([disabled]) {
+--- a/ui/webui/resources/cr_elements/cr_toolbar/cr_toolbar_search_field.css
++++ b/ui/webui/resources/cr_elements/cr_toolbar/cr_toolbar_search_field.css
+@@ -170,7 +170,8 @@
+   padding: 0 6px;
+   position: relative;
+   width: var(--cr-toolbar-field-width, 680px);
+-  --cr-toolbar-search-field-border-radius: var(--aero-radius, 100px);
++  --cr-toolbar-search-field-border-radius: var(--oneui-pill-radius,
++      var(--aero-radius, 100px));
+ }
+ 
+ @media (prefers-color-scheme: dark) {
+--- a/ui/webui/resources/cr_elements/md_select_lit.css
++++ b/ui/webui/resources/cr_elements/md_select_lit.css
+@@ -10,9 +10,9 @@
+ 
+ .md-select {
+   --md-arrow-width: 7px;
+-  --md-select-bg-color: transparent;
++  --md-select-bg-color: var(--oneui-select-bg, transparent);
+   --md-select-option-bg-color: white;
+-  --md-select-side-padding: 10px;
++  --md-select-side-padding: var(--oneui-select-pad, 10px);
+   --md-select-text-color: inherit;
+ 
+   -webkit-appearance: none;
+@@ -21,15 +21,16 @@
+       center no-repeat;
+   background-color: var(--md-select-bg-color);
+   background-size: var(--md-arrow-width);
+-  border: solid 1px var(--color-combobox-container-outline,
+-      var(--cr-fallback-color-neutral-outline));
+-  border-radius: var(--aero-radius, 8px);
++  border: var(--oneui-select-border, solid 1px
++      var(--color-combobox-container-outline,
++      var(--cr-fallback-color-neutral-outline)));
++  border-radius: var(--oneui-pill-radius, var(--aero-radius, 8px));
+   box-sizing: border-box;
+   color: var(--md-select-text-color);
+   cursor: pointer;
+   font-family: inherit;
+-  font-size: 12px;
+-  height: 36px;
++  font-size: var(--oneui-select-font-size, 12px);
++  height: var(--oneui-select-height, 36px);
+   max-width: 100%;
+   outline: none;
+   padding-block-end: 0;

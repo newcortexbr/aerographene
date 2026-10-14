@@ -130,6 +130,7 @@ aerographene/windows-branding.patch
 aerographene/windows-confine.patch
 aerographene/notes-f2.patch
 aerographene/settings-f5.patch
+aerographene/settings-oneui.patch
 aerographene/terminal-f1.patch
 aerographene/commandbar-f3.patch
 aerographene/commandbar-centered.patch
