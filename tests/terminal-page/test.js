@@ -109,7 +109,7 @@ try {
       h.dispatchEvent(new PointerEvent('pointermove', {bubbles: true, clientX: x + dx, clientY: y + dy, pointerId: pid}));
       h.dispatchEvent(new PointerEvent('pointerup', {bubbles: true, pointerId: pid}));
     };
-    check('tres alcas de redimensionar', !!win.querySelector('.win-resize-r') && !!win.querySelector('.win-resize-b') && !!win.querySelector('.win-resize'));
+    check('oito alcas de redimensionar', ['', '-r', '-b', '-l', '-t', '-tl', '-tr', '-bl'].every((s) => !!win.querySelector('.win-resize' + s)));
     const w0 = parseFloat(win.style.width), h0 = parseFloat(win.style.height);
     const rows0 = calls.filter((c) => c[0] === 'resize').length;
     drag('.win-resize-r', 100, 50, 11);
@@ -124,6 +124,43 @@ try {
     await sleep(60);
     check('canto: largura e altura', parseFloat(win.style.width) === w0 + 110 && parseFloat(win.style.height) === h0 + 70);
     check('xterm refaz o fit e o backend recebe resize', calls.filter((c) => c[0] === 'resize').length > rows0 && calls.filter((c) => c[0] === 'resize').pop()[1] === 7, JSON.stringify(calls.filter((c) => c[0] === 'resize')));
+    // as 5 direcoes novas: o lado oposto fica parado (x/y se movem)
+    const geo = () => ({x: parseFloat(win.style.left), y: parseFloat(win.style.top), w: parseFloat(win.style.width), h: parseFloat(win.style.height)});
+    const cases = [
+      ['-l', -40, 15, (a, b) => b.w === a.w + 40 && b.x === a.x - 40 && b.h === a.h && b.y === a.y],
+      ['-t', 15, -30, (a, b) => b.h === a.h + 30 && b.y === a.y - 30 && b.w === a.w && b.x === a.x],
+      ['-tl', -20, -10, (a, b) => b.w === a.w + 20 && b.x === a.x - 20 && b.h === a.h + 10 && b.y === a.y - 10],
+      ['-tr', 25, -10, (a, b) => b.w === a.w + 25 && b.x === a.x && b.h === a.h + 10 && b.y === a.y - 10],
+      ['-bl', -15, 20, (a, b) => b.w === a.w + 15 && b.x === a.x - 15 && b.h === a.h + 20 && b.y === a.y],
+    ];
+    let pid = 40;
+    for (const [sel, dx, dy, ok] of cases) {
+      const a = geo();
+      drag('.win-resize' + sel, dx, dy, pid++);
+      await sleep(30);
+      const b = geo();
+      check('alca ' + sel, ok(a, b), JSON.stringify([a, b]));
+    }
+    // a borda superior e uma faixa fina; a barra de titulo continua movendo
+    {
+      const hr = win.querySelector('.win-resize-t').getBoundingClientRect();
+      const hd = win.querySelector('.win-head').getBoundingClientRect();
+      const mx = hd.left + hd.width / 2;
+      check('faixa superior sobre a barra, fina', hr.height <= 8 && hr.top < hd.top + 4 && document.elementFromPoint(mx, hr.top + 1) === win.querySelector('.win-resize-t') && document.elementFromPoint(mx, hd.top + 14) === win.querySelector('.win-head'));
+      const a = geo();
+      drag('.win-head', 30, 20, pid++);
+      await sleep(30);
+      const b = geo();
+      check('barra de titulo move sem redimensionar', b.x === a.x + 30 && b.y === a.y + 20 && b.w === a.w && b.h === a.h, JSON.stringify([a, b]));
+    }
+    // minimo pela esquerda/topo: a borda direita/inferior nao anda
+    {
+      const a = geo();
+      drag('.win-resize-tl', 5000, 5000, pid++);
+      await sleep(30);
+      const b = geo();
+      check('minimo pelo canto sup-esq mantem a borda oposta', b.w === 220 && b.h === 120 && b.x + b.w === a.x + a.w && b.y + b.h === a.y + a.h, JSON.stringify([a, b]));
+    }
     drag('.win-resize', -5000, -5000, 14);
     await sleep(30);
     check('tamanho minimo', parseFloat(win.style.width) === 220 && parseFloat(win.style.height) === 120, `${win.style.width} ${win.style.height}`);
@@ -137,7 +174,7 @@ try {
     check('respeita o zoom', Math.abs(dz - 50) <= 1, String(dz));
     await sleep(700);
     const saved = JSON.parse(localStorage.getItem([...Array(localStorage.length).keys()].map((i) => localStorage.key(i)).find((k) => k.startsWith('aero-terminal-layout-'))));
-    check('tamanho salvo no layout', saved.wins.some((w) => w.w === parseFloat(win.style.width) && w.h === 120), JSON.stringify(saved.wins));
+    check('tamanho salvo no layout', saved.wins.some((w) => w.w === parseFloat(win.style.width) && w.h === parseFloat(win.style.height)), JSON.stringify(saved.wins));
   }
   // fechar pelo x
   wins[1].querySelector('.win-close').click(); await sleep(30);
