@@ -1,4 +1,4 @@
-# aerographene: patch portado sem alteração do conteúdo do diff.
+# aerographene: rebaseado sem keyboard-shortcuts; no Mac mantém o IDC_NEW_SPLIT_TAB do upstream.
 # Origem: https://github.com/imputnet/helium (tag 0.18.3, Chromium 154.0.8037.97)
 # Commit: 57a40ad82583d21787cff0500150539ce54c5960
 # Caminho original: patches/helium/ui/layout/shortcuts.patch
@@ -6,9 +6,9 @@
 #
 --- a/chrome/common/pref_names.h
 +++ b/chrome/common/pref_names.h
-@@ -912,6 +912,11 @@ inline constexpr char kPrefersDefaultScr
- inline constexpr char kCopyPageUrlShortcut[] =
-     "helium.settings.a11y.copy_page_url_shortcut";
+@@ -882,6 +882,11 @@ inline constexpr char kPageColorsBlockList[] =
+ inline constexpr char kPrefersDefaultScrollbarStyles[] =
+     "settings.a11y.prefers_default_scrollbar_styles";
  
 +// Boolean that indicates whether the user has enabled the keyboard shortcut
 +// for toggling vertical tabs in vertical layout.
@@ -20,17 +20,18 @@
  // asking the user to set up automatic updates when Keystone promotion is
 --- a/chrome/browser/ui/browser_ui_prefs.cc
 +++ b/chrome/browser/ui/browser_ui_prefs.cc
-@@ -189,6 +189,7 @@ void RegisterBrowserUserPrefs(user_prefs
+@@ -178,6 +178,8 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
+       prefs::kWebRTCDiagnosticLogCollectionAllowedForOrigins,
        base::ListValue());
  
-   registry->RegisterBooleanPref(prefs::kCopyPageUrlShortcut, true);
 +  registry->RegisterBooleanPref(prefs::kVerticalCollapseShortcut, true);
- 
++
    // We need to register the type of these preferences in order to query
    // them even though they're only typically controlled via policy.
+   registry->RegisterBooleanPref(policy::policy_prefs::kHideWebStoreIcon, false);
 --- a/chrome/app/chrome_command_ids.h
 +++ b/chrome/app/chrome_command_ids.h
-@@ -120,6 +120,8 @@
+@@ -119,6 +119,8 @@
  #define IDC_BROWSER_LAYOUT_VERTICAL_RIGHT 34085
  #define IDC_BROWSER_LAYOUT_DYNAMIC      34086
  
@@ -49,7 +50,7 @@
  #include "chrome/browser/ui/lens/lens_overlay_controller.h"
  #include "chrome/browser/ui/managed_ui.h"
  #include "chrome/browser/ui/navigator/browser_navigator.h"
-@@ -266,6 +267,12 @@ actions::ActionItem* FindAction(actions:
+@@ -265,6 +266,12 @@ actions::ActionItem* FindAction(actions::ActionId action_id,
    return actions::ActionManager::Get().FindAction(action_id, root_action_item);
  }
  
@@ -62,7 +63,7 @@
  }  // namespace
  
  ///////////////////////////////////////////////////////////////////////////////
-@@ -370,6 +377,10 @@ BrowserCommandController::BrowserCommand
+@@ -369,6 +376,10 @@ BrowserCommandController::BrowserCommandController(BrowserWindowInterface* bwi)
        base::BindRepeating(
            &BrowserCommandController::UpdateCommandsForIncognitoAvailability,
            base::Unretained(this)));
@@ -73,10 +74,10 @@
  #if BUILDFLAG(ENABLE_PRINTING)
    profile_pref_registrar_.Add(
        prefs::kPrintingEnabled,
-@@ -1484,6 +1495,21 @@ void BrowserCommandController::HandleCom
-           std::nullopt, time_stamp);
+@@ -1455,6 +1466,21 @@ void BrowserCommandController::HandleCommandWithDisposition(
+     case IDC_DUPLICATE_TARGET_TAB:
+       DuplicateKeyboardFocusedTab(browser_);
        break;
-     }
 +    case IDC_CTRL_S_SHORTCUT: {
 +      PrefService* prefs = profile()->GetPrefs();
 +      if (ShouldToggleVerticalCollapse(prefs)) {
@@ -95,7 +96,7 @@
      // Hosted App commands
      case IDC_COPY_URL:
        CopyURL(browser_, browser_->tab_strip_model()->GetActiveWebContents());
-@@ -2683,7 +2709,11 @@ void BrowserCommandController::UpdateSav
+@@ -2627,7 +2653,11 @@ void BrowserCommandController::UpdateSaveAsState() {
    }
  #endif
  
@@ -110,7 +111,7 @@
  void BrowserCommandController::UpdateReloadStopState(bool is_loading,
 --- a/chrome/browser/ui/accelerator_table.cc
 +++ b/chrome/browser/ui/accelerator_table.cc
-@@ -74,7 +74,7 @@ const AcceleratorMapping kAcceleratorMap
+@@ -74,7 +74,7 @@ const AcceleratorMapping kAcceleratorMap[] = {
      {ui::VKEY_R, ui::EF_PLATFORM_ACCELERATOR, IDC_RELOAD},
      {ui::VKEY_R, ui::EF_SHIFT_DOWN | ui::EF_PLATFORM_ACCELERATOR,
       IDC_RELOAD_BYPASSING_CACHE},
@@ -119,7 +120,7 @@
      {ui::VKEY_9, ui::EF_PLATFORM_ACCELERATOR, IDC_SELECT_LAST_TAB},
      {ui::VKEY_NUMPAD9, ui::EF_PLATFORM_ACCELERATOR, IDC_SELECT_LAST_TAB},
  #if BUILDFLAG(IS_LINUX)
-@@ -158,8 +158,6 @@ const AcceleratorMapping kAcceleratorMap
+@@ -158,8 +158,6 @@ const AcceleratorMapping kAcceleratorMap[] = {
      {ui::VKEY_F11, ui::EF_NONE, IDC_FULLSCREEN},
      {ui::VKEY_M, ui::EF_SHIFT_DOWN | ui::EF_PLATFORM_ACCELERATOR,
       IDC_SHOW_AVATAR_MENU},
@@ -130,7 +131,7 @@
  #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 --- a/chrome/browser/global_keyboard_shortcuts_mac.mm
 +++ b/chrome/browser/global_keyboard_shortcuts_mac.mm
-@@ -143,6 +143,8 @@ const std::vector<KeyboardShortcutData>&
+@@ -143,6 +143,8 @@ const std::vector<KeyboardShortcutData>& GetShortcutsNotPresentInMainMenu() {
        {true,  false, false, false, kVK_ANSI_9,            IDC_SELECT_LAST_TAB},
        {true,  false, false, false, kVK_ANSI_Keypad9,      IDC_SELECT_LAST_TAB},
  
@@ -138,10 +139,10 @@
 +
        {true,  true,  false, false, kVK_ANSI_M,            IDC_SHOW_AVATAR_MENU},
        {true,  false, false, true,  kVK_ANSI_L,            IDC_SHOW_DOWNLOADS},
-       {true,  true,  false, false, kVK_ANSI_I,            IDC_DEV_TOOLS},
+       {true,  true,  false, false, kVK_ANSI_C,            IDC_DEV_TOOLS_INSPECT},
 --- a/chrome/browser/ui/cocoa/accelerators_cocoa.mm
 +++ b/chrome/browser/ui/cocoa/accelerators_cocoa.mm
-@@ -48,7 +48,7 @@ const struct AcceleratorMapping {
+@@ -46,7 +46,7 @@ const struct AcceleratorMapping {
      {IDC_PASTE, ui::EF_COMMAND_DOWN, ui::VKEY_V},
      {IDC_PRINT, ui::EF_COMMAND_DOWN, ui::VKEY_P},
      {IDC_RESTORE_TAB, ui::EF_COMMAND_DOWN | ui::EF_SHIFT_DOWN, ui::VKEY_T},
@@ -150,19 +151,18 @@
      {IDC_SHOW_BOOKMARK_BAR, ui::EF_COMMAND_DOWN | ui::EF_SHIFT_DOWN,
       ui::VKEY_B},
      {IDC_SHOW_BOOKMARK_MANAGER, ui::EF_COMMAND_DOWN | ui::EF_ALT_DOWN,
-@@ -113,9 +113,6 @@ const struct AcceleratorMapping {
+@@ -114,8 +114,6 @@ const struct AcceleratorMapping {
       ui::VKEY_I},
  #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
      {IDC_TAB_SEARCH, ui::EF_COMMAND_DOWN | ui::EF_SHIFT_DOWN, ui::VKEY_A},
 -    {IDC_TOGGLE_VERTICAL_TABS_COLLAPSE, ui::EF_COMMAND_DOWN | ui::EF_SHIFT_DOWN,
 -     ui::VKEY_L},
--    {IDC_NEW_SPLIT_TAB, ui::EF_COMMAND_DOWN | ui::EF_ALT_DOWN, ui::VKEY_N},
+     {IDC_NEW_SPLIT_TAB, ui::EF_COMMAND_DOWN | ui::EF_ALT_DOWN, ui::VKEY_N},
  };
  
- ui::Accelerator AcceleratorForCloseWindow() {
 --- a/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
 +++ b/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
-@@ -454,6 +454,7 @@ void BrowserNativeWidgetMac::ValidateUse
+@@ -454,6 +454,7 @@ void BrowserNativeWidgetMac::ValidateUserInterfaceItem(
      case IDC_PIN_TARGET_TAB:
      case IDC_PRINT:
      case IDC_RELOAD:
@@ -172,7 +172,7 @@
      case IDC_SELECT_PREVIOUS_TAB:
 --- a/chrome/app/chrome_dll.rc
 +++ b/chrome/app/chrome_dll.rc
-@@ -84,7 +84,7 @@ BEGIN
+@@ -83,7 +83,7 @@ BEGIN
      VK_F5,          IDC_RELOAD_BYPASSING_CACHE, VIRTKEY, CONTROL
      VK_F5,          IDC_RELOAD_BYPASSING_CACHE, VIRTKEY, SHIFT
      "T",            IDC_RESTORE_TAB,            VIRTKEY, CONTROL, SHIFT
@@ -183,9 +183,9 @@
      VK_NEXT,        IDC_MOVE_TAB_NEXT,          VIRTKEY, CONTROL, SHIFT
 --- a/chrome/app/settings_strings.grdp
 +++ b/chrome/app/settings_strings.grdp
-@@ -4687,6 +4687,16 @@
-       Enable quick page link copying with Ctrl+Shift+C
-     </message>
+@@ -4464,6 +4464,16 @@
+       </message>
+     </else>
    </if>
 +  <if expr="is_macosx">
 +    <message name="IDS_SETTINGS_VERTICAL_COLLAPSE_SHORTCUT" desc="Toggle in settings that allows you to enable the keyboard shortcut that toggles vertical tabs in the Vertical layout. It's enabled by default.">
@@ -198,23 +198,23 @@
 +    </message>
 +  </if>
  
-   <!-- Experimental settings strings -->
-   <message name="IDS_SETTINGS_AI_PAGE_MAIN_TITLE" desc="This string is the title of a card that sets the context for the ‘AI innovations’ section of Chrome’s settings. Here, the user can see settings related to AI (artificial intelligence) in this section; these settings include Help me write and more. This title is before the ‘Things to consider’ subheading and bullet points. We want users to read this card and understand the considerations that apply to all Chrome’s AI features. The tone should be motivating." formatter_data="android_java">
+   <!-- Experimental settings - CPU Performance Override -->
+   <message name="IDS_SETTINGS_CPU_PERFORMANCE_OVERRIDE_TITLE" desc="Title for the CPU performance override setting.">
 --- a/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
 +++ b/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
-@@ -603,6 +603,7 @@ void AddAppearanceStrings(content::WebUI
+@@ -599,6 +599,7 @@ void AddAppearanceStrings(content::WebUIDataSource* html_source,
        {"browserLayoutCompact", IDS_SETTINGS_BROWSER_LAYOUT_COMPACT},
        {"browserLayoutVertical", IDS_SETTINGS_BROWSER_LAYOUT_VERTICAL},
        {"tabStripRightAlign", IDS_SETTINGS_TAB_STRIP_RIGHT_ALIGN},
 +      {"verticalCollapseShortcut", IDS_SETTINGS_VERTICAL_COLLAPSE_SHORTCUT},
-       {"shiftRightClickContextMenu",
-        IDS_SETTINGS_SHIFT_RIGHT_CLICK_CONTEXT_MENU},
        {"showHomeButton", IDS_SETTINGS_SHOW_HOME_BUTTON},
+       {"showBookmarksBar", IDS_SETTINGS_SHOW_BOOKMARKS_BAR},
+       {"bookmarksBar", IDS_SETTINGS_BOOKMARKS_BAR},
 --- a/chrome/browser/extensions/api/settings_private/prefs_util.cc
 +++ b/chrome/browser/extensions/api/settings_private/prefs_util.cc
-@@ -709,6 +709,8 @@ const PrefsUtil::TypedPrefMap& PrefsUtil
-       settings_api::PrefType::kBoolean;
-   (*s_allowlist)[::prefs::kCopyPageUrlShortcut] =
+@@ -676,6 +676,8 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetAllowlistedKeys() {
+ 
+   (*s_allowlist)[::prefs::kCaretBrowsingEnabled] =
        settings_api::PrefType::kBoolean;
 +  (*s_allowlist)[::prefs::kVerticalCollapseShortcut] =
 +      settings_api::PrefType::kBoolean;
@@ -223,9 +223,9 @@
    // Accounts / Users / People.
 --- a/chrome/browser/resources/settings/appearance_page/appearance_behavior_page.html
 +++ b/chrome/browser/resources/settings/appearance_page/appearance_behavior_page.html
-@@ -21,6 +21,11 @@
-       label="$i18n{copyPageUrlShortcut}">
-   </settings-toggle-button>
+@@ -1,6 +1,11 @@
+ <style include="cr-shared-style settings-shared"></style>
+ <settings-section page-title="$i18n{behaviorPageTitle}">
  
 +  <settings-toggle-button class="hr" id="verticalCollapseShortcut"
 +      pref-key="helium.settings.behavior.vertical_collapse_shortcut"

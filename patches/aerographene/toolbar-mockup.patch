@@ -38,10 +38,9 @@ runtime). Agora os dois prefs nascem false (a barra continua no menu "Mostrar
 barra de favoritos"; perfis que já a ligaram a mantêm).
 (6) Fonte do texto da URL: CONTEXT_OMNIBOX_PRIMARY pede 13 px (default) / 12 px
 (pixelized) em vez de 14.
-
 --- a/chrome/browser/ui/bookmarks/bookmark_bar_controller.cc
 +++ b/chrome/browser/ui/bookmarks/bookmark_bar_controller.cc
-@@ -267,7 +267,10 @@
+@@ -267,7 +267,10 @@ bool BookmarkBarController::ShouldShowBookmarkBar() const {
    }
  
    std::vector<tabs::TabInterface*> tabs = tab_strip_model_->GetForegroundTabs();
@@ -55,7 +54,7 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
  
 --- a/chrome/browser/ui/bookmarks/bookmark_utils.cc
 +++ b/chrome/browser/ui/bookmarks/bookmark_utils.cc
-@@ -277,7 +277,8 @@
+@@ -277,7 +277,8 @@ bool IsAppsShortcutEnabled(Profile* profile) {
    // Chrome OS uses the app list / app launcher.
    return false;
  #else
@@ -67,9 +66,9 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
  
 --- a/chrome/browser/ui/browser_ui_prefs.cc
 +++ b/chrome/browser/ui/browser_ui_prefs.cc
-@@ -129,7 +129,9 @@
- 
-   registry->RegisterBooleanPref(prefs::kShiftRightClickContextMenu, true);
+@@ -122,7 +122,9 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
+   registry->RegisterIntegerPref(prefs::kSessionRestoreInfoBarTimesShown, 0);
+ #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
  
 -  registry->RegisterBooleanPref(prefs::kHeliumRoundedFrame, true);
 +  // aerographene: the page meets the sidebar and toolbar with a 1px line, no
@@ -80,7 +79,7 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
  
 --- a/chrome/browser/ui/color/aerographene_theme_tokens.cc
 +++ b/chrome/browser/ui/color/aerographene_theme_tokens.cc
-@@ -47,7 +47,7 @@
+@@ -57,7 +57,7 @@ struct TokenOverrides {
  
  struct TokenSpec {
    const char* name;
@@ -89,7 +88,7 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
  };
  
  // Curated token -> ColorId mapping. Unused slots are 0 (kUiColorsStart, never
-@@ -92,7 +92,8 @@
+@@ -102,7 +102,8 @@ const TokenSpec kTokens[] = {
      {"tab_hover", {kColorTabBackgroundInactiveHoverFrameActive}},
      {"separator",
       {ui::kColorSeparator, ui::kColorMenuSeparator, kColorToolbarSeparator,
@@ -109,7 +108,7 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
  #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
  #include "components/omnibox/browser/omnibox_field_trial.h"
  #include "ui/base/default_style.h"
-@@ -59,6 +60,10 @@
+@@ -59,6 +60,10 @@ void ApplyCommonFontStyles(int context,
      case CONTEXT_OMNIBOX_TOOLBELT_BUTTON: {
        const bool is_touch_ui = ui::TouchUiController::Get()->touch_ui();
        int desired_font_size = is_touch_ui ? 15 : 14;
@@ -122,7 +121,7 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
                LocationBarView::GetAvailableTextHeight(), desired_font_size);
 --- a/chrome/browser/ui/views/extensions/extensions_toolbar_desktop.cc
 +++ b/chrome/browser/ui/views/extensions/extensions_toolbar_desktop.cc
-@@ -182,6 +182,10 @@
+@@ -182,6 +182,10 @@ ExtensionsToolbarDesktop::ExtensionsToolbarDesktop(
  
    // Add extensions button.
    AddMainItem(extensions_button_);
@@ -133,7 +132,7 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
  
    // Create request access button.
    if (base::FeatureList::IsEnabled(
-@@ -593,7 +597,9 @@
+@@ -593,7 +597,9 @@ void ExtensionsToolbarDesktop::AnchorAndShowWidgetImmediately(
          prefs::kShowExtensionsButton);
    const bool hide_cmd = base::CommandLine::ForCurrentProcess()->HasSwitch(
          "hide-extensions-menu");
@@ -146,7 +145,7 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
              kToolbarAppMenuButtonElementId,
 --- a/chrome/browser/ui/views/profiles/avatar_toolbar_button.cc
 +++ b/chrome/browser/ui/views/profiles/avatar_toolbar_button.cc
-@@ -49,6 +49,10 @@
+@@ -49,6 +49,10 @@ constexpr int kChromeRefreshImageLabelPadding = 6;
  // Value used to enlarge the AvatarIcon to accommodate for DIP scaling.
  constexpr int kAvatarIconEnlargement = 1;
  
@@ -157,7 +156,7 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
  }  // namespace
  
  AvatarToolbarButton::AvatarToolbarButton(BrowserWindowInterface* browser)
-@@ -311,6 +315,10 @@
+@@ -311,6 +315,10 @@ gfx::Size AvatarToolbarButton::CalculatePreferredSize(
    return size;
  }
  
@@ -168,7 +167,7 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
  gfx::Size AvatarToolbarButton::GetMinimumSize() const {
    const int size = GetTargetInsets().width() + GetIconSize();
    return gfx::Size(size, size);
-@@ -515,8 +523,12 @@
+@@ -515,8 +523,12 @@ void AvatarToolbarButton::UpdateLayoutInsets() {
    // ring and its gap.
    int total_icon_size =
        (!icon || icon->IsEmpty()) ? GetIconSize() : icon->Size().width();
@@ -184,7 +183,7 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
    SetHorizontalAlignment(is_label_visible ? gfx::ALIGN_LEFT
 --- a/chrome/browser/ui/views/profiles/avatar_toolbar_button.h
 +++ b/chrome/browser/ui/views/profiles/avatar_toolbar_button.h
-@@ -122,6 +122,10 @@
+@@ -122,6 +122,10 @@ class AvatarToolbarButton : public ToolbarButton,
        const views::SizeBounds& available_size) const override;
    gfx::Size GetMinimumSize() const override;
  
@@ -212,7 +211,7 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
  
  namespace {
  
-@@ -112,6 +119,91 @@
+@@ -112,6 +119,91 @@ std::optional<base::TimeDelta> g_signed_out_promo_trigger_delay_for_testing;
  constexpr base::TimeDelta kOnSigninDuration = base::Seconds(20);
  std::optional<base::TimeDelta> g_on_signin_duration_for_testing;
  
@@ -304,7 +303,7 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
  }  // namespace
  
  // static
-@@ -406,8 +498,8 @@
+@@ -406,8 +498,8 @@ class EnterpriseIsolatedStateProvider : public PrivateBaseStateProvider {
      auto [image, icon_type] = GetProfileAvatarImage(
          *profile().GetOriginalProfile(), color_provider, icon_size);
      ui::ImageModel avatar_model =
@@ -315,7 +314,7 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
      return {avatar_model, icon_type};
    }
  
-@@ -2137,8 +2229,8 @@
+@@ -2137,8 +2229,8 @@ std::pair<ui::ImageModel, AvatarIconType> StateProvider::GetAvatarIcon(
    auto [image, icon_type] =
        GetProfileAvatarImage(profile(), color_provider, icon_size);
    ui::ImageModel avatar_model =
@@ -328,7 +327,7 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
      gfx::ImageSkia avatar_with_ai_ring =
 --- a/chrome/browser/ui/views/toolbar/toolbar_view.cc
 +++ b/chrome/browser/ui/views/toolbar/toolbar_view.cc
-@@ -457,7 +457,8 @@
+@@ -457,7 +457,8 @@ void ToolbarView::Init() {
        !features::IsWebUIExtensionsContainerEnabled()) {
      extensions_container = std::make_unique<ExtensionsToolbarDesktop>(browser_);
  
@@ -338,7 +337,7 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
    }
  
    std::unique_ptr<MediaToolbarButtonView> media_button;
-@@ -1575,6 +1576,17 @@
+@@ -1575,6 +1576,17 @@ gfx::Size ToolbarView::GetMinimumSize() const {
    return size;
  }
  
@@ -358,7 +357,7 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
    if (!initialized_) {
 --- a/chrome/browser/ui/views/toolbar/toolbar_view.h
 +++ b/chrome/browser/ui/views/toolbar/toolbar_view.h
-@@ -245,6 +245,7 @@
+@@ -245,6 +245,7 @@ class ToolbarView : public views::AccessiblePaneView,
    gfx::Size GetMinimumSize() const override;
    void Layout(PassKey) override;
    void OnThemeChanged() override;
@@ -368,7 +367,7 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
    void ChildVisibilityChanged(View* child) override;
 --- a/components/bookmarks/browser/bookmark_utils.cc
 +++ b/components/bookmarks/browser/bookmark_utils.cc
-@@ -450,8 +450,12 @@
+@@ -450,8 +450,12 @@ bool DoesBookmarkContainWords(const std::u16string& title,
  }
  
  void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
@@ -382,7 +381,7 @@ barra de favoritos"; perfis que já a ligaram a mantêm).
        user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
    // `BookmarkBarVisibilityState::kOnlyShowOnNtp` is equivalent to
    // `kShowBookmarkBar` set to false.
-@@ -463,8 +467,9 @@
+@@ -463,8 +467,9 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
    registry->RegisterBooleanPref(
        prefs::kShowAppsShortcutInBookmarkBar, false,
        user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);

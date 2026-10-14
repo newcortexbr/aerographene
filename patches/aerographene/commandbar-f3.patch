@@ -6,7 +6,6 @@ em IDC_NEW_TAB): foca a omnibox vazia e o popup (command bar) flutua com 640 px
 no centro da janela; Enter abre aba nova; Esc, clique fora ou blur fecham sem
 aba. t:/o: continuam. Depende de: aerographene/menus-command-bar.patch,
 aerographene/terminal-c6.patch, aerographene/terminal-c6b.patch.
-
 --- a/chrome/app/chrome_command_ids.h
 +++ b/chrome/app/chrome_command_ids.h
 @@ -110,6 +110,8 @@
@@ -17,10 +16,10 @@ aerographene/terminal-c6.patch, aerographene/terminal-c6b.patch.
 +#define IDC_AERO_COMMAND_BAR            34076
  
  // Helium commands
- #define IDC_COPY_OR_INSPECT_SHORTCUT    34080
+ #define IDC_BROWSER_LAYOUT_MENU         34081
 --- a/chrome/browser/ui/accelerator_table.cc
 +++ b/chrome/browser/ui/accelerator_table.cc
-@@ -217,7 +217,9 @@
+@@ -217,7 +217,9 @@ const AcceleratorMapping kAcceleratorMap[] = {
  #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
      {ui::VKEY_N, ui::EF_SHIFT_DOWN | ui::EF_PLATFORM_ACCELERATOR,
       IDC_NEW_INCOGNITO_WINDOW},
@@ -45,7 +44,7 @@ aerographene/terminal-c6.patch, aerographene/terminal-c6b.patch.
  #include "chrome/browser/ui/page_info/page_info_dialog.h"
  #include "chrome/browser/ui/passwords/ui_utils.h"
  #include "chrome/browser/ui/profiles/profile_picker.h"
-@@ -771,6 +774,24 @@
+@@ -763,6 +766,24 @@ void BrowserCommandController::HandleCommandWithDisposition(
        NewTabToRight(browser_);
        break;
      }
@@ -70,7 +69,7 @@ aerographene/terminal-c6.patch, aerographene/terminal-c6b.patch.
      case IDC_CLOSE_TAB:
        base::RecordAction(base::UserMetricsAction("CloseTabByKey"));
        CloseTab(browser_);
-@@ -1819,6 +1840,7 @@
+@@ -1796,6 +1817,7 @@ void BrowserCommandController::InitCommandState() {
    // Window management commands
    command_updater_->UpdateCommandEnabled(IDC_CLOSE_WINDOW, true);
    command_updater_->UpdateCommandEnabled(IDC_NEW_TAB, true);
@@ -80,7 +79,7 @@ aerographene/terminal-c6.patch, aerographene/terminal-c6b.patch.
        IDC_DUPLICATE_TAB,
 --- a/chrome/browser/ui/location_bar/location_bar.h
 +++ b/chrome/browser/ui/location_bar/location_bar.h
-@@ -79,6 +79,11 @@
+@@ -79,6 +79,11 @@ class LocationBar {
      navigation_params_ = navigation_params;
    }
  
@@ -92,7 +91,7 @@ aerographene/terminal-c6.patch, aerographene/terminal-c6b.patch.
    // Focuses the location bar. User-initiated focuses (like pressing Ctrl+L)
    // should have |is_user_initiated| set to true. In those cases, we want to
    // take some extra steps, like selecting everything and maybe uneliding.
-@@ -243,6 +248,7 @@
+@@ -243,6 +248,7 @@ class LocationBar {
  
   private:
    NavigationParams navigation_params_;
@@ -110,7 +109,7 @@ aerographene/terminal-c6.patch, aerographene/terminal-c6b.patch.
  #include "chrome/browser/ui/omnibox/omnibox_tab_helper.h"
  #include "chrome/browser/ui/views/frame/browser_view.h"
  #include "chrome/browser/ui/views/omnibox/omnibox_popup_closer.h"
-@@ -987,6 +988,17 @@
+@@ -987,6 +988,17 @@ void ChromeOmniboxClient::OnAutocompleteAccept(
        disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
      }
    }
@@ -139,7 +138,7 @@ aerographene/terminal-c6.patch, aerographene/terminal-c6b.patch.
  #include "chrome/browser/ui/views/frame/browser_view.h"
  #include "chrome/browser/ui/views/omnibox/omnibox_popup_presenter_base.h"
  
-@@ -83,9 +85,31 @@
+@@ -83,9 +85,31 @@ void OmniboxPopupCloser::CloseWithReason(PopupCloseReason reason) {
        }
      }
    }
@@ -173,7 +172,7 @@ aerographene/terminal-c6.patch, aerographene/terminal-c6b.patch.
      omnibox_view->ApplyFocusRingToAimButton(false);
 --- a/chrome/browser/ui/views/omnibox/omnibox_popup_view_views.cc
 +++ b/chrome/browser/ui/views/omnibox/omnibox_popup_view_views.cc
-@@ -351,7 +351,8 @@
+@@ -351,7 +351,8 @@ void OmniboxPopupViewViews::UpdatePopupAppearance() {
    const bool should_be_open =
        controller()->popup_state_manager()->popup_state() !=
            OmniboxPopupState::kAim &&
@@ -183,7 +182,7 @@ aerographene/terminal-c6.patch, aerographene/terminal-c6b.patch.
        !omnibox_view_->IsImeShowingPopup();
    const bool was_open = !!widget_;
  
-@@ -773,6 +774,21 @@
+@@ -773,6 +774,21 @@ gfx::Rect OmniboxPopupViewViews::GetTargetBounds() const {
      gfx::Rect panel(
          bar_bounds.CenterPoint().x() - panel_width / 2, bar_bounds.bottom() + gap,
          panel_width, rows_height ? rows_height + 2 * kAeroPanelPadding : 0);
