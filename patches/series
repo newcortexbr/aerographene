@@ -49,6 +49,7 @@ aerographene/remove-vertical-corner-refs.patch
 aerographene/layout-base-padding.patch
 aerographene/process-names.patch
 aerographene/windows-disable-rlz.patch
+aerographene/windows-ungoogled-prefs.patch
 aerographene/command-bar-type-icons.patch
 aerographene/peek.patch
 aerographene/theme-tokens.patch
