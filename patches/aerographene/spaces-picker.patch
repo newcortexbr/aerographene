@@ -1,0 +1,915 @@
+# aerographene: profile picker (chrome://profile-picker) e customização do perfil novo no visual mono aero
+# (mockups 04 e 02, theming/mockups/perfis-onboarding). Sem banners, gradientes nem avatares origami: o avatar vira glifo
+# (inicial do nome). Só aparência; fluxo e funções iguais. Textos (space no lugar de perfil) vêm de build/strings_space.json.
+#
+--- a/chrome/browser/resources/signin/profile_customization/profile_customization.html
++++ b/chrome/browser/resources/signin/profile_customization/profile_customization.html
+@@ -19,6 +19,12 @@
+           background-color: var(--md-background-color);
+         }
+       }
++      /* aerographene: fundo mono do tema (fallback: mockup 02) */
++      body {
++        --md-background-color: var(--color-sys-base, #05070c);
++        background-color: var(--md-background-color);
++        color: var(--color-sys-on-surface, #e6edf8);
++      }
+     </style>
+   </head>
+   <body>
+--- a/chrome/browser/resources/signin/profile_customization/profile_customization_app.css
++++ b/chrome/browser/resources/signin/profile_customization/profile_customization_app.css
+@@ -11,6 +11,21 @@
+  * #include=signin-shared
+  * #css_wrapper_metadata_end */
+ 
++:host {
++  /* aerographene: tokens do tema (chrome://theme/colors.css), fallback mono do mockup 02 */
++  --aero-bg: var(--color-sys-base, #05070c);
++  --aero-panel: var(--color-sys-surface, #0a0e16);
++  --aero-line: var(--color-sys-divider, #1c2433);
++  --aero-text: var(--color-sys-on-surface, #e6edf8);
++  --aero-text2: var(--color-sys-on-surface-subtle, #9aa8bf);
++  --aero-accent: var(--color-sys-primary, #6cb6ff);
++  --aero-mono: "JetBrains Mono", "JetBrainsMono Nerd Font", ui-monospace,
++      "DejaVu Sans Mono", monospace;
++  --cr-primary-text-color: var(--aero-text);
++  --cr-secondary-text-color: var(--aero-text2);
++  font-family: var(--aero-mono);
++}
++
+ #viewManager,
+ #customizeDialog,
+ #selectAvatarDialog {
+@@ -30,9 +45,8 @@
+ }
+ 
+ .in-dialog-design #header {
+-  background: center 18px no-repeat
+-      url(./images/profile_customization_illustration.svg);
+-  height: 170px;
++  background-image: none;
++  height: 150px;
+ }
+ 
+ :host([is-refreshed-ui_]) .in-dialog-design #header {
+@@ -57,22 +71,30 @@
+ 
+ :host([is-refreshed-ui_]) .in-dialog-design #avatarContainer {
+   --avatar-size: 88px;
+-  border-radius: 50%;
++  border-radius: 0;
+   top: 48px;
+ }
+ 
++/* glifo: inicial do nome num quadrado de contorno fino (sem imagem de avatar) */
+ #avatar {
+-  /** The user avatar may be transparent, add a background */
+-  background-color: var(--md-background-color);
+-  border: var(--avatar-border) solid var(--md-background-color);
+-  border-radius: 50%;
++  background: color-mix(in srgb, var(--aero-accent) 10%, transparent);
++  border: 1px solid var(--aero-accent);
++  box-sizing: border-box;
++  color: var(--aero-accent);
++  display: grid;
++  font: 700 32px var(--aero-mono);
+   height: 100%;
+-  left: calc(-1 * var(--avatar-border));
++  place-items: center;
+   position: absolute;
+-  top: calc(-1 * var(--avatar-border));
++  user-select: none;
+   width: 100%;
+ }
+ 
++/* sem o seletor de avatares (origami): o avatar é o glifo derivado do nome */
++.avatar-badge:has(#customizeAvatarIcon) {
++  display: none;
++}
++
+ .avatar-badge {
+   --badge-icon-size: 15px;
+   --badge-offset: -4px;
+@@ -90,7 +112,8 @@
+ .in-dialog-design .avatar-badge {
+   --badge-icon-size: 16px;
+   --badge-width: 26px;
+-  border: 1px solid var(--google-grey-300);
++  border: 1px solid var(--aero-line);
++  border-radius: 0;
+   bottom: 0;
+ }
+ 
+@@ -194,13 +217,32 @@ cr-theme-color-picker {
+ }
+ 
+ cr-button {
++  --cr-button-background-color: transparent;
++  --cr-button-border-color: var(--aero-line);
++  --cr-button-text-color: var(--aero-text2);
++  border-radius: 0;
+   font-size: 12px;
+   min-width: 111px;
+ }
+ 
++cr-button.action-button {
++  --cr-button-background-color: var(--aero-text);
++  --cr-button-border-color: var(--aero-text);
++  --cr-button-text-color: var(--aero-bg);
++}
++
++cr-input {
++  --cr-input-background-color: transparent;
++  --cr-input-color: var(--aero-text);
++  --cr-input-focus-color: var(--aero-text);
++  --cr-input-border-radius: 0;
++}
++
+ .in-dialog-design #title {
+-  font-size: 20px;
+-  line-height: 24px;
++  font-size: 24px;
++  font-weight: 600;
++  letter-spacing: -0.5px;
++  line-height: 30px;
+ }
+ 
+ .in-dialog-design #themePickerTitle {
+@@ -282,18 +324,3 @@ cr-profile-avatar-selector {
+ #selectAvatarConfirmButton {
+   min-width: 119px;
+ }
+-
+-@media (prefers-color-scheme: dark) {
+-  .in-dialog-design .avatar-badge {
+-    border: 1px solid var(--google-grey-500);
+-  }
+-
+-  :host(:not([is-refreshed-ui_])) .in-dialog-design #header {
+-    background-image:
+-        url(./images/profile_customization_illustration_dark.svg);
+-  }
+-
+-  #nameInput {
+-    --cr-input-placeholder-color: rgba(var(--google-grey-200-rgb), .5);
+-  }
+-}
+--- a/chrome/browser/resources/signin/profile_customization/profile_customization_app.html.ts
++++ b/chrome/browser/resources/signin/profile_customization/profile_customization_app.html.ts
+@@ -16,7 +16,9 @@ export function getHtml(this: ProfileCustomizationAppElement) {
+     <div class="profile-customization-wrapper">
+       <div id="header">
+         <div id="avatarContainer">
+-          <img id="avatar" alt="" src="${this.pictureUrl_}">
++          <div id="avatar" class="aero-glyph" aria-hidden="true">
++            ${this.getGlyph_()}
++          </div>
+           ${!this.isLocalProfileCreation_ ? html`
+             <div class="avatar-badge" id="workBadge"
+                 ?hidden="${!this.isManaged_}">
+--- a/chrome/browser/resources/signin/profile_customization/profile_customization_app.ts
++++ b/chrome/browser/resources/signin/profile_customization/profile_customization_app.ts
+@@ -149,6 +149,15 @@ export class ProfileCustomizationAppElement extends
+         this.i18n('profileCustomizationTitle');
+   }
+ 
++  /**
++   * aerographene: inicial do nome, mostrada num glifo no lugar do avatar
++   * (sem letra ou número no nome, "A").
++   */
++  protected getGlyph_(): string {
++    const match = this.profileName_.match(/[\p{L}\p{N}]/u);
++    return match ? match[0].toUpperCase() : 'A';
++  }
++
+   protected getNameInputPlaceHolder_(): string {
+     return this.isRefreshedUI_ ?
+         '' :
+--- a/chrome/browser/resources/signin/profile_picker/profile_card.css
++++ b/chrome/browser/resources/signin/profile_picker/profile_card.css
+@@ -46,11 +46,11 @@ cr-button {
+   --domain-icon-size: 24px;
+   --domain-icon-border-size: 2px;
+   align-items: center;
+-  background-color: white;
++  background-color: var(--aero-panel);
+   border:
+     var(--domain-icon-border-size) solid var(--profile-card-hover-color);
+-  border-radius: 50%;
+-  box-shadow: 0 0 2px rgba(60, 64, 67, 0.12), 0 0 6px rgba(60, 64, 67, 0.15);
++  border-radius: 0;
++  box-shadow: none;
+   display: flex;
+   height: var(--domain-icon-size);
+   inset-inline-end: -6px;
+@@ -62,7 +62,7 @@ cr-button {
+ }
+ 
+ cr-icon {
+-  --iron-icon-fill-color: var(--google-grey-700);
++  --iron-icon-fill-color: var(--aero-text2);
+ }
+ 
+ #forceSigninContainer {
+@@ -91,7 +91,7 @@ cr-input {
+ }
+ 
+ #hoverUnderline {
+-  border-bottom: 2px solid var(--google-grey-300);
++  border-bottom: 1px solid var(--aero-line2);
+   border-radius: 0;
+   height: 0;
+   left: 0;
+@@ -121,18 +121,8 @@ cr-tooltip {
+   overflow-wrap: break-word;
+ }
+ 
+-@media (prefers-color-scheme: dark) {
+-  #iconContainer {
+-    background-color: var(--md-background-color);
+-    box-shadow: 0 0 2px rgba(60, 64, 67, 0.12), 0 0 6px
+-      rgba(60, 64, 67, 0.15);
+-  }
+-
+-  cr-icon {
+-    --iron-icon-fill-color: var(--google-grey-500);
+-  }
+-
+-  #hoverUnderline {
+-    border-color: var(--google-grey-700);
+-  }
++cr-input {
++  --cr-input-color: var(--aero-text);
++  --cr-input-focus-color: var(--aero-text);
++  font-family: var(--aero-mono);
+ }
+--- a/chrome/browser/resources/signin/profile_picker/profile_card.html.ts
++++ b/chrome/browser/resources/signin/profile_picker/profile_card.html.ts
+@@ -6,6 +6,7 @@ import {html} from '//resources/lit/v3_0/lit.rollup.js';
+ 
+ import type {ProfileCardElement} from './profile_card.js';
+ import {isGlicVersion} from './profile_picker_flags.js';
++import {spaceGlyph} from './profile_picker_util.js';
+ 
+ export function getHtml(this: ProfileCardElement) {
+   return html`<!--_html_template_start_-->
+@@ -14,9 +15,9 @@ export function getHtml(this: ProfileCardElement) {
+       ?disabled="${this.disabled}"
+       aria-label="${this.profileState.profileCardButtonLabel}">
+     <div id="avatarContainer">
+-      <img class="profile-avatar ${
+-      this.profileState.hasAvatarRing ? 'with-avatar-ring' : ''}"
+-          alt="" .src="${this.profileState.avatarIcon}">
++      <div class="profile-avatar aero-glyph" aria-hidden="true">
++        ${spaceGlyph(this.profileState.localProfileName)}
++      </div>
+       <div id="iconContainer"
+           ?hidden="${!this.profileState.avatarBadge.length}">
+         <cr-icon icon="${this.profileState.avatarBadge}"></cr-icon>
+--- a/chrome/browser/resources/signin/profile_picker/profile_card_menu.css
++++ b/chrome/browser/resources/signin/profile_picker/profile_card_menu.css
+@@ -32,14 +32,14 @@ cr-action-menu {
+ }
+ 
+ #actionMenu cr-icon {
+-  --iron-icon-fill-color: var(--google-grey-700);
++  --iron-icon-fill-color: var(--aero-text2);
+   padding-inline-end: 14px;
+ }
+ 
+ #actionMenu button {
+   --iron-icon-height: 16px;
+   --iron-icon-width: 16px;
+-  color: var(--google-grey-800);
++  color: var(--aero-text2);
+   padding-inline-start: 14px;
+ }
+ 
+@@ -62,8 +62,8 @@ cr-dialog::part(dialog) {
+ 
+ #removeActionDialogBody {
+   align-items: center;
+-  border: 1px solid var(--google-grey-100);
+-  border-radius: 12px;
++  border: 1px solid var(--aero-line);
++  border-radius: 0;
+   box-sizing: border-box;
+   display: flex;
+   flex-direction: row;
+@@ -72,7 +72,7 @@ cr-dialog::part(dialog) {
+ #profileCardContainer {
+   align-items: center;
+   background-color: var(--profile-card-hover-color);
+-  border-radius: 12px 0 0 12px;
++  border-radius: 0;
+   display: flex;
+   flex-direction: column;
+   height: var(--profile-item-height);
+@@ -113,7 +113,7 @@ cr-dialog::part(dialog) {
+ 
+ .count {
+   align-self: center;
+-  color: var(--color-sys-on-surface-subtle);
++  color: var(--aero-muted);
+   text-align: end;
+ }
+ 
+@@ -126,31 +126,24 @@ cr-dialog::part(dialog) {
+   --cr-button-border-color: var(--google-red-100);
+ }
+ 
+-@media (prefers-color-scheme: dark) {
+-  #actionMenu button {
+-    color: var(--google-grey-300);
+-  }
+-
+-  #actionMenu cr-icon {
+-    --iron-icon-fill-color: var(--google-grey-500);
+-  }
+-
+-  .warning-message {
+-    color: var(--google-grey-500);
+-  }
++.warning-message {
++  color: var(--aero-text2);
++}
+ 
+-  #removeActionDialogBody {
+-    border-color: var(--google-grey-700);
+-  }
++cr-action-menu {
++  --cr-menu-background-color: var(--aero-panel);
++}
+ 
+-  #removeConfirmationButton {
+-    --cr-button-background-color: var(--google-red-300);
+-    --cr-button-text-color: var(--google-grey-900);
+-  }
++cr-dialog::part(dialog) {
++  --cr-dialog-background-color: var(--aero-panel);
++  background-color: var(--aero-panel);
++  border: 1px solid var(--aero-line2);
++  border-radius: 0;
++  color: var(--aero-text);
++}
+ 
+-  #removeConfirmationButton:hover {
+-    --cr-button-background-color: var(--google-red-300)
+-        linear-gradient(rgba(0, 0, 0, .08), rgba(0, 0, 0, .08));
+-    --cr-button-hover-on-prominent-background-color: transparent;
+-  }
++#removeConfirmationButton {
++  --cr-button-background-color: var(--aero-text);
++  --cr-button-text-color: var(--aero-bg);
++  border-radius: 0;
+ }
+--- a/chrome/browser/resources/signin/profile_picker/profile_card_menu.html.ts
++++ b/chrome/browser/resources/signin/profile_picker/profile_card_menu.html.ts
+@@ -5,6 +5,7 @@
+ import {html} from '//resources/lit/v3_0/lit.rollup.js';
+ 
+ import type {ProfileCardMenuElement} from './profile_card_menu.js';
++import {spaceGlyph} from './profile_picker_util.js';
+ 
+ export function getHtml(this: ProfileCardMenuElement) {
+   return html`<!--_html_template_start_-->
+@@ -37,8 +38,9 @@ export function getHtml(this: ProfileCardMenuElement) {
+     <div id="removeActionDialogBody">
+       <div id="profileCardContainer">
+         <div id="avatarContainer">
+-          <img class="profile-avatar" alt=""
+-              src="${this.profileState.avatarIcon}">
++          <div class="profile-avatar aero-glyph" aria-hidden="true">
++            ${spaceGlyph(this.profileState.localProfileName)}
++          </div>
+         </div>
+         <div id="profileName" class="profile-card-info prominent-text">
+           ${this.profileState.localProfileName}
+--- a/chrome/browser/resources/signin/profile_picker/profile_creation_flow/profile_type_choice.css
++++ b/chrome/browser/resources/signin/profile_picker/profile_creation_flow/profile_type_choice.css
+@@ -12,8 +12,8 @@
+  * #css_wrapper_metadata_end */
+ 
+ :host {
+-  --avatar-size: 100px;
+-  --banner-height: 244px;
++  --avatar-size: 72px;
++  --banner-height: 150px;
+ }
+ 
+ #actionContainer {
+@@ -30,18 +30,17 @@
+ }
+ 
+ #avatarContainer {
+-  bottom: calc(var(--avatar-size) / -2);
+-  height: calc(var(--avatar-size) + 4px);
++  height: var(--avatar-size);
+   left: 0;
+   margin: auto;
+   position: absolute;
+   right: 0;
+-  width: calc(var(--avatar-size) + 4px);
++  top: 56px;
++  width: var(--avatar-size);
+ }
+ 
+ .avatar {
+-  border: 2px solid var(--md-background-color);
+-  border-radius: 50%;
++  border-radius: 0;
+   height: var(--avatar-size);
+   width: var(--avatar-size);
+   z-index: 1;
+@@ -85,9 +84,9 @@
+ 
+ .info-box {
+   align-items: center;
+-  border: 1px solid var(--google-grey-200);
+-  border-radius: 8px;
+-  color: var(--google-grey-700);
++  border: 1px solid var(--aero-line);
++  border-radius: 0;
++  color: var(--aero-text2);
+   display: inline-flex;
+   flex-direction: row;
+   margin-inline: auto;
+@@ -96,8 +95,8 @@
+   padding-inline-end: 18px;
+ }
+ 
+-:host([is-refreshed-ui_]) .info-box {
+-  border-radius: 24px;
++.info-box {
++  background: var(--aero-panel);
+ }
+ 
+ .info-box > p {
+@@ -109,8 +108,8 @@
+ .icon-container {
+   --icon-container-size: 28px;
+   --icon-container-margin: 16px;
+-  background-color: var(--google-grey-100);
+-  border-radius: 50%;
++  background-color: transparent;
++  border-radius: 0;
+   height: var(--icon-container-size);
+   margin-inline: var(--icon-container-margin);
+   width: var(--icon-container-size);
+@@ -125,6 +124,10 @@
+ 
+ cr-button {
+   --cr-button-height: 36px;
++  --cr-button-border-color: var(--aero-text);
++  --cr-button-text-color: var(--aero-text);
++  --cr-button-background-color: transparent;
++  border-radius: 0;
+   font-size: 0.75rem;
+   font-weight: normal;
+   min-width: 210px;
+@@ -143,7 +146,7 @@ cr-button {
+ }
+ 
+ .title-container {
+-  margin: 104px 60px 48px;
++  margin: 40px 60px 48px;
+   text-align: center;
+ }
+ 
+@@ -152,8 +155,9 @@ cr-button {
+ }
+ 
+ .title {
+-  font-size: 2.25rem;
+-  font-weight: 500;
++  font-size: 1.875rem;
++  font-weight: 600;
++  letter-spacing: -0.5px;
+   line-height: 43px;
+   margin-bottom: 16px;
+ }
+@@ -163,19 +167,14 @@ cr-button {
+ }
+ 
+ .subtitle {
+-  font-size: 1.25rem;
++  color: var(--aero-text2);
++  font-size: 1rem;
+   line-height: 24px;
+ }
+ 
+-@media (prefers-color-scheme: dark) {
+-  .info-box {
+-    border-color: var(--google-grey-600);
+-    color: var(--google-grey-100);
+-  }
+-
+-  .icon-container {
+-    background-color: var(--google-grey-700);
+-  }
++#signInButton {
++  --cr-button-background-color: var(--aero-text);
++  --cr-button-text-color: var(--aero-bg);
+ }
+ 
+ @media screen and ((max-width: 780px) or (max-height: 600px)) {
+--- a/chrome/browser/resources/signin/profile_picker/profile_creation_flow/profile_type_choice.html.ts
++++ b/chrome/browser/resources/signin/profile_picker/profile_creation_flow/profile_type_choice.html.ts
+@@ -20,8 +20,7 @@ export function getHtml(this: ProfileTypeChoiceElement) {
+       ?disabled="${this.profileCreationInProgress}">
+   </cr-icon-button>
+   <div id="avatarContainer">
+-    <img class="avatar" alt=""
+-        src="${this.profileThemeInfo.themeGenericAvatar}">
++    <div class="avatar aero-glyph" aria-hidden="true">+</div>
+   </div>
+ </div>
+ <div class="title-container">
+--- a/chrome/browser/resources/signin/profile_picker/profile_picker.html
++++ b/chrome/browser/resources/signin/profile_picker/profile_picker.html
+@@ -3,7 +3,7 @@
+   <head>
+     <base href="chrome://profile-picker">
+     <meta charset="utf-8">
+-    <meta name="color-scheme" content="light dark">
++    <meta name="color-scheme" content="dark">
+     <link rel="stylesheet" href="chrome://resources/css/md_colors.css">
+     <link rel="stylesheet" href="chrome://resources/css/text_defaults_md.css">
+     <title>$i18n{mainViewTitle}</title>
+@@ -16,11 +16,13 @@
+         width: 100vw;
+       }
+ 
+-      @media (prefers-color-scheme: dark) {
+-        html {
+-          --md-background-color: rgba(41, 42, 45, 1);
+-          background: var(--md-background-color);
+-        }
++      /* aerographene: fundo mono escuro com pontilhado (mockup 04), sempre */
++      html {
++        --md-background-color: #05070c;
++        background: #05070c;
++        background-image: radial-gradient(circle at 1px 1px,
++            rgba(255, 255, 255, 0.04) 1px, transparent 1.5px);
++        background-size: 14px 24px;
+       }
+     </style>
+     <profile-picker-app></profile-picker-app>
+--- a/chrome/browser/resources/signin/profile_picker/profile_picker_app.css
++++ b/chrome/browser/resources/signin/profile_picker/profile_picker_app.css
+@@ -48,48 +48,15 @@
+   }
+ }
+ 
+-:host([app-mode_='regular']) {
+-
+-  #banner-right,
+-  #banner-left {
+-    max-width: 320px;
+-    position: absolute;
+-    top: 0;
+-    width: 17vw;
+-  }
+-
+-  #banner-right {
+-    content: url(right_banner.svg);
+-    right: 0;
+-
+-    @media (prefers-color-scheme: dark) {
+-      content: url(right_banner_dark.svg);
+-    }
+-  }
+-
+-  #banner-left {
+-    content: url(left_banner.svg);
+-    left: 0;
+-
+-    @media (prefers-color-scheme: dark) {
+-      content: url(left_banner_dark.svg);
+-    }
+-  }
+-}
+-
++/* aerographene: sem os banners e gradientes do Chromium; fundo mono liso. */
++:host([app-mode_='regular']),
+ :host([app-mode_='regular-refreshed']) {
+   #banner-right,
+   #banner-left {
+     display: none;
+   }
+ 
+-  background-image: url(shared_gradient_light_background.svg);
+-  background-repeat: no-repeat;
+-  background-size: 100% 100%;
+-
+-  @media (prefers-color-scheme: dark) {
+-    background-image: url(shared_gradient_dark_background.svg);
+-  }
++  background-color: var(--aero-bg);
+ }
+ 
+ 
+--- a/chrome/browser/resources/signin/profile_picker/profile_picker_main_view.css
++++ b/chrome/browser/resources/signin/profile_picker/profile_picker_main_view.css
+@@ -15,7 +15,7 @@
+ :host {
+   --profile-item-border-width: 1px;
+   --profile-item-margin: 4px;
+-  --profile-item-background: var(--google-grey-50);
++  --profile-item-background: var(--aero-panel);
+   --picker-logo-height: 44px;
+ }
+ 
+@@ -101,7 +101,9 @@
+ .profile-item {
+   align-items: center;
+   background-color: var(--profile-item-background);
+-  border-radius: 8px;
++  border: var(--profile-item-border-width) solid var(--aero-line);
++  border-radius: 0;
++  box-sizing: border-box;
+   display: flex;
+   flex-direction: column;
+   height: var(--profile-item-height);
+@@ -115,12 +117,21 @@
+ #addProfile.profile-item:focus-within,
+ #addProfile.profile-item:hover {
+   background-color: var(--profile-card-hover-color);
++  border-color: var(--aero-text);
+ }
+ 
++/* cor do glifo por posição (paleta do mockup); herdada pelo shadow do card */
++.profile-item:nth-child(7n+2) { --glyph-c: #c4a7ff; }
++.profile-item:nth-child(7n+3) { --glyph-c: #7ee0b5; }
++.profile-item:nth-child(7n+4) { --glyph-c: #ffd37a; }
++.profile-item:nth-child(7n+5) { --glyph-c: #ff9a8a; }
++.profile-item:nth-child(7n+6) { --glyph-c: #ff8fc8; }
++.profile-item:nth-child(7n+7) { --glyph-c: #5ee0e8; }
++
+ #addProfile.profile-item {
+   --cr-hover-background-color: none;
+   background-color: transparent;
+-  border: var(--profile-item-border-width) dashed var(--google-grey-300);
++  border: var(--profile-item-border-width) dashed var(--aero-line2);
+   box-shadow: none;
+   position: relative;
+ }
+@@ -130,14 +141,22 @@
+   left: 0;
+ }
+ 
+-cr-icon[icon='profiles:add-custom'] {
+-  --iron-icon-height: var(--profile-card-avatar-icon-size);
+-  --iron-icon-width: var(--profile-card-avatar-icon-size);
+-  --iron-icon-fill-color: var(--google-grey-100);
+-  --iron-icon-stroke-color: var(--google-grey-700);
++.aero-plus {
++  border: 1px dashed var(--aero-line2);
++  box-sizing: border-box;
++  color: var(--aero-text2);
++  display: grid;
++  font: 400 28px var(--aero-mono);
++  height: var(--profile-card-avatar-icon-size);
++  place-items: center;
++  width: var(--profile-card-avatar-icon-size);
+ }
+ 
+ #browseAsGuestButton {
++  --cr-button-background-color: transparent;
++  --cr-button-border-color: var(--aero-line2);
++  --cr-button-text-color: var(--aero-text2);
++  border-radius: 0;
+   margin-inline-start: var(--footer-spacing);
+   padding: 8px 16px;
+ }
+@@ -149,7 +168,10 @@ cr-icon[icon='profiles:add-custom'] {
+ }
+ 
+ cr-checkbox {
+-  --cr-checkbox-label-color: var(--cr-secondary-text-color);
++  --cr-checkbox-label-color: var(--aero-text2);
++  --cr-checkbox-checked-box-color: var(--aero-text);
++  --cr-checkbox-checked-mark-color: var(--aero-bg);
++  --cr-checkbox-ripple-checked-color: transparent;
+   --cr-checkbox-label-padding-start: 8px;
+   justify-content: flex-end;
+   margin-inline-end: var(--footer-spacing);
+@@ -167,22 +189,10 @@ cr-checkbox {
+   margin-inline-start: auto;
+ }
+ 
+-@media (prefers-color-scheme: dark) {
+-  :host {
+-    --profile-item-background: var(--google-grey-900);
+-  }
+-
+-  :host([is-refreshed-ui_]) {
+-    --profile-item-background: var(--cr-fallback-color-surface5);
+-  }
+-
+-  .profile-item,
+-  #addProfile.profile-item {
+-    border-color: var(--google-grey-700);
+-  }
+-
+-  cr-icon[icon='profiles:add-custom'] {
+-    --iron-icon-fill-color: var(--google-grey-500);
+-    --iron-icon-stroke-color: rgb(48, 48, 50);
+-  }
++#ask-on-startup-container {
++  --cr-toggle-checked-bar-color: var(--aero-text);
++  --cr-toggle-checked-button-color: var(--aero-bg);
++  --cr-toggle-unchecked-bar-color: var(--aero-line2);
++  --cr-toggle-unchecked-button-color: var(--aero-text2);
++  color: var(--aero-text2);
+ }
+--- a/chrome/browser/resources/signin/profile_picker/profile_picker_main_view.html.ts
++++ b/chrome/browser/resources/signin/profile_picker/profile_picker_main_view.html.ts
+@@ -38,7 +38,7 @@ ${isGlicVersion() ? html`
+             class="profile-card-info prominent-text">
+           $i18n{addSpaceButton}
+         </div>
+-        <cr-icon icon="profiles:add-custom"></cr-icon>
++        <div class="aero-plus" aria-hidden="true">+</div>
+       </cr-button>
+     </div>
+   </div>
+--- a/chrome/browser/resources/signin/profile_picker/profile_picker_shared.css
++++ b/chrome/browser/resources/signin/profile_picker/profile_picker_shared.css
+@@ -10,20 +10,36 @@
+  * #css_wrapper_metadata_end */
+ 
+ :host {
++  /* aerographene: paleta mono escura (mockup 04), fixa; o picker não carrega colors.css do tema */
++  --aero-bg: #05070c;
++  --aero-panel: #0a0e16;
++  --aero-line: #1c2433;
++  --aero-line2: #2c3a52;
++  --aero-text: #e6edf8;
++  --aero-text2: #9aa8bf;
++  --aero-muted: #5e6b82;
++  --aero-accent: #6cb6ff;
++  --aero-mono: "JetBrains Mono", "JetBrainsMono Nerd Font", ui-monospace,
++      "DejaVu Sans Mono", monospace;
++  --cr-primary-text-color: var(--aero-text);
++  --cr-secondary-text-color: var(--aero-text2);
++  --cr-focus-outline-color: var(--aero-text);
+   --profile-card-avatar-icon-size: 74px;
+-  --text-font-size: 1.16em;
++  --text-font-size: 1em;
+   --scrollbar-width: 4px;
+-  --scrollbar-background: var(--google-grey-100);
++  --scrollbar-background: var(--aero-line2);
+   --footer-spacing: 40px;
+-  --profile-card-hover-color: var(--google-grey-100);
++  --profile-card-hover-color: var(--aero-panel);
+   --profile-item-height: 178px;
+   --profile-item-width: 162px;
++  font-family: var(--aero-mono);
+ }
+ 
+ .title {
+   color: var(--cr-primary-text-color);
+-  font-size: 1.85em;
+-  font-weight: normal;
++  font-size: 30px;
++  font-weight: 600;
++  letter-spacing: -0.5px;
+   margin-block-end: 20px;
+   margin-block-start: 20px;
+ }
+@@ -70,7 +86,7 @@
+ }
+ 
+ .footer.division-line {
+-  border-top: 1px solid var(--google-grey-300);
++  border-top: 1px solid var(--aero-line);
+ }
+ 
+ .custom-scrollbar::-webkit-scrollbar {
+@@ -89,7 +105,7 @@
+ }
+ 
+ .profile-avatar {
+-  border-radius: 50%;
++  border-radius: 0;
+   flex-shrink: 0;
+   height: var(--profile-card-avatar-icon-size);
+   width: var(--profile-card-avatar-icon-size);
+@@ -110,13 +126,16 @@
+ }
+ 
+ 
+-@media (prefers-color-scheme: dark) {
+-  :host {
+-    --scrollbar-background: var(--google-grey-800);
+-    --profile-card-hover-color: var(--google-grey-800);
+-  }
+-
+-  .footer.division-line {
+-    border-top-color: var(--cr-separator-color);
+-  }
++/* Glifo no lugar do avatar: inicial do nome num quadrado de contorno fino
++ * (substitui as imagens origami do Chromium, sem asset binário). */
++.aero-glyph {
++  --glyph-color: var(--glyph-c, var(--aero-accent));
++  background: color-mix(in srgb, var(--glyph-color) 10%, transparent);
++  border: 1px solid var(--glyph-color);
++  box-sizing: border-box;
++  color: var(--glyph-color);
++  display: grid;
++  font: 700 28px var(--aero-mono);
++  place-items: center;
++  user-select: none;
+ }
+--- a/chrome/browser/resources/signin/profile_picker/profile_picker_util.ts
++++ b/chrome/browser/resources/signin/profile_picker/profile_picker_util.ts
+@@ -20,6 +20,15 @@ export function createDummyProfileState(): ProfileState {
+   };
+ }
+ 
++/**
++ * aerographene: inicial maiúscula do nome do space, mostrada num glifo no lugar
++ * do avatar. Sem letra ou número no nome, usa "A".
++ */
++export function spaceGlyph(name: string): string {
++  const match = name.match(/[\p{L}\p{N}]/u);
++  return match ? match[0].toUpperCase() : 'A';
++}
++
+ export function createDummyAutogeneratedThemeColorInfo():
+     AutogeneratedThemeColorInfo {
+   return {
+--- a/chrome/browser/resources/signin/profile_picker/profile_switch.css
++++ b/chrome/browser/resources/signin/profile_picker/profile_switch.css
+@@ -18,8 +18,8 @@
+ #profileCardContainer {
+   align-items: center;
+   align-self: center;
+-  border: 1px solid var(--google-grey-300);
+-  border-radius: 8px;
++  border: 1px solid var(--aero-line);
++  border-radius: 0;
+   display: flex;
+   flex-direction: column;
+   height: var(--profile-item-height);
+@@ -48,11 +48,11 @@
+   --domain-icon-size: 24px;
+   --domain-icon-border-size: 2px;
+   align-items: center;
+-  background-color: white;
++  background-color: var(--aero-panel);
+   border:
+     var(--domain-icon-border-size) solid var(--profile-card-hover-color);
+-  border-radius: 50%;
+-  box-shadow: 0 0 2px rgba(60, 64, 67, 0.12), 0 0 6px rgba(60, 64, 67, 0.15);
++  border-radius: 0;
++  box-shadow: none;
+   display: flex;
+   height: var(--domain-icon-size);
+   inset-inline-end: -6px;
+@@ -64,7 +64,7 @@
+ }
+ 
+ cr-icon {
+-  --iron-icon-fill-color: var(--google-grey-700);
++  --iron-icon-fill-color: var(--aero-text2);
+ }
+ 
+ #titleContainer {
+@@ -84,12 +84,6 @@ cr-button {
+   min-width: 111px;
+ }
+ 
+-@media (prefers-color-scheme: dark) {
+-  #iconContainer {
+-    background-color: var(--md-background-color);
+-  }
+-
+-  cr-icon {
+-    --iron-icon-fill-color: var(--google-grey-500);
+-  }
++cr-button {
++  border-radius: 0;
+ }
+--- a/chrome/browser/resources/signin/profile_picker/profile_switch.html.ts
++++ b/chrome/browser/resources/signin/profile_picker/profile_switch.html.ts
+@@ -5,13 +5,16 @@
+ import {html} from '//resources/lit/v3_0/lit.rollup.js';
+ 
+ import type {ProfileSwitchElement} from './profile_switch.js';
++import {spaceGlyph} from './profile_picker_util.js';
+ 
+ export function getHtml(this: ProfileSwitchElement) {
+   return html`<!--_html_template_start_-->
+ <div id="outerContainer">
+   <div id="profileCardContainer">
+     <div id="avatarContainer">
+-      <img class="profile-avatar" alt="" src="${this.profileState_.avatarIcon}">
++      <div class="profile-avatar aero-glyph" aria-hidden="true">
++        ${spaceGlyph(this.profileState_.localProfileName)}
++      </div>
+       <div id="iconContainer"
+           ?hidden="${!this.profileState_.avatarBadge.length}">
+         <cr-icon icon="${this.profileState_.avatarBadge}"></cr-icon>
