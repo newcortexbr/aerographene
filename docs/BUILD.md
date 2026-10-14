@@ -63,7 +63,27 @@ Cache e custo: o perfil não entra no hash da série (sem re-patch nem recriaç�
 
 Efeito esperado: ganho pequeno em Speedometer/JetStream (o motor JS já é -O3); aumento do binário de ordem de poucos MB. Regra do produto (AGENTS.md): nenhuma mudança piora mais de 2% a linha de base. Plano de medição: duas builds `cpu=avx2` isoladas (`o3=hot`, depois `o3=wide`), cada uma contra a v0.3.2 normal, mesmo protocolo e mesmas condições do `docs/BASELINE.md` (perfil `performance`, sem carga paralela, Comet Lake), Speedometer manual repetido (não automatizado), mais tamanho do pacote e RSS/startup do harness. Um perfil só entra se o ganho superar o ruído sem violar os 2%.
 
-Medição de tamanho em amostra de objetos (Cezanne, sem LTO/PGO, só indicativa): ver a tabela abaixo.
+Tamanho de `.text` por objeto, -O2 contra -O3 (14/10/2026, Cezanne, container `aero-c4-lin`, linha de comando do `out/Default` só lida, saída em `/tmp` do container; sem ThinLTO, CFI e PGO, porque `-c` com LTO gera bitcode; o `-march` do `out/Default` naquele momento era `ivybridge`). Só indicativo: com LTO o inlining entre módulos e o ICF mudam os números, e com PGO as funções frias não crescem.
+
+```
+objeto                              .text -O2   .text -O3
+v8 turbolev-frontend-pipeline        1354165     1348718   -0,4%
+v8 machine-lowering-phase             511710      546980   +6,9%
+v8 maglev-graph-builder              1200951     1220873   +1,7%
+v8 elements                           654267      933498  +42,7%
+v8 mark-compact                       346516      364459   +5,2%
+v8 code-stub-assembler                534016      544168   +1,9%
+blink platform paint_artifact_comp.    59590       64334   +8,0%
+blink platform widget_base             42563       44707   +5,0%
+blink heap thread_state                 6823        7179   +5,2%
+blink wtf string_impl                  45607       47240   +3,6%
+base values                            46060       49723   +8,0%
+base sequence_manager_impl             46446       52997  +14,1%
+base task_queue_impl                   59745       63360   +6,1%
+blink core local_frame_view           217811      240060  +10,2%
+```
+
+Somas da amostra: V8 +7,8% (+2,0% sem `elements`, que sozinho cresce 43%); `hot` (platform+heap, 3 objetos) +6,6%; platform+heap+wtf+base (7 objetos) +7,4%. Leitura: o crescimento típico é de 4% a 8% por objeto, com caudas (V8 `elements`, `sequence_manager_impl`). No V8 o -O3 já está ativo, então esses números dizem o que o upstream já paga, não o que este recurso acrescenta. O custo real de `hot`/`wide` no binário final não foi medido (precisa de build com ThinLTO e PGO); como `platform`+`heap`+`base` são uma fração pequena do `.text` do `chrome`, o esperado é bem menos de 1% do binário, hipótese a confirmar.
 
 ## release e pacote
 
