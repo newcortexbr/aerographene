@@ -1,12 +1,8 @@
 brave/chrome-importer-files.patch
 brave/custom-importer.patch
-brave/tab-cycling-mru-impl.patch
 helium/core/add-arc-importer.patch
-helium/core/services-prefs.patch
 helium/core/override-chrome-protocol.patch
-helium/core/onboarding-page.patch
 helium/settings/setup-behavior-settings-page.patch
-helium/core/keyboard-shortcuts.patch
 helium/core/memory-saving-by-default.patch
 helium/core/flags-setup.patch
 helium/core/add-low-power-framerate-flag.patch
@@ -16,13 +12,8 @@ helium/core/ublock-setup-sources.patch
 helium/core/ublock-install-as-component.patch
 helium/core/ublock-reconfigure-defaults.patch
 helium/core/infinite-tab-freezing.patch
-helium/core/open-new-tabs-next-to-active-tab-option.patch
-helium/core/browser-window-context-menu.patch
-helium/core/tab-cycling-mru.patch
 helium/core/hibernate-tab-context-menu.patch
 helium/core/copy-url-tab-context-menu.patch
-helium/core/shift-right-click-context-menu.patch
-helium/core/crash-reporting-prefs.patch
 helium/core/lazy-session-restore.patch
 helium/ui/tabs.patch
 helium/ui/toolbar-button-prefs.patch
@@ -144,3 +135,4 @@ aerographene/commandbar-f3.patch
 aerographene/commandbar-centered.patch
 aerographene/defaults-f4.patch
 aerographene/notes-f2b.patch
+aerographene/first-run-off.patch

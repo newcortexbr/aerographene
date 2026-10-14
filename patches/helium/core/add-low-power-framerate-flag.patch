@@ -1,4 +1,4 @@
-# aerographene: patch portado sem alteração do conteúdo do diff.
+# aerographene: descrição da flag diz "aerographene flag." em vez de "Helium flag." (texto visível em chrome://flags); resto do diff sem alteração.
 # Origem: https://github.com/imputnet/helium (tag 0.18.3, Chromium 154.0.8037.97)
 # Commit: 57a40ad82583d21787cff0500150539ce54c5960
 # Caminho original: patches/helium/core/add-low-power-framerate-flag.patch
@@ -31,7 +31,7 @@
 +    {helium::kEnergySaverFrameRateCommandLine,
 +     "Maximum frame rate for Energy Saver",
 +     "Configures the frame rate the browser is throttled to when Energy Saver "
-+     "is enabled. Helium flag.",
++     "is enabled. aerographene flag.",
 +     kOsDesktop, MULTI_VALUE_TYPE(helium::kEnergySaverFrameRateChoices)},
      // core/network
      // ui

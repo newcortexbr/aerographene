@@ -1,4 +1,4 @@
-# aerographene: patch portado sem alteração do conteúdo do diff.
+# aerographene: contexto de settings/prefs rebaseado (sem tab-cycling-mru, open-new-tabs-next-to-active-tab-option e shift-right-click-context-menu).
 # Origem: https://github.com/imputnet/helium (tag 0.18.3, Chromium 154.0.8037.97)
 # Commit: 57a40ad82583d21787cff0500150539ce54c5960
 # Caminho original: patches/helium/ui/rounded-frame-corners.patch
@@ -6,9 +6,9 @@
 #
 --- a/chrome/common/pref_names.h
 +++ b/chrome/common/pref_names.h
-@@ -613,6 +613,10 @@ inline constexpr char kTabCyclingMRU[] =
- inline constexpr char kShiftRightClickContextMenu[] =
-     "helium.browser.shift_right_click_context_menu";
+@@ -599,6 +599,10 @@ inline constexpr char
+         "restricted_managed_guest_session_extension_cleanup_exempt_list";
+ #endif  // BUILDFLAG(IS_CHROMEOS)
  
 +// A boolean pref set to true if web contents should be shown inside a rounded
 +// frame.
@@ -19,9 +19,9 @@
  inline constexpr char kShowHomeButton[] = "browser.show_home_button";
 --- a/chrome/browser/ui/browser_ui_prefs.cc
 +++ b/chrome/browser/ui/browser_ui_prefs.cc
-@@ -131,6 +131,8 @@ void RegisterBrowserUserPrefs(user_prefs
- 
-   registry->RegisterBooleanPref(prefs::kShiftRightClickContextMenu, true);
+@@ -122,6 +122,8 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
+   registry->RegisterIntegerPref(prefs::kSessionRestoreInfoBarTimesShown, 0);
+ #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
  
 +  registry->RegisterBooleanPref(prefs::kHeliumRoundedFrame, true);
 +
@@ -30,9 +30,9 @@
    registry->RegisterBooleanPref(prefs::kShowHomeButton, false,
 --- a/chrome/app/settings_strings.grdp
 +++ b/chrome/app/settings_strings.grdp
-@@ -268,6 +268,9 @@
-     <message name="IDS_SETTINGS_SHIFT_RIGHT_CLICK_CONTEXT_MENU" desc="Label for the checkbox which makes Shift+right click show the browser context menu even when a page blocks it.">
-       Force context menu with Shift+Right Click
+@@ -259,6 +259,9 @@
+     <message name="IDS_SETTINGS_COLOR_SCHEME_MODE" desc="Text of the label for selecting a color scheme mode for the browser.">
+       Mode
      </message>
 +    <message name="IDS_SETTINGS_ROUNDED_FRAME" desc="Label for the toggle which enables or disables a rounded frame around web contents.">
 +      Show a rounded frame around web contents
@@ -42,28 +42,28 @@
      </message>
 --- a/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
 +++ b/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
-@@ -596,6 +596,7 @@ void AddAppearanceStrings(content::WebUI
+@@ -592,6 +592,7 @@ void AddAppearanceStrings(content::WebUIDataSource* html_source,
+       {"lightMode", IDS_NTP_CUSTOMIZE_CHROME_COLOR_SCHEME_MODE_LIGHT_LABEL},
+       {"darkMode", IDS_NTP_CUSTOMIZE_CHROME_COLOR_SCHEME_MODE_DARK_LABEL},
        {"systemMode", IDS_NTP_CUSTOMIZE_CHROME_COLOR_SCHEME_MODE_SYSTEM_LABEL},
-       {"openNewTabNextToActive", IDS_SETTINGS_NEW_TAB_NEXT_TO_ACTIVE_BUTTON},
-       {"cycleTabsInMRUOrder", IDS_SETTINGS_CYCLE_TABS_IN_MRU_ORDER},
 +      {"roundedFrame", IDS_SETTINGS_ROUNDED_FRAME},
-       {"shiftRightClickContextMenu",
-        IDS_SETTINGS_SHIFT_RIGHT_CLICK_CONTEXT_MENU},
        {"showHomeButton", IDS_SETTINGS_SHOW_HOME_BUTTON},
+       {"showBookmarksBar", IDS_SETTINGS_SHOW_BOOKMARKS_BAR},
+       {"bookmarksBar", IDS_SETTINGS_BOOKMARKS_BAR},
 --- a/chrome/browser/extensions/api/settings_private/prefs_util.cc
 +++ b/chrome/browser/extensions/api/settings_private/prefs_util.cc
-@@ -309,6 +309,8 @@ const PrefsUtil::TypedPrefMap& PrefsUtil
+@@ -312,6 +312,8 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetAllowlistedKeys() {
        settings_api::PrefType::kBoolean;
-   (*s_allowlist)[::prefs::kShiftRightClickContextMenu] =
+   (*s_allowlist)[::prefs::kSplitViewDragAndDropEnabled] =
        settings_api::PrefType::kBoolean;
 +  (*s_allowlist)[::prefs::kHeliumRoundedFrame] =
 +      settings_api::PrefType::kBoolean;
  
-   (*s_allowlist)[::prefs::kShowHomeButton] = settings_api::PrefType::kBoolean;
-   (*s_allowlist)[contextual_search::kDriveConsentState] =
+   // Helium toolbar settings.
+   (*s_allowlist)[::prefs::kShowBackButton] =
 --- a/chrome/browser/resources/settings/appearance_page/appearance_page.html.ts
 +++ b/chrome/browser/resources/settings/appearance_page/appearance_page.html.ts
-@@ -66,7 +66,11 @@ export function getHtml(this: SettingsAp
+@@ -65,7 +65,11 @@ export function getHtml(this: SettingsAppearancePageElement) {
      <div class="hr" ?hidden="${!this.showHr_(
          this.pageVisibility_.setTheme, this.pageVisibility_.homeButton)}">
      </div>
@@ -78,7 +78,7 @@
          label="$i18n{showHomeButton}"
 --- a/chrome/browser/ui/views/frame/contents_container_view.h
 +++ b/chrome/browser/ui/views/frame/contents_container_view.h
-@@ -117,6 +117,7 @@ class ContentsContainerView : public vie
+@@ -117,6 +117,7 @@ class ContentsContainerView : public views::View,
                                int font_size);
  
    void UpdateBorderAndOverlay(bool is_in_split,
@@ -86,7 +86,7 @@
                                bool is_active,
                                bool is_highlighted,
                                bool round_bottom_left_window_corner,
-@@ -166,6 +167,7 @@ class ContentsContainerView : public vie
+@@ -166,6 +167,7 @@ class ContentsContainerView : public views::View,
        const views::SizeBounds& size_bounds) const override;
  
    bool is_in_split_ = false;
@@ -96,7 +96,7 @@
  
 --- a/chrome/browser/ui/views/frame/contents_container_view.cc
 +++ b/chrome/browser/ui/views/frame/contents_container_view.cc
-@@ -192,20 +192,24 @@ std::vector<views::View*> ContentsContai
+@@ -192,20 +192,24 @@ std::vector<views::View*> ContentsContainerView::GetAccessiblePanes() {
  }
  
  void ContentsContainerView::UpdateBorderAndOverlay(bool is_in_split,
@@ -123,7 +123,7 @@
        SetBorder(nullptr);
        UpdateBorderRoundedCorners();
  
-@@ -215,22 +219,35 @@ void ContentsContainerView::UpdateBorder
+@@ -215,22 +219,35 @@ void ContentsContainerView::UpdateBorderAndOverlay(bool is_in_split,
        }
      }
    } else {
@@ -166,7 +166,7 @@
      // Ensures correct window rounded corners after updating contents rounded
      // corners in UpdateBorderRoundedCorners().
      GetWidget()->non_client_view()->frame_view()->UpdateWindowRoundedCorners();
-@@ -309,7 +326,7 @@ void ContentsContainerView::SetBorderRou
+@@ -309,7 +326,7 @@ void ContentsContainerView::SetBorderRoundedCornersFrom(
  }
  
  void ContentsContainerView::UpdateBorderRoundedCorners() {
@@ -175,7 +175,7 @@
      SetBorderRoundedCornersFrom(rounded_corner_radii_);
      return;
    }
-@@ -324,11 +341,11 @@ void ContentsContainerView::UpdateBorder
+@@ -324,11 +341,11 @@ void ContentsContainerView::UpdateBorderRoundedCorners() {
  
    const gfx::RoundedCornersF container_rounded_corners(
        generic_radius, generic_radius, lower_right_radius, lower_left_radius);
@@ -191,7 +191,7 @@
  
    container_outline_->SetCornerRadii(container_rounded_corners);
    if (capture_contents_border_view_) {
-@@ -339,7 +356,7 @@ void ContentsContainerView::UpdateBorder
+@@ -339,7 +356,7 @@ void ContentsContainerView::UpdateBorderRoundedCorners() {
  
  void ContentsContainerView::ChildVisibilityChanged(View* child) {
    if ((child == new_tab_footer_view_ || child == devtools_web_view_) &&
@@ -200,7 +200,7 @@
      UpdateBorderRoundedCorners();
    }
  }
-@@ -364,7 +381,7 @@ views::View::Views ContentsContainerView
+@@ -364,7 +381,7 @@ views::View::Views ContentsContainerView::GetChildrenInZOrder() {
  void ContentsContainerView::OnViewBoundsChanged(View* observed_view) {
    if (observed_view == contents_view_) {
      UpdateDevToolsDockedPlacement();
@@ -270,7 +270,7 @@
  namespace {
  constexpr int kSnapDistance = 15;
  }
-@@ -58,6 +63,8 @@ void MultiContentsView::ContentsSeparato
+@@ -58,6 +63,8 @@ void MultiContentsView::ContentsSeparators::Reset() {
    leading_separator = nullptr;
    trailing_separator = nullptr;
    corner_separator = nullptr;
@@ -306,7 +306,7 @@
  }
  
  MultiContentsView::~MultiContentsView() {
-@@ -444,6 +459,7 @@ void MultiContentsView::OnThemeChanged()
+@@ -444,6 +459,7 @@ void MultiContentsView::OnThemeChanged() {
  
  void MultiContentsView::OnFullscreenStateChanged() {
    UpdateContentsBorderAndOverlay();
@@ -314,7 +314,7 @@
  }
  
  int MultiContentsView::GetInactiveIndex() const {
-@@ -512,8 +528,9 @@ views::ProposedLayout MultiContentsView:
+@@ -512,8 +528,9 @@ views::ProposedLayout MultiContentsView::CalculateProposedLayout(
  
    gfx::Rect available_space = gfx::Rect(width, height);
  
@@ -326,7 +326,7 @@
    layouts.child_layouts.emplace_back(background_view_.get(), show_background,
                                       available_space);
  
-@@ -527,6 +544,17 @@ views::ProposedLayout MultiContentsView:
+@@ -527,6 +544,17 @@ views::ProposedLayout MultiContentsView::CalculateProposedLayout(
  
    if (IsInSplitView()) {
      available_space.Inset(split_view_insets_);
@@ -344,7 +344,7 @@
    }
    ViewSizes sizes = GetViewSizes(available_space);
  
-@@ -663,7 +691,7 @@ gfx::Rect MultiContentsView::CalculateDr
+@@ -663,7 +691,7 @@ gfx::Rect MultiContentsView::CalculateDropTargetLayout(
  gfx::Rect MultiContentsView::CalculateSeparatorLayouts(
      const gfx::Rect& available_space,
      std::vector<views::ChildLayout>& child_layouts) const {
@@ -353,7 +353,7 @@
      child_layouts.emplace_back(contents_separators_.top_separator.get(), false,
                                 gfx::Rect());
      child_layouts.emplace_back(contents_separators_.leading_separator.get(),
-@@ -799,33 +827,57 @@ int MultiContentsView::GetMinViewSize(gf
+@@ -799,33 +827,57 @@ int MultiContentsView::GetMinViewSize(gfx::Rect available_space) const {
                    std::max(kConstrainedMinWebContentsSize, min_percentage));
  }
  
@@ -415,7 +415,7 @@
          use_system_bottom_left_radius && is_first_view,
          use_system_bottom_right_radius && is_last_view);
    }
-@@ -865,12 +917,38 @@ void MultiContentsView::OnDragAndDropPre
+@@ -865,12 +917,38 @@ void MultiContentsView::OnDragAndDropPrefStateChange() {
    InvalidateLayout();
  }
  
@@ -455,7 +455,7 @@
      UpdateContentsBorderAndOverlay();
    }
    // This can be called during BrowserView layout, so protect against creating a
-@@ -883,7 +961,7 @@ void MultiContentsView::SetSplitViewInse
+@@ -883,7 +961,7 @@ void MultiContentsView::SetSplitViewInsets(const gfx::Insets& insets) {
      return;
    }
    split_view_insets_ = insets;
@@ -466,7 +466,7 @@
    // This can be called during BrowserView layout, so protect against creating a
 --- a/chrome/browser/ui/views/frame/contents_container_outline.h
 +++ b/chrome/browser/ui/views/frame/contents_container_outline.h
-@@ -39,6 +39,7 @@ class ContentsContainerOutline : public
+@@ -39,6 +39,7 @@ class ContentsContainerOutline : public views::View,
  
    void SetCornerRadii(const gfx::RoundedCornersF& radii);
    void UpdateState(bool is_active, bool is_highlighted);
@@ -474,7 +474,7 @@
  
   private:
    // views::View
-@@ -48,8 +49,8 @@ class ContentsContainerOutline : public
+@@ -48,8 +49,8 @@ class ContentsContainerOutline : public views::View,
    void OnViewBoundsChanged(views::View* observed_view) override;
    void OnViewIsDeleting(views::View* observed_view) override;
  
@@ -486,7 +486,7 @@
        view_bounds_observer_{this};
 --- a/chrome/browser/ui/views/frame/contents_container_outline.cc
 +++ b/chrome/browser/ui/views/frame/contents_container_outline.cc
-@@ -99,8 +99,13 @@ void ContentsContainerOutline::SetCorner
+@@ -99,8 +99,13 @@ void ContentsContainerOutline::SetCornerRadii(
  
  void ContentsContainerOutline::UpdateState(bool is_active,
                                             bool is_highlighted) {
@@ -501,7 +501,7 @@
    SetVisible(true);
    SchedulePaint();
  }
-@@ -109,8 +114,7 @@ void ContentsContainerOutline::OnPaint(g
+@@ -109,8 +114,7 @@ void ContentsContainerOutline::OnPaint(gfx::Canvas* canvas) {
    // Draw the bordering stroke.
    cc::PaintFlags flags;
    flags.setStrokeWidth(GetThickness(is_highlighted_));
@@ -513,7 +513,7 @@
  
 --- a/chrome/browser/ui/views/frame/browser_view.cc
 +++ b/chrome/browser/ui/views/frame/browser_view.cc
-@@ -163,6 +163,7 @@
+@@ -162,6 +162,7 @@
  #include "chrome/browser/ui/views/frame/browser_widget.h"
  #include "chrome/browser/ui/views/frame/contents_container_view.h"
  #include "chrome/browser/ui/views/frame/contents_separator.h"
@@ -521,7 +521,7 @@
  #include "chrome/browser/ui/views/frame/custom_floating_corner.h"
  #include "chrome/browser/ui/views/frame/horizontal_tab_strip_region_view.h"
  #include "chrome/browser/ui/views/frame/layout/browser_view_layout.h"
-@@ -675,6 +676,10 @@ class BrowserView::ExclusiveAccessContex
+@@ -669,6 +670,10 @@ class BrowserView::ExclusiveAccessContextImpl
    Profile* GetProfile() override { return browser_view_->GetProfile(); }
  
    void UpdateUIForTabFullscreen() override {
@@ -532,7 +532,7 @@
      browser_view_->GetFrameView()->UpdateFullscreenTopUI();
      // Layout can change in vertical tabstrip mode when going from fullscreen
      // to tab fullscreen and vice-versa.
-@@ -2250,7 +2255,10 @@ gfx::Rect BrowserView::GetBounds() const
+@@ -2167,7 +2172,10 @@ gfx::Rect BrowserView::GetBounds() const {
  
  gfx::Size BrowserView::GetContentsSize() const {
    DCHECK(initialized_);

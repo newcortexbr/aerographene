@@ -34,7 +34,7 @@ com o mesmo teto; POSIX mantido sob #if.
 diff --git a/chrome/app/settings_strings.grdp b/chrome/app/settings_strings.grdp
 --- a/chrome/app/settings_strings.grdp
 +++ b/chrome/app/settings_strings.grdp
-@@ -307,6 +307,42 @@
+@@ -298,6 +298,42 @@
      <message name="IDS_SETTINGS_AEROGRAPHENE_RESET_EXTENSION_THEME" desc="Button next to the extension theme warning that removes the extension theme and goes back to the default Chromium theme.">
        Reset to default
      </message>
@@ -77,10 +77,9 @@ diff --git a/chrome/app/settings_strings.grdp b/chrome/app/settings_strings.grdp
      <message name="IDS_SETTINGS_TAB_STRIP_RIGHT_ALIGN" desc="Label for the toggle that displays vertical tabs on the right side of the browser window.">
        Show vertical tabs on right side
      </message>
-diff --git a/chrome/browser/resources/settings/appearance_page/appearance_browser_proxy.ts b/chrome/browser/resources/settings/appearance_page/appearance_browser_proxy.ts
 --- a/chrome/browser/resources/settings/appearance_page/appearance_browser_proxy.ts
 +++ b/chrome/browser/resources/settings/appearance_page/appearance_browser_proxy.ts
-@@ -19,9 +19,19 @@
+@@ -19,9 +19,19 @@ export interface AerographeneThemes {
    active: string;
  }
  
@@ -100,7 +99,7 @@ diff --git a/chrome/browser/resources/settings/appearance_page/appearance_browse
    getDefaultZoom(): Promise<number>;
    getThemeInfo(themeId: string): Promise<chrome.management.ExtensionInfo>;
  
-@@ -55,6 +65,15 @@
+@@ -55,6 +65,15 @@ export class AppearanceBrowserProxyImpl implements AppearanceBrowserProxy {
      return sendWithPromise<boolean>('setAerographeneTheme', name);
    }
  
@@ -116,10 +115,9 @@ diff --git a/chrome/browser/resources/settings/appearance_page/appearance_browse
    getDefaultZoom(): Promise<number> {
      return chrome.settingsPrivate.getDefaultZoom();
    }
-diff --git a/chrome/browser/resources/settings/appearance_page/appearance_page.html.ts b/chrome/browser/resources/settings/appearance_page/appearance_page.html.ts
 --- a/chrome/browser/resources/settings/appearance_page/appearance_page.html.ts
 +++ b/chrome/browser/resources/settings/appearance_page/appearance_page.html.ts
-@@ -65,6 +65,17 @@
+@@ -65,6 +65,17 @@ export function getHtml(this: SettingsAppearancePageElement) {
          `)}
        </select>
      </div>
@@ -137,11 +135,10 @@ diff --git a/chrome/browser/resources/settings/appearance_page/appearance_page.h
      ${this.showAerographeneExtensionWarning_() ? html`
        <div class="cr-row continuation" id="aerographeneExtensionThemeWarning">
          <div class="flex cr-padded-text secondary">
-@@ -327,6 +338,48 @@
-       </cr-button>
+@@ -328,6 +339,48 @@ ${this.showAerographeneRestartDialog_ ? html`
      </div>
    </cr-dialog>
-+` : ''}
+ ` : ''}
 +${this.aerographeneConflictName_ ? html`
 +  <cr-dialog id="aerographeneImportConflictDialog" show-on-attach
 +      close-text="$i18n{close}"
@@ -183,13 +180,13 @@ diff --git a/chrome/browser/resources/settings/appearance_page/appearance_page.h
 +      </cr-button>
 +    </div>
 +  </cr-dialog>
- ` : ''}
++` : ''}
  ${this.shouldShowRelaunchDialog ? html`
    <relaunch-confirmation-dialog .restartType="${RestartType.RESTART}"
-diff --git a/chrome/browser/resources/settings/appearance_page/appearance_page.ts b/chrome/browser/resources/settings/appearance_page/appearance_page.ts
+       @close="${this.onRelaunchDialogClose}">
 --- a/chrome/browser/resources/settings/appearance_page/appearance_page.ts
 +++ b/chrome/browser/resources/settings/appearance_page/appearance_page.ts
-@@ -36,7 +36,7 @@
+@@ -36,7 +36,7 @@ import {routes} from '../route.js';
  import {Router} from '../router.js';
  import {SettingsViewMixinLit} from '../settings_page/settings_view_mixin_lit.js';
  
@@ -198,7 +195,7 @@ diff --git a/chrome/browser/resources/settings/appearance_page/appearance_page.t
  import {AppearanceBrowserProxyImpl} from './appearance_browser_proxy.js';
  import {getCss} from './appearance_page.css.js';
  import {getHtml} from './appearance_page.html.js';
-@@ -178,6 +178,10 @@
+@@ -178,6 +178,10 @@ export class SettingsAppearancePageElement extends
        aerographeneThemes_: {type: Array},
        aerographeneActiveTheme_: {type: String},
        showAerographeneRestartDialog_: {type: Boolean},
@@ -209,7 +206,7 @@ diff --git a/chrome/browser/resources/settings/appearance_page/appearance_page.t
        glassEffectOptions_: {type: Array},
        browserLayoutOptions_: {type: Array},
        showGlassEffectEnabled_: {type: Boolean},
-@@ -236,6 +240,11 @@
+@@ -236,6 +240,11 @@ export class SettingsAppearancePageElement extends
    protected accessor aerographeneThemes_: AerographeneThemeEntry[] = [];
    protected accessor aerographeneActiveTheme_: string = '';
    protected accessor showAerographeneRestartDialog_: boolean = false;
@@ -221,7 +218,7 @@ diff --git a/chrome/browser/resources/settings/appearance_page/appearance_page.t
  
    protected accessor colorSchemeModeOptions_:
        Array<{value: ColorSchemeMode, name: string}> = [
-@@ -540,6 +549,86 @@
+@@ -540,6 +549,86 @@ export class SettingsAppearancePageElement extends
      this.showAerographeneRestartDialog_ = false;
    }
  
@@ -308,10 +305,9 @@ diff --git a/chrome/browser/resources/settings/appearance_page/appearance_page.t
    protected onUseDefaultClick_() {
      if (this.isForcedTheme_) {
        this.showManagedThemeDialog_ = true;
-diff --git a/chrome/browser/themes/BUILD.gn b/chrome/browser/themes/BUILD.gn
 --- a/chrome/browser/themes/BUILD.gn
 +++ b/chrome/browser/themes/BUILD.gn
-@@ -9,6 +9,7 @@
+@@ -9,6 +9,7 @@ assert(is_win || is_mac || is_linux || is_chromeos)
  source_set("themes") {
    public = [
      "aerographene_theme.h",
@@ -319,7 +315,7 @@ diff --git a/chrome/browser/themes/BUILD.gn b/chrome/browser/themes/BUILD.gn
      "aerographene_theme_repo.h",
      "browser_theme_pack.h",
      "browser_theme_provider_delegate.h",
-@@ -24,6 +25,7 @@
+@@ -24,6 +25,7 @@ source_set("themes") {
    ]
    sources = [
      "aerographene_theme.cc",
@@ -327,7 +323,7 @@ diff --git a/chrome/browser/themes/BUILD.gn b/chrome/browser/themes/BUILD.gn
      "aerographene_theme_repo.cc",
      "browser_theme_pack.cc",
      "custom_theme_supplier.cc",
-@@ -64,6 +66,7 @@
+@@ -64,6 +66,7 @@ source_set("themes") {
      "//content/public/browser",
      "//third_party/abseil-cpp:absl",
      "//third_party/icu",
@@ -335,7 +331,7 @@ diff --git a/chrome/browser/themes/BUILD.gn b/chrome/browser/themes/BUILD.gn
      "//ui/color",
      "//ui/color/dynamic_color",
      "//ui/gfx",
-@@ -151,6 +154,7 @@
+@@ -151,6 +154,7 @@ if (!is_android) {
      testonly = true
  
      sources = [
@@ -343,7 +339,7 @@ diff --git a/chrome/browser/themes/BUILD.gn b/chrome/browser/themes/BUILD.gn
        "aerographene_theme_repo_unittest.cc",
        "browser_theme_pack_unittest.cc",
        "theme_local_data_batch_uploader_unittest.cc",
-@@ -181,6 +185,7 @@
+@@ -181,6 +185,7 @@ if (!is_android) {
        "//content/test:test_support",
        "//testing/gmock",
        "//testing/gtest",
@@ -351,8 +347,6 @@ diff --git a/chrome/browser/themes/BUILD.gn b/chrome/browser/themes/BUILD.gn
        "//ui/color:test_support",
        "//ui/color/dynamic_color",
        "//ui/gfx",
-diff --git a/chrome/browser/themes/aerographene_theme_archive.cc b/chrome/browser/themes/aerographene_theme_archive.cc
-new file mode 100644
 --- /dev/null
 +++ b/chrome/browser/themes/aerographene_theme_archive.cc
 @@ -0,0 +1,203 @@
@@ -559,8 +553,6 @@ new file mode 100644
 +}
 +
 +}  // namespace aerographene
-diff --git a/chrome/browser/themes/aerographene_theme_archive.h b/chrome/browser/themes/aerographene_theme_archive.h
-new file mode 100644
 --- /dev/null
 +++ b/chrome/browser/themes/aerographene_theme_archive.h
 @@ -0,0 +1,66 @@
@@ -630,8 +622,6 @@ new file mode 100644
 +}  // namespace aerographene
 +
 +#endif  // CHROME_BROWSER_THEMES_AEROGRAPHENE_THEME_ARCHIVE_H_
-diff --git a/chrome/browser/themes/aerographene_theme_archive_unittest.cc b/chrome/browser/themes/aerographene_theme_archive_unittest.cc
-new file mode 100644
 --- /dev/null
 +++ b/chrome/browser/themes/aerographene_theme_archive_unittest.cc
 @@ -0,0 +1,166 @@
@@ -801,7 +791,6 @@ new file mode 100644
 +
 +}  // namespace
 +}  // namespace aerographene
-diff --git a/chrome/browser/ui/webui/settings/appearance_handler.cc b/chrome/browser/ui/webui/settings/appearance_handler.cc
 --- a/chrome/browser/ui/webui/settings/appearance_handler.cc
 +++ b/chrome/browser/ui/webui/settings/appearance_handler.cc
 @@ -4,7 +4,9 @@
@@ -850,10 +839,11 @@ diff --git a/chrome/browser/ui/webui/settings/appearance_handler.cc b/chrome/bro
  
  void AppearanceHandler::OnJavascriptAllowed() {}
  void AppearanceHandler::OnJavascriptDisallowed() {}
-@@ -80,6 +90,14 @@
+@@ -79,6 +89,14 @@ void AppearanceHandler::RegisterMessages() {
+       "setAerographeneTheme",
        base::BindRepeating(&AppearanceHandler::HandleSetAerographeneTheme,
                            base::Unretained(this)));
-   web_ui()->RegisterMessageCallback(
++  web_ui()->RegisterMessageCallback(
 +      "importAerographeneTheme",
 +      base::BindRepeating(&AppearanceHandler::HandleImportAerographeneTheme,
 +                          base::Unretained(this)));
@@ -861,11 +851,10 @@ diff --git a/chrome/browser/ui/webui/settings/appearance_handler.cc b/chrome/bro
 +      "replaceAerographeneTheme",
 +      base::BindRepeating(&AppearanceHandler::HandleReplaceAerographeneTheme,
 +                          base::Unretained(this)));
-+  web_ui()->RegisterMessageCallback(
+   web_ui()->RegisterMessageCallback(
        "recordVerticalTabStripModeChanged",
        base::BindRepeating(
-           &AppearanceHandler::HandleRecordVerticalTabStripModeChanged,
-@@ -202,4 +220,109 @@
+@@ -202,4 +220,109 @@ void AppearanceHandler::OnAerographeneThemeValidated(
    ResolveJavascriptCallback(callback_id, base::Value(found));
  }
  
@@ -975,7 +964,6 @@ diff --git a/chrome/browser/ui/webui/settings/appearance_handler.cc b/chrome/bro
 +}
 +
  }  // namespace settings
-diff --git a/chrome/browser/ui/webui/settings/appearance_handler.h b/chrome/browser/ui/webui/settings/appearance_handler.h
 --- a/chrome/browser/ui/webui/settings/appearance_handler.h
 +++ b/chrome/browser/ui/webui/settings/appearance_handler.h
 @@ -6,15 +6,19 @@
@@ -998,7 +986,7 @@ diff --git a/chrome/browser/ui/webui/settings/appearance_handler.h b/chrome/brow
  
  namespace content {
  class WebUI;
-@@ -25,7 +29,8 @@
+@@ -25,7 +29,8 @@ class Profile;
  namespace settings {
  
  // Chrome "Appearance" settings page UI handler.
@@ -1008,7 +996,7 @@ diff --git a/chrome/browser/ui/webui/settings/appearance_handler.h b/chrome/brow
   public:
    explicit AppearanceHandler(content::WebUI* webui);
  
-@@ -68,8 +73,34 @@
+@@ -68,8 +73,34 @@ class AppearanceHandler : public SettingsPageUIHandler {
        std::string name,
        std::vector<aerographene::ThemeInfo> themes);
  
@@ -1043,10 +1031,9 @@ diff --git a/chrome/browser/ui/webui/settings/appearance_handler.h b/chrome/brow
    base::WeakPtrFactory<AppearanceHandler> weak_ptr_factory_{this};
  };
  
-diff --git a/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc b/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
 --- a/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
 +++ b/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
-@@ -615,6 +615,30 @@
+@@ -612,6 +612,30 @@ void AddAppearanceStrings(content::WebUIDataSource* html_source,
         IDS_SETTINGS_AEROGRAPHENE_EXTENSION_THEME_WARNING},
        {"aerographeneResetExtensionTheme",
         IDS_SETTINGS_AEROGRAPHENE_RESET_EXTENSION_THEME},
@@ -1076,4 +1063,4 @@ diff --git a/chrome/browser/ui/webui/settings/settings_localized_strings_provide
 +       IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_ERROR_IO},
        {"centeredLocationBar", IDS_SETTINGS_CENTERED_LOCATION_BAR},
        {"verticalCollapseShortcut", IDS_SETTINGS_VERTICAL_COLLAPSE_SHORTCUT},
-       {"shiftRightClickContextMenu",
+       {"showHomeButton", IDS_SETTINGS_SHOW_HOME_BUTTON},

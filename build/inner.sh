@@ -15,10 +15,6 @@ AERO_STATE="${_src_dir}/.aero-applied"          # cópia da série aplicada + BU
 DOMSUB_CACHE="${_root}/build/domsub-cache.tar.gz"  # originais da domain substitution (permite revert)
 MTIME_SNAP="${_root}/build/aero-mtimes.tsv"
 GNFILE_REL=build/config/compiler/BUILD.gn
-# helium-onboarding (deps.ini do Helium, sha256 fixado); a versão entra no hash da série porque
-# build/branding_strings.py reescreve o .grdp dele (Helium -> aerographene, traduções pt-BR)
-ob_ver=202609160835
-ob_sha=35ce782dc9534b5bff59af7937f22c90179ca9610883acb2e0d698cc6f799366
 # NeverDecaf/chromium-web-store (MIT), release fixada por versão + sha256 do .crx (fatia F4)
 cws_ver=1.5.5.4
 cws_sha=63c075b4a25b11af2c536dad191946e8d9547f92d5b6c257b2ce4138d2996f32
@@ -42,7 +38,6 @@ patch_hash() {
         series_list "${AERO_PATCHES}" | while read -r p; do cat "${AERO_PATCHES}/${p}"; done
         echo "march=${MARCH}"
         cat /aero/build/branding_strings.py /aero/build/strings_ptbr_extra.json
-        echo "onboarding=${ob_ver}"
         echo "chromium-web-store=${cws_ver}"
     } | sha256sum | cut -d' ' -f1
 }
@@ -229,21 +224,6 @@ PY
     curl -fL --retry 3 -o "${cws_dir}/LICENSE" \
         "https://raw.githubusercontent.com/NeverDecaf/chromium-web-store/v${cws_ver}/LICENSE"
     touch "${_src_dir}/.aero-cws-${cws_ver}"
-fi
-
-echo "== helium-onboarding ${ob_ver} (deps.ini do Helium, sha256 fixado)"
-# antes dos patches e do branding_strings.py: o .grdp dele é parte de generated_resources.grd.
-# No re-patch incremental o backup de strings-orig já restaurou o .grdp original; se a versão
-# mudou, o diretório é recriado aqui antes da troca.
-ob_dir="${_src_dir}/components/helium_onboarding"
-if [ ! -f "${ob_dir}/.aero-onboarding-${ob_ver}" ]; then
-    ob_tgz="${_root}/build/helium-onboarding-${ob_ver}.tar.gz"
-    [ -s "$ob_tgz" ] || curl -fL --retry 3 -o "$ob_tgz" \
-        "https://github.com/imputnet/helium-onboarding/releases/download/${ob_ver}/helium-onboarding-${ob_ver}.tar.gz"
-    echo "${ob_sha}  ${ob_tgz}" | sha256sum -c -
-    rm -rf "$ob_dir"; mkdir -p "$ob_dir"
-    tar -xzf "$ob_tgz" -C "$ob_dir"
-    touch "${ob_dir}/.aero-onboarding-${ob_ver}"
 fi
 
 echo "== patches aerographene (${AERO_PATCHES}/series)"

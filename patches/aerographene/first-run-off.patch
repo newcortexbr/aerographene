@@ -1,0 +1,26 @@
+# aerographene: sem first-run nativo do Chromium (FRE do seletor de perfil), também com --force-first-run.
+# Substitui o hunk de first_run_service.cc de helium/core/onboarding-page.patch (Helium, GPL-3.0), que saiu da série.
+# Perfil novo abre a página nova aba; o onboarding próprio ainda não existe.
+#
+--- a/chrome/browser/ui/startup/first_run_service.cc
++++ b/chrome/browser/ui/startup/first_run_service.cc
+@@ -48,16 +48,9 @@
+ }
+ 
+ bool IsFirstRunEligibleProcess() {
+-  if (!first_run::IsChromeFirstRun()) {
+-    return false;
+-  }
+-
+-  // TODO(crbug.com/40232971): `IsChromeFirstRun()` should be a sufficient check
+-  // for Dice platforms. We currently keep this because some tests add
+-  // `--force-first-run` while keeping `--no-first-run`. We should updated the
+-  // affected tests to handle correctly the FRE opening instead of a tab.
+-  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
+-      switches::kNoFirstRun);
++  // aerographene: no native first-run experience (profile picker FRE), also
++  // for forced first-run launches; a new profile opens the new tab page.
++  return false;
+ }
+ 
+ void SetFirstRunFinished(ProfilePicker::FirstRunFinishReason reason) {
