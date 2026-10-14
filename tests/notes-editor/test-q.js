@@ -8,7 +8,7 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 try {
   await sleep(700);
   check('q: titulo da aba = vault', document.title === 'o: MeuCofre', document.title);
-  check('q: nenhum documento aberto', $('#noteTitle').textContent === 'sem nota aberta' && !$('textarea') && !$('.md.live'));
+  check('q: nenhum documento aberto', $('#noteState').textContent === 'sem nota aberta' && !$('textarea') && !$('.md.live'));
   check('q: arvore completa visivel na lateral', !$('#tree').hidden && $$('#tree .node').length > 0);
   check('q: lista de resultados da lateral escondida', $('#results').hidden);
   const hits = $$('.center-results .hit');
@@ -17,7 +17,7 @@ try {
   check('q: campo de busca preenchido', $('#search').value === 'forte');
   check('q: searchVault chamado uma vez com o termo', window.calls.filter((c) => c[0] === 'searchVault' && c[1] === 'forte').length === 1);
   hits.find((h) => h.textContent.includes('a.md')).click(); await sleep(200);
-  check('q: clicar abre a nota', $('#noteTitle').textContent === 'a.md');
+  check('q: clicar abre a nota', $('#noteTitle').textContent === 'a');
   check('q: titulo continua o vault', document.title === 'o: MeuCofre', document.title);
 } catch (e) { results.push('ERRO ' + e.stack); }
 const pre = document.createElement('pre'); pre.id = 'results'; pre.textContent = results.join('\n'); document.body.append(pre);

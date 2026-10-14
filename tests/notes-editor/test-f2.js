@@ -18,8 +18,8 @@ try {
   check('f2: arvore rola sozinha', scrolls($('#tree')));
   $('#tree').scrollTop = 200;
   check('f2: arvore rolou', $('#tree').scrollTop > 0 && window.scrollY === 0);
-  check('f2: cabecalho da vault', $('.vault-head .lbl') && $('#vaultName').textContent === 'MeuCofre');
-  check('f2: acoes nova nota/pasta/busca', !$('#btnNew').disabled && !!$('#btnNewDir') && !$('#btnFind').disabled);
+  check('f2: cabecalho da vault', $('.vsel .lbl') && $('#vaultName').textContent === 'MeuCofre');
+  check('f2: acoes nova nota/pasta/busca', !$('#btnNew').disabled && !!$('#btnNewDir') && $('#btnNewDir').disabled && !$('#modeSearch').disabled);
   check('f2: atalhos visiveis', ['Ctrl+S', 'Ctrl+N', 'Ctrl+K'].every((k) => $('#vaultFoot').textContent.includes(k)));
   check('f2: estado vazio util', $('.empty-state') && $$('.empty-state kbd').length === 3);
   check('f2: contagem de notas na barra', /\d+ notas visíveis/.test($('#noteStats').textContent), $('#noteStats').textContent);
@@ -30,10 +30,10 @@ try {
   check('f2: editor rola sozinho', scrolls($('#editor')));
   $('#editor').scrollTop = 500;
   check('f2: editor rolou sem rolar a pagina', $('#editor').scrollTop > 0 && root.scrollHeight <= innerHeight);
-  check('f2: contagem de palavras', /^\d+ palavras · \d+ caracteres$/.test($('#noteStats').textContent) && parseInt($('#noteStats').textContent) > 500, $('#noteStats').textContent);
+  check('f2: contagem de palavras', /^\d+ palavras$/.test($('#sbWords').textContent) && /^\d+ caracteres$/.test($('#sbChars').textContent) && parseInt($('#sbWords').textContent) > 500, $('#sbWords').textContent);
   check('f2: estado salvo', $('#noteState').textContent === 'salvo');
   $$('.node').find((n) => n.dataset.path === 'sub/b.md').click(); await sleep(150);
-  check('f2: breadcrumb com a pasta', $('#crumbs').textContent.replace(/\s/g, '') === 'sub/', $('#crumbs').textContent);
+  check('f2: breadcrumb com a pasta', $('#crumbs').textContent.replace(/\s/g, '') === 'vault:sub/b.md', $('#crumbs').textContent);
   // atalhos
   const ev = (k, o = {}) => window.dispatchEvent(new KeyboardEvent('keydown', {key: k, bubbles: true, cancelable: true, ...o}));
   ev('k', {ctrlKey: true});

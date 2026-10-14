@@ -16,6 +16,27 @@ validado até aqui (Chromium 154, Cezanne, overlay): os patches aplicam com `--f
 - feito (B6, `patches/aerographene/notes-b6.patch`, último da série): aba única por janela e entrada `o:` na command bar (seção "aba única e command bar").
 - falta: a migração para Mojo (hoje usa mensagens WebUI), cor/ícone próprios da aba e a verificação como `chrome://notes` real.
 
+## layout F2B (aprovado em 14/10/2026)
+
+patch `notes-f2b` (só `notes.{html,css,js}` e `editor.js`; sem backend novo). Mockup aprovado sem mudanças: `theming/1/notes-f2b/`.
+
+funciona de verdade (frontend sobre `listDir`/`readNote`/`searchVault`):
+
+- lateral com três modos: arquivos (árvore), buscar (campo e resultados do B5; Ctrl+K abre este modo) e tags. Ações: `+ nota`, ordenar (nome A→Z / Z→A, guardado em `localStorage`) e recolher todas as pastas.
+- árvore com triângulos, guias de recuo, extensão `.md` apagada, contagem recursiva de notas por pasta (índice por `listDir`, até 3000 pastas / 20000 notas; refeito 1,5 s depois de uma mudança) e item ativo.
+- abas das notas abertas: cada aba tem o seu editor, então o texto não salvo sobrevive à troca de aba; `●` marca a aba suja; fechar aba suja pergunta salvar/descartar; abrir uma nota já aberta só troca de aba. Trocar de vault pergunta uma vez por todas as abas sujas. Enquanto uma pergunta inline está aberta (`asking`) a troca de aba espera.
+- faixa à direita das abas: estado (salvo, alterado, conflito, sem nota aberta) e salvar/renomear/apagar.
+- breadcrumb `vault: pasta / pasta / nota.md` e botão `editar ⇄ ler` (`editor.setReadOnly`: tudo renderizado, clique não edita; o texto alterado fica).
+- título grande (`# nome`, sem `.md`) e chips de tags lidos do front matter (`tags: [a, b]`, `tags: a b` ou lista `- a`) e de `#tags` no texto fora de código.
+- barra de status: selo EDIT/LER/VAULT, pasta, `← N backlinks`, palavras, caracteres, `L:C` (o editor avisa o cursor por `onCaret`) e `UTF-8 · LF/CRLF`; sem nota aberta, `N notas visíveis`.
+- backlinks: `searchVault("[[nome")` escolhe candidatos (até 60) e `readNote` confirma um `[[nome]]` de verdade; clicar no contador lista as notas no modo buscar. Só acha links sem pasta (`[[nome]]`, `[[nome|alias]]`, `[[nome#seção]]`).
+- modo tags: lê até 500 notas (seis por vez), lista as tags por contagem e expande as notas de cada uma; mostra "parcial" se passar do limite.
+- estado vazio com atalhos e notas recentes (`localStorage`, até 8 por vault, nunca sai da página).
+
+visível mas desabilitado (precisa de backend novo): `+ pasta` (criar pasta), trocar de vault (lista de vaults), ordenar por data (`listDir` não devolve mtime) e `⋯` (mais ações, ainda sem conteúdo). Codificação é sempre UTF-8 (o backend só lê UTF-8).
+
+teste: `tests/notes-editor/run.sh` (`test-f2b.js`, 53 verificações novas; páginas `index*.html` com backend simulado). Não testado: `chrome://notes` real.
+
 ## título da aba
 
 decisão do dono em 13/10/2026: o título da aba de notas é sempre `o: <nome da vault>` (nome da pasta escolhida), nunca o nome do arquivo aberto. O nome do arquivo aparece só no cabeçalho da nota dentro da página. Sem vault escolhida o título é `o: notas`. Isso substitui o rótulo `o: <arquivo>.md` do plano (B6) e dos mockups C-r02 para o título da aba.
@@ -132,3 +153,4 @@ verificado só no Chrome headless com backend simulado (`tests/notes-editor/run.
 - a página, ao receber `vaultChanged`: `syncExternal` (limpa cache de imagens, refaz a árvore, refaz a busca ativa, `checkOpenNote`). Edição externa em nota alterada reutiliza `resolveConflict` do B4. `markdown.js` recebe `opts.loadImage(path, img, onFail)` do editor; sem ele (ou com URL remota/absoluta) imagem vira texto.
 - B6 (`notes-b6`, último da série): `aerographene::ParseNotesCommand(text)` -> `optional<u16string>` (termo; `""` para `o:` sozinho) e `NotesCommandUrl(termo)` (`chrome://notes/?q=<termo>` ou `?new=1`) em `components/omnibox/browser/aero_notes_command.*`, chamados em `BuiltinProvider::Start` logo após o `-t` do terminal-c4 (patch depende dele pelo contexto). Aba única: bloco em `NavigateImpl` (`browser_navigator.cc`, depois do hunk `kHeliumUIScheme`) converte para `SINGLETON_TAB` + `IGNORE_AND_NAVIGATE` quando `GetIndexOfExistingTabMatchingURL` acha uma aba `chrome://notes`; `query == "new=1"` fica de fora. Página: `openFromQuery()` em `notes.js` e `renderHits(target, r)` (compartilhada com a busca lateral). Teste da página com `?q=`: `tests/notes-editor/test-q.js` (rodado por `run.sh`).
 - F2 (`notes-f2`, último da série): só `notes.{html,css,js}`; `emptyState()`, `setCrumbs()`, `updateStats()`, flag `conflict` em `updateState()`; Ctrl+K/Ctrl+N/Ctrl+Shift+F no `keydown` da janela; `#btnNewDir` desabilitado de propósito. Teste: `tests/notes-editor/test-f2.js`.
+- F2B (`notes-f2b`, fim da série): `notes.{html,css,js}` + `editor.js` (`setReadOnly`, `isReadOnly`, `isCrlf`, opção `onCaret`). Estado da página: `tabs[]` (cada aba com `doc`, `host`, `mtime`, `conflict`, `backlinks`, `readOnly`), globais `current/mtime/doc/conflict` espelham a aba ativa via `activate()`; `mode` = files|search|tags; `vaultIndex` (contagens), `scan` (tags), `localStorage` `aero.notes.recent` e `aero.notes.sort`. `#noteTitle` agora é o nome sem `.md` (e `sem nota aberta` sem aba). Desabilitados: `#btnNewDir`, `#btnSwap`, `#btnMore`. `#btnFind` foi removido (modo buscar). Teste: `test-f2b.js`.
