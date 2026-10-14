@@ -1389,8 +1389,8 @@ passa a ignorar nomes que não são UTF-8 (base::Value exige UTF-8).
 +  if (!real_root.AppendRelativePath(path, &rel)) {
 +    return true;  // the root itself or an unexpected form: do not hide it
 +  }
-+  for (const std::string& part : rel.GetComponents()) {
-+    if (!part.empty() && part[0] == '.') {
++  for (const base::FilePath::StringType& part : rel.GetComponents()) {
++    if (!part.empty() && part[0] == FILE_PATH_LITERAL('.')) {
 +      return false;
 +    }
 +  }
