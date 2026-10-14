@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>neobrutalism wild · dark</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--bg:#0b0b10;--ink:#ffffff;--line:#ffffff;--chrome:#16161d;--tabbg:#26262f;--urlbg:#0b0b10;--stripe:rgba(255,255,255,.05);--on:#0b0b10;--c1:#ff2e93;--c2:#d7ff1e;--c3:#00e5ff;--c4:#ffe600;--c5:#ff6a1a}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%;overflow:hidden}
+body{width:1440px;height:900px;background:var(--bg);color:var(--ink);font:700 14px/1.2 "JetBrains Mono","DejaVu Sans Mono",monospace;position:relative;
+ background-image:repeating-linear-gradient(135deg,var(--stripe) 0 2px,transparent 2px 22px)}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+.bd{border:4px solid var(--line)}
+.sh{box-shadow:7px 7px 0 var(--line)}
+/* chrome */
+.top{position:absolute;left:0;right:0;top:0;height:132px;background:var(--chrome);border-bottom:6px solid var(--line);z-index:5}
+.top:after{content:"";position:absolute;left:0;right:0;bottom:-18px;height:12px;background:repeating-linear-gradient(90deg,var(--line) 0 18px,var(--c3) 18px 36px,var(--line) 36px 54px,var(--c1) 54px 72px)}
+.tabs{position:absolute;left:96px;top:16px;display:flex;gap:6px;align-items:flex-end}
+.logo{position:absolute;left:14px;top:10px;width:66px;height:66px;background:var(--c2);border:4px solid var(--line);box-shadow:5px 5px 0 var(--line);transform:rotate(-8deg);display:grid;place-items:center;font:900 40px/1 "DejaVu Sans",sans-serif;color:var(--on)}
+.tab{position:relative;height:50px;padding:0 14px;display:flex;align-items:center;gap:10px;border:4px solid var(--line);box-shadow:5px 5px 0 var(--line);background:var(--tabbg);font-size:15px;white-space:nowrap;text-transform:lowercase}
+.tab b{font-weight:900;background:var(--line);color:var(--bg);padding:2px 6px;margin-right:2px}
+.tab i{font-style:normal;width:22px;height:22px;border:3px solid var(--line);display:grid;place-items:center;font-size:12px;background:var(--bg)}
+.t1{transform:rotate(-2.5deg);background:var(--c4);color:var(--on);width:200px}
+.t2{transform:rotate(1.8deg) translateY(4px);background:var(--c1);color:var(--on);width:210px}
+.t3{transform:rotate(-1deg);background:var(--c3);color:var(--on);width:180px}
+.t4{transform:rotate(3deg) translateY(6px);width:150px}
+.sel{height:66px;margin-bottom:-6px;z-index:3;background:var(--c2)!important;color:var(--on);font-size:17px;transform:rotate(-1.2deg) translateY(-4px);box-shadow:8px 8px 0 var(--line);width:250px}
+.sel:after{content:"";position:absolute;left:-4px;right:-4px;bottom:-10px;height:10px;background:var(--c2);border-left:4px solid var(--line);border-right:4px solid var(--line)}
+.plus{width:48px;height:48px;border:4px solid var(--line);background:var(--c4);color:var(--on);font:900 30px/1 monospace;box-shadow:4px 4px 0 var(--line);transform:rotate(8deg);margin-left:8px}
+.bar{position:absolute;left:14px;right:14px;top:84px;height:42px;display:flex;gap:10px;align-items:center}
+.nav{width:42px;height:42px;border:4px solid var(--line);background:var(--bg);box-shadow:4px 4px 0 var(--line);font:900 20px/1 monospace;display:grid;place-items:center}
+.nav:nth-child(2){transform:rotate(2deg)}
+.url{flex:1;height:42px;border:4px solid var(--line);background:var(--urlbg);box-shadow:6px 6px 0 var(--line);display:flex;align-items:center;padding:0 12px;gap:12px;font-size:17px;transform:rotate(-.25deg)}
+.url .pill{background:var(--c3);color:var(--on);border:3px solid var(--line);padding:2px 8px;font-size:13px}
+.url .k{margin-left:auto;background:var(--line);color:var(--bg);padding:3px 8px;font-size:12px}
+.go{height:42px;padding:0 16px;border:4px solid var(--line);background:var(--c1);color:var(--on);box-shadow:4px 4px 0 var(--line);font:900 16px/1 monospace;transform:rotate(1.5deg)}
+.av{width:42px;height:42px;border:4px solid var(--line);background:var(--c3);border-radius:50%;box-shadow:4px 4px 0 var(--line);display:grid;place-items:center;font-weight:900;color:var(--on)}
+/* page */
+.page{position:absolute;left:0;right:0;top:150px;bottom:0;padding:26px 44px}
+.hello{position:absolute;left:40px;top:20px;font:900 168px/.82 "DejaVu Sans","Noto Sans",sans-serif;letter-spacing:-8px;text-transform:uppercase;color:var(--ink);text-shadow:8px 8px 0 var(--c1);transform:rotate(-3deg);transform-origin:left top}
+.hello span{display:block;color:var(--bg);-webkit-text-stroke:5px var(--ink);text-shadow:8px 8px 0 var(--c2);margin-left:90px}
+.sub{position:absolute;left:62px;top:340px;background:var(--ink);color:var(--bg);padding:8px 14px;font-size:17px;transform:rotate(-1.5deg);box-shadow:6px 6px 0 var(--c3)}
+.search{position:absolute;left:62px;top:392px;width:700px;height:76px;border:6px solid var(--line);background:var(--urlbg);box-shadow:12px 12px 0 var(--c4);display:flex;align-items:center;padding:0 20px;font-size:25px;transform:rotate(.8deg)}
+.search em{font-style:normal;margin-left:auto;background:var(--c2);color:var(--on);border:4px solid var(--line);padding:8px 16px;font-weight:900}
+.cards{position:absolute;left:62px;top:500px;display:flex;gap:26px}
+.card{width:212px;height:168px;border:5px solid var(--line);box-shadow:9px 9px 0 var(--line);padding:14px;display:flex;flex-direction:column;justify-content:space-between;color:var(--on)}
+.card h3{font:900 29px/.9 "DejaVu Sans",sans-serif;text-transform:uppercase;letter-spacing:-1.5px}
+.card small{font-size:12px;background:var(--line);color:var(--bg);padding:2px 6px;align-self:flex-start}
+.c-a{background:var(--c1);transform:rotate(-3deg)}
+.c-b{background:var(--c4);transform:rotate(2deg) translateY(10px)}
+.c-c{background:var(--c3);transform:rotate(-1.5deg) translateY(-4px)}
+.c-d{background:var(--c5);transform:rotate(3.5deg) translateY(8px)}
+/* right collage */
+.sun{position:absolute;right:70px;top:34px;width:430px;height:430px;border-radius:50%;background:var(--c5);border:6px solid var(--line);box-shadow:14px 14px 0 var(--line);
+ background-image:repeating-linear-gradient(0deg,transparent 0 22px,var(--line) 22px 28px);-webkit-mask:none}
+.sun:after{content:"";position:absolute;inset:0;border-radius:50%;background:repeating-linear-gradient(0deg,transparent 0 24px,var(--bg) 24px 30px);clip-path:inset(55% 0 0 0)}
+.widget{position:absolute;right:56px;top:330px;width:360px;border:5px solid var(--line);background:var(--urlbg);box-shadow:10px 10px 0 var(--c1);transform:rotate(2.2deg);padding:14px}
+.widget h4{background:var(--line);color:var(--bg);padding:4px 8px;font-size:14px;margin:-14px -14px 10px;text-transform:uppercase}
+.widget li{list-style:none;display:flex;justify-content:space-between;padding:7px 0;border-bottom:3px dashed var(--line);font-size:15px}
+.widget li:last-child{border:0}
+.widget li span{background:var(--c3);color:var(--on);padding:0 6px;border:2px solid var(--line)}
+.stk{position:absolute;font:900 20px/1 monospace;border:4px solid var(--line);padding:8px 12px;box-shadow:5px 5px 0 var(--line);text-transform:uppercase;color:var(--on)}
+.s1{right:440px;top:470px;background:var(--c3);transform:rotate(-12deg)}
+.s2{right:52px;top:30px;background:var(--c1);transform:rotate(9deg)}
+.s3{right:150px;top:575px;background:var(--c2);transform:rotate(-5deg);font-size:26px}
+.tape{position:absolute;left:-20px;right:-20px;bottom:46px;height:44px;background:var(--c2);border-top:5px solid var(--line);border-bottom:5px solid var(--line);transform:rotate(-1.2deg);overflow:hidden;white-space:nowrap;font:900 24px/34px monospace;color:var(--on);letter-spacing:2px;text-transform:uppercase;padding-top:2px}
+.foot{position:absolute;left:0;right:0;bottom:0;height:34px;background:var(--line);color:var(--bg);display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:12px;letter-spacing:1px;text-transform:uppercase}
+</style></head><body>
+<header class="top">
+ <div class="logo">A</div>
+ <div class="tabs">
+  <div class="tab t1"><i>●</i><b>o:</b>vault</div>
+  <div class="tab t2"><i>▮</i><b>t:</b>workspace 1</div>
+  <div class="tab sel"><i>★</i>nova aba</div>
+  <div class="tab t3"><i>◆</i>receitas de pão</div>
+  <div class="tab t4"><i>◐</i>mapa</div>
+  <button class="plus" aria-label="Nova aba">+</button>
+ </div>
+ <div class="bar">
+  <button class="nav" aria-label="Voltar">←</button><button class="nav" aria-label="Avançar">→</button><button class="nav" aria-label="Recarregar">↻</button>
+  <div class="url"><span class="pill">novo</span>pesquisar ou digitar endereço<span class="k">ctrl+L</span></div>
+  <button class="go">IR ▶</button><div class="av">M</div>
+ </div>
+</header>
+<main class="page">
+ <div class="hello">boa<span>noite.</span></div>
+ <div class="sub">QUARTA · 14 OUT · 3 ABAS VIVAS · 0 RASTREADORES</div>
+ <div class="search">pesquisar na web…<em>BUSCAR</em></div>
+ <div class="cards">
+  <div class="card c-a"><small>vault</small><h3>notas do dia</h3></div>
+  <div class="card c-b"><small>term</small><h3>workspace 1</h3></div>
+  <div class="card c-c"><small>favorito</small><h3>mapa da cidade</h3></div>
+  <div class="card c-d"><small>leitura</small><h3>ensaios longos</h3></div>
+ </div>
+ <div class="sun"></div>
+ <div class="stk s2">sem nuvem!</div>
+ <div class="widget"><h4>fixados / recentes</h4><ul>
+  <li>o: vault <span>3</span></li><li>t: workspace 1 <span>1</span></li><li>receitas de pão <span>·</span></li><li>mapa de trilhas <span>·</span></li></ul></div>
+ <div class="stk s1">100% local</div>
+ <div class="stk s3">rápido ⚡</div>
+ <div class="tape">aerographene ✦ conteúdo fictício ✦ aerographene ✦ conteúdo fictício ✦ aerographene ✦ conteúdo fictício ✦ aerographene</div>
+</main>
+<div class="foot"><span>AG/NB-WILD · dark · REV.00</span><span>mockup estático · sem dados reais</span></div>
+</body></html>
