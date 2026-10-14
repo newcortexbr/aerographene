@@ -256,6 +256,18 @@ Fatias:
 3. E3 `release.yml` usa o padrão de nomes novo e anexa pkg/deb/rpm, um conjunto por cpu quando A estiver pronta. Aceite: release draft de teste com todos os assets e `SHA256SUMS`.
 4. E4 Windows: o Chromium gera `mini_installer.exe` (alvo `mini_installer`; o Helium põe NSIS por cima). Recomendação: zip portátil + `mini_installer`; NSIS só se o dono quiser instalador com páginas; `makensis` roda nativo no Ubuntu (pacote `nsis`), sem wine. Depende de D4.
 
+## F. feedback do dono na pre-release v0.3.0 (13/10/2026, noite)
+
+Testado pelo dono no Arch com a pre-release (`24688b2`): gostou no geral. Pedidos, cada um numa fatia própria, com patch novo no fim da série:
+
+1. F1 terminal: redimensionar janelas do workspace (alça na borda/canto, tamanho persistido no layout, `ResizePseudoConsole`/`TIOCSWINSZ` já existentes recebem o novo tamanho).
+2. F2 notas: a página não rola (editor, árvore e resultados precisam de scroll próprio); GUI "bem barebones": aproximar do Obsidian dentro da linguagem visual do tema (cabeçalho da nota, abas ou breadcrumb, estados vazios, contadores, atalhos visíveis).
+3. F3 Ctrl+T abre a command bar no centro da tela (painel flutuante, estilo Arc/Zen) em vez de aba vazia; Enter abre o destino em aba nova; Esc fecha sem criar aba.
+4. F4 padrões de primeiro uso: buscador padrão Google; loja de extensões configurada (extensão chromium-web-store fixada por hash como o uBlock, e `extension-mime-request-handling` para instalar `.crx` da Chrome Web Store).
+5. F5 configurações bem diferentes do Chromium padrão: `chrome://settings` com o desenho quadrado e semi-futurista do aerographene (tokens do tema ativo, raio do tema, rótulos mono, seções com contorno), sem tirar funções.
+
+Aceite comum: patch aplica com `--fuzz=0` na série, alvos afetados compilam, `aero_ui_tests` verde, página testada headless quando for WebUI, wiki atualizada. Nada disso foi testado no navegador real até a próxima pre-release.
+
 ## ordem e dependências
 
 1. E1–E3 (independe de tudo, usa o artefato v0.2/v0.3 existente).
