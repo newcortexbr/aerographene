@@ -5,7 +5,7 @@
 - aerographene: navegador Linux x86-64-v3, série própria de patches sobre ungoogled-chromium, com partes do Helium e foco em desempenho. Licença GPL-3.0.
 - este repositório contém patches, scripts Bash, harness Python e mockups; não contém a árvore completa do Chromium nem um aplicativo Node.js.
 - antes de implementar produto, leia `docs/SCOPE.md` e `CONTEXT.md`; consulte `docs/adr/` para decisões de base, CPU, CI, spaces e sync.
-- ao retomar trabalho, leia `docs/NOITE-20261005.md`: a seção de sequência acordada complementa os retratos históricos de estado. Confirme branch, arquivos e runs atuais antes de agir.
+- notas de sessão, planos e estudos de tema ficam fora do repo (ver o vault); ao retomar, confirme branch, arquivos e runs atuais antes de agir.
 
 ## mapa do repositório
 
@@ -15,7 +15,7 @@
 - `.github/workflows/`: build, diagnóstico de cache e release.
 - `bench/`: harness Python, download de navegadores e páginas sintéticas; resultados locais fora do git.
 - `packaging/arch/`: PKGBUILD, metadados e desktop entry.
-- `theming/1/`: estudos HTML/PNG; `DECISIONS.md` registra feedback e aprovação. Arquivos locais podem ainda não estar rastreados.
+- `theming/`: só o que foi aprovado; estudos e mockups em andamento ficam fora do repo.
 
 ## build e comandos
 
@@ -44,7 +44,7 @@
 
 - preserve origem/licença dos patches e confira dependências/ordem em `patches/series`; alterações persistentes pertencem à série, não apenas à árvore gerada do runner.
 - siga as convenções dos arquivos vizinhos: scripts Bash com `set -euo pipefail`, patches no formato existente e Python do harness sem dependências externas desnecessárias.
-- para trabalho visual, leia as últimas entradas de `theming/1/DECISIONS.md`; `SPECS.md` contém decisões históricas supersedidas.
+- para trabalho visual, leia o registro de decisões de tema indicado no vault.
 - mockups usam conteúdo fictício: não executar comandos de terminais ilustrativos, acessar dados privados nem alegar integração real de notas/mcode.
 - aprovação visual tem escopo: não estendê-la a outros estudos ou a contratos de integração.
 
