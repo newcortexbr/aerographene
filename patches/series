@@ -50,6 +50,7 @@ aerographene/layout-base-padding.patch
 aerographene/process-names.patch
 aerographene/windows-disable-rlz.patch
 aerographene/windows-ungoogled-prefs.patch
+aerographene/windows-safe-browsing-dummy.patch
 aerographene/command-bar-type-icons.patch
 aerographene/peek.patch
 aerographene/theme-tokens.patch

@@ -1,0 +1,21 @@
+aerographene: Windows sem Safe Browsing — static_library("safe_browsing") vazia não gera .lib e quebra o link do chrome.dll.
+
+Trecho de windows-fix-building-without-safebrowsing.patch do ungoogled-chromium-windows (tag 154.0.8037.97-1.1),
+licença BSD-3-Clause (The ungoogled-chromium Authors): só a fonte dummy; os demais hunks não foram necessários aqui.
+
+--- a/chrome/browser/safe_browsing/BUILD.gn
++++ b/chrome/browser/safe_browsing/BUILD.gn
+@@ -7,6 +7,7 @@ import("//components/safe_browsing/build
+ import("//extensions/buildflags/buildflags.gni")
+ 
+ static_library("safe_browsing") {
++  sources = [ "safe_browsing_dummy.cc" ]
+   if (false) {
+   public = [
+     "chrome_controller_client.h",
+--- /dev/null
++++ b/chrome/browser/safe_browsing/safe_browsing_dummy.cc
+@@ -0,0 +1,3 @@
++#ifndef __safe_browsing_dummy__
++#define __safe_browsing_dummy__
++#endif
