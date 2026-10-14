@@ -111,7 +111,7 @@ diff --git a/chrome/browser/resources/settings/settings_vars.css b/chrome/browse
    --cr-radio-group-item-padding: 0;
 +
 +  /* aerographene: compact density and mono labels (settings-f5). */
-+  --aero-mono: "JetBrains Mono", "DejaVu Sans Mono", ui-monospace, monospace;
++  --aero-mono: 'JetBrains Mono', 'DejaVu Sans Mono', ui-monospace, monospace;
 +  --cr-section-min-height: 40px;
 +  --cr-section-two-line-min-height: 54px;
 +  --cr-section-padding: 16px;
