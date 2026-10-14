@@ -232,6 +232,31 @@ for d, names in sorted(need.items()):
 print(f"   {n} arquivo(s) reposto(s) (tag {ver})")
 PY
 
+echo "== 11. 7za linux-amd64 (CIPD de src/third_party/lzma_sdk/bin/host_platform; usado pelo mini_installer)"
+z_ver="$(python3 - "$src/DEPS" <<'PY'
+import re, sys
+s = open(sys.argv[1]).read()
+blk = s[s.index("'src/third_party/lzma_sdk/bin/host_platform'"):]
+print(re.search(r"'version': '([^']+)'", blk).group(1))
+PY
+)"
+# id da instância CIPD = sha256 do zip; fixado na primeira verificação (14/10/2026)
+declare -A z_sha=(
+    [version:3@26.03]=6b9e6cf8076f7f949abb9d986e5048af26f6cdcfa6cd1a14554d5dc4fcce322c
+)
+[ -n "${z_sha[$z_ver]:-}" ] || { echo "erro: sem sha256 fixado para 7z $z_ver" >&2; exit 1; }
+z_rel=third_party/lzma_sdk/bin/host_platform/7za
+if [ -x "$src/$z_rel" ] && [ -f "$src/$z_rel.aero-${z_sha[$z_ver]}" ]; then echo "   ok"; else
+    z_url="$(curl -fsS -H 'Content-Type: application/json' -H 'Accept: application/json' \
+        -d "{\"package\":\"infra/3pp/tools/7z/linux-amd64\",\"instance\":{\"hashAlgo\":\"SHA256\",\"hexDigest\":\"${z_sha[$z_ver]}\"}}" \
+        https://chrome-infra-packages.appspot.com/prpc/cipd.Repository/GetInstanceURL \
+        | tail -n +2 | python3 -c 'import json, sys; print(json.load(sys.stdin)["signedUrl"])')"
+    z="$(fetch "$z_url" "7z-linux-amd64-${z_sha[$z_ver]}.zip" sha256 "${z_sha[$z_ver]}")"
+    x="$cache/7z"; mkdir -p "$x"; python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extract("7za", sys.argv[2])' "$z" "$x"
+    place "$x/7za" "$z_rel" 755
+    touch "$src/$z_rel.aero-${z_sha[$z_ver]}"
+fi
+
 echo "== pronto. Próximo:"
 echo "   export LD_LIBRARY_PATH=$fuse_lib   # só para remontar o ciopfs (rode este script de novo após reboot)"
 echo "   gn gen $out_rel && nice -n 19 ninja -C $out_rel -j8 chrome_elf"
