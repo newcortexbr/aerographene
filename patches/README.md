@@ -74,7 +74,11 @@ Estado: aplicação não verificada; será verificada no primeiro build (o Chrom
 
 ### `aerographene/first-run-off.patch` (GPL-3.0)
 
-`IsFirstRunEligibleProcess()` (`first_run_service.cc`) devolve `false`: sem a FRE nativa do Chromium (seletor de perfil), também com `--force-first-run`. Perfil novo abre a página nova aba até existir onboarding próprio. Mesmo efeito do hunk que estava em `helium/core/onboarding-page.patch`. Compilado com `-fsyntax-only`; não testado no navegador.
+`IsFirstRunEligibleProcess()` (`first_run_service.cc`) devolve `false`: sem a FRE nativa do Chromium (seletor de perfil), também com `--force-first-run`. Segundo hunk (`startup_browser_creator_impl.cc`, `DetermineStartupTabs`): perfil novo (`IsNewProfile()`) sem URL na linha de comando, sem `--no-first-run` e com `aerographene.onboarding_completed` falso abre `chrome://setup/` (kChromeUISetupURL) em vez da nova aba; anônimo, convidado e pós-crash saem antes. Depende de `onboarding-setup.patch`. Compilado com `-fsyntax-only`; não testado no navegador.
+
+### `aerographene/onboarding-setup.patch` (GPL-3.0)
+
+Página de primeiro uso `aerographene://setup` ([wiki](../docs/wiki/onboarding.md)), antes de `first-run-off` na série: `aero_setup/` (`AeroSetupUIConfig`, `AeroSetupUI` com CSP estrita, `SetupHandler`), recursos `aero_setup/{setup.html,setup.css,setup.js,wordmark.svg}` e `IDR_AERO_SETUP_*` no grd, pref `aerographene.onboarding_completed` (`browser_prefs.cc`, `pref_names.h`), `kChromeUISetupURL`, registro em `chrome_web_ui_configs.cc` e dep no `webui/BUILD.gn`. Original; o `chrome://setup` do Helium (`helium/core/onboarding-page.patch`, fora da série) foi só referência. Depende de `notes-render`/`notes-editor` (`kVaultPathPref`), `settings-theme-picker` (`ListThemes`) e `terminal-webui` (contexto do grd). Sem rede e sem recurso externo. Aplica com `--fuzz=0`; `-fsyntax-only` nos `.cc`; página testada em Chrome headless com backend falso (`tests/onboarding/run.sh`); não testado no navegador.
 
 ### `aerographene/process-names.patch` (GPL-3.0, SCOPE item 9)
 
