@@ -185,7 +185,7 @@ fi
 echo "== 9. ativos Windows (.ico do app e JetBrains Mono; D3d)"
 bash "$here/apply_assets.sh" "$src"
 
-echo "== 10. saídas MIDL/mc pré-geradas (.tlb, .bin) de third_party/win_build_output (podadas pelo ungoogled)"
+echo "== 10. saídas MIDL/mc pré-geradas (.tlb, .bin) de third_party/win_build_output e chrome/app/etw_events (podadas pelo ungoogled)"
 # no Linux o midl.py/rc só copiam estes binários; sem eles as ações *_idl e eventlog falham.
 # Fonte: chromium/src na tag da versão; cada blob é conferido pelo id git da listagem da árvore.
 python3 - "$src" <<'PY'
@@ -196,7 +196,7 @@ ver = ".".join(re.search(rf"^{k}=(\d+)", open(f"{src}/chrome/VERSION").read(), r
 base = f"https://chromium.googlesource.com/chromium/src/+/refs/tags/{ver}/"
 wbo = "third_party/win_build_output"
 need = {}
-for root, _, files in os.walk(f"{src}/{wbo}"):
+for root, _, files in (w for r in (wbo, "chrome/app/etw_events") for w in os.walk(f"{src}/{r}")):
     rel = os.path.relpath(root, src)
     if root.endswith("/x64"):
         for f in files:
