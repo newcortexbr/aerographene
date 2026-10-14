@@ -179,6 +179,10 @@ um tema embutido novo é mais uma instância em `aerographene_theme.cc` (e o nom
 
 leia `docs/BUILD.md` antes; a build completa leva horas.
 
+## visual de `chrome://settings` (patch `settings-f5`)
+
+as configurações seguem a linguagem quadrada do aerographene, sem remover nenhuma função: cards sem sombra e com contorno de 1px, raio do tema ativo (`--aero-radius`: 4px no `default`, 0 no `pixelized`), botões e toggles quadrados, rótulos de seção (título do card e `h2`) em mono caixa alta de 11px, menu lateral compacto com o item ativo marcado por barra de 2px na borda inicial (sem pílula) e linhas de 40px em vez de 48px. As cores vêm só das variáveis do tema (`--cr-*`, `--color-*`); o CSS fica em `settings_vars.css`, `settings_shared_lit.css`, `settings_page/settings_section.css` e no `<style>` de `settings_menu.html`. Compilação do recurso e visual no navegador não verificados (só aplicação do patch e mockup estático).
+
 ## problemas comuns
 
 - nada mudou: confira se reiniciou, se o JSON é válido (`jq . theme.json`) e se `mode` é `"dark"`.
@@ -271,3 +275,4 @@ RULES FOR A GOOD THEME:
 
 EXAMPLES in repo: theming/chrome-themes/{pixelized,nebula,high-contrast}/theme.json
 ```
+- `chrome://settings`: visual do patch `aerographene/settings-f5.patch` (CSS puro: rótulos mono caixa alta, barra no item ativo do menu, densidade via `--cr-section-*` em `settings_vars.css`); forma/raio vêm de `--aero-radius`.
