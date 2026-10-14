@@ -66,7 +66,7 @@ try {
   key(inp, 'Enter'); await sleep(100);
   const rn = window.calls.filter((c) => c[0] === 'renameNote').at(-1);
   check('renameNote enviado', rn && rn[2] === 'sub/renomeada.md', JSON.stringify(rn));
-  check('titulo do cabecalho segue o arquivo', $('#noteTitle').textContent === 'renomeada.md', $('#noteTitle').textContent);
+  check('titulo do cabecalho segue o arquivo', $('#noteTitle').textContent === 'renomeada', $('#noteTitle').textContent);
   check('titulo da aba intacto apos renomear', document.title === 'o: MeuCofre');
   // delete
   clickBtn('apagar'); await sleep(30);
@@ -92,7 +92,7 @@ try {
   check('arquivo criado fora aparece', $$('.node').some((n) => n.dataset.path === 'fora.md'));
   // nota aberta limpa: edicao externa recarrega
   $$('.node').find((n) => n.dataset.path === 'fora.md').click(); await sleep(100);
-  check('abriu fora.md', $('#noteTitle').textContent === 'fora.md');
+  check('abriu fora.md', $('#noteTitle').textContent === 'fora');
   window.files['fora.md'].t = 'alterado fora'; window.files['fora.md'].m = 7100;
   window.fire('vaultChanged'); await sleep(500);
   check('nota limpa recarrega do disco', $('.md.live').textContent.includes('alterado fora'), $('.md.live').textContent);
@@ -123,7 +123,7 @@ try {
   // nota apagada fora
   delete window.files['fora.md'];
   window.fire('vaultChanged'); await sleep(500);
-  check('nota apagada fora: aviso e editor limpo', !$('#banner').hidden && $('#banner').textContent.includes('apagada') && $('#noteTitle').textContent === 'sem nota aberta', $('#banner').textContent);
+  check('nota apagada fora: aviso e aba fechada', !$('#banner').hidden && $('#banner').textContent.includes('apagada') && $('#noteTitle').textContent !== 'fora' && !$$('.nt').some((t) => t.dataset.path === 'fora.md'), $('#banner').textContent);
   $$('#banner button').find((b) => b.textContent === 'ok').click();
   check('arvore sem o arquivo apagado', !$$('.node').some((n) => n.dataset.path === 'fora.md'));
   // rajada de eventos vira poucas leituras
@@ -142,12 +142,16 @@ try {
   const hit = $$('.hit').find((h) => h.textContent.includes('busca.md'));
   check('resultado com snippet', hit && hit.textContent.includes('meu bolo de Cenoura'), hit && hit.textContent);
   hit.click(); await sleep(150);
-  check('clicar no resultado abre a nota', $('#noteTitle').textContent === 'busca.md');
+  check('clicar no resultado abre a nota', $('#noteTitle').textContent === 'busca');
   s.value = ''; s.dispatchEvent(new Event('input', {bubbles: true})); await sleep(500);
-  check('limpar a busca volta a arvore', $('#results').hidden && !$('#tree').hidden);
+  check('limpar a busca mostra a dica no modo buscar', !$('#results').hidden && $('#tree').hidden && $('#results').textContent.includes('ao menos 2'));
+  $('#modeFiles').click();
+  check('modo arquivos volta a arvore', $('#results').hidden && !$('#tree').hidden);
+  const callsQ = window.calls.filter((c) => c[0] === 'searchVault').length;
   s.value = 'a'; s.dispatchEvent(new Event('input', {bubbles: true})); await sleep(500);
-  check('consulta curta nao busca', $('#results').hidden);
+  check('consulta curta nao busca', window.calls.filter((c) => c[0] === 'searchVault').length === callsQ);
   s.value = '';
+  $('#modeFiles').click();
 
   // imagens
   window.files['img.md'] = {t: 'antes\n\n![foto](pic.png)\n\n![[pic.png|120]]\n\n![remota](https://x.test/a.png)\n\n![abs](/etc/a.png)\n\n![falta](nada.png)\n\n![[outra nota]]\n', m: 9000};
