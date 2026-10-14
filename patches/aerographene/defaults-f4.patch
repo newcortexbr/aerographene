@@ -1,0 +1,309 @@
+# aerographene: padrões de primeiro uso (fatia F4).
+# 1. restaura a entrada "google" de prepopulated_engines.json (reverte
+#    core/ungoogled-chromium/replace-google-search-engine-with-nosearch.patch, GPL-3.0/BSD-3 ungoogled).
+#    Google vira o buscador padrão de perfil novo; perfil existente guarda a escolha em prefs.
+# 2. extension-mime-request-handling ligado por padrão (instalar .crx pela Chrome Web Store).
+# 3. extensão NeverDecaf/chromium-web-store (MIT) instalada como extensão componente, no molde de
+#    third_party/ublock (helium/core/ublock-setup-sources.patch e ublock-install-as-component.patch,
+#    GPL-3.0 Helium). O código da extensão é baixado por build/inner.sh (versão + sha256 fixados)
+#    em third_party/chromium_web_store; este patch cria BUILD.gn/grit e registra o componente.
+--- a/third_party/search_engines_data/resources/definitions/prepopulated_engines.json
++++ b/third_party/search_engines_data/resources/definitions/prepopulated_engines.json
+@@ -172,11 +172,26 @@
+     },
+ 
+     "google": {
++      "name": "Google",
++      "keyword": "google.com",
++      "favicon_url": "https://www.google.com/images/branding/product/ico/googleg_alldp.ico",
++      "base_builtin_resource_id": "SEARCH_ENGINE_GOOGLE",
++      "search_url": "{google:baseURL}search?q={searchTerms}&{google:RLZ}{google:originalQueryForSuggestion}{google:assistedQueryStats}{google:searchFieldtrialParameter}{google:language}{google:prefetchSource}{google:searchClient}{google:sourceId}{google:searchSource}{google:contextualSearchVersion}ie={inputEncoding}",
++      "suggest_url": "{google:baseSuggestURL}{google:suggestPath}?{google:searchFieldtrialParameter}client={google:suggestClient}&gs_ri={google:suggestRid}&xssi=t&q={searchTerms}&{google:inputType}{google:omniboxFocusType}{google:cursorPosition}{google:currentPageUrl}{google:pageClassification}{google:clientCacheTimeToLive}{google:searchVersion}{google:sessionToken}{google:prefetchQuery}sugkey={google:suggestAPIKeyParameter}",
++      "image_url": "{google:baseSearchByImageURL}upload",
++      "image_translate_url": "{google:baseSearchByImageURL}upload?filtertype=tr&{imageTranslateSourceLocale}{imageTranslateTargetLocale}",
++      "contextual_search_url": "{google:baseURL}_/contextualsearch?{google:contextualSearchVersion}{google:contextualSearchContextData}",
++      "image_url_post_params": "encoded_image={google:imageThumbnail},image_url={google:imageURL},sbisrc={google:imageSearchSource},original_width={google:imageOriginalWidth},original_height={google:imageOriginalHeight},processed_image_dimensions={google:processedImageDimensions}",
++      "image_translate_source_language_param_key": "sourcelang",
++      "image_translate_target_language_param_key": "targetlang",
++      "search_intent_params": ["si", "gs_ssp", "udm"],
++      "alternate_urls": [
++        "{google:baseURL}#q={searchTerms}",
++        "{google:baseURL}search#q={searchTerms}",
++        "{google:baseURL}webhp#q={searchTerms}",
++        "{google:baseURL}s#q={searchTerms}",
++        "{google:baseURL}s?q={searchTerms}"
++      ],
+-      "name": "No Search",
+-      "keyword": "nosearch",
+-      "favicon_url": "about:blank",
+-      "search_url": "http://{searchTerms}",
+-      "new_tab_url": "about:blank",
+       "type": "SEARCH_ENGINE_GOOGLE",
+       "preconnect_to_search_url" : "ALLOWED",
+       "prefetch_likely_navigations" : "ALLOWED",
+--- a/chrome/browser/extensions/extension_management.cc
++++ b/chrome/browser/extensions/extension_management.cc
+@@ -311,9 +311,12 @@ bool ExtensionManagement::IsOffstoreInst
+     const GURL& referrer_url) const {
+   const base::CommandLine& command_line =
+       *base::CommandLine::ForCurrentProcess();
+-  if (command_line.HasSwitch("extension-mime-request-handling") &&
+-      command_line.GetSwitchValueASCII("extension-mime-request-handling") ==
+-      "always-prompt-for-install") {
++  // aerographene: padrão "always-prompt-for-install" (instalar da Chrome Web
++  // Store pela extensão chromium-web-store); só o valor explícito
++  // "download-as-regular-file" desliga.
++  if (!command_line.HasSwitch("extension-mime-request-handling") ||
++      command_line.GetSwitchValueASCII("extension-mime-request-handling") ==
++      "always-prompt-for-install") {
+     return true;
+   }
+   // No allowed install sites specified, disallow by default.
+--- a/chrome/browser/extensions/BUILD.gn
++++ b/chrome/browser/extensions/BUILD.gn
+@@ -636,6 +636,7 @@
+     "//services/metrics/public/cpp:ukm_builders",
+     "//storage/browser",
+     "//third_party/ublock",
++    "//third_party/chromium_web_store",
+     "//third_party/zlib/google:zip",
+     "//ui/base/accelerators/global_accelerator_listener",
+     "//ui/base/unowned_user_data",
+--- a/chrome/browser/extensions/chrome_component_extension_resource_manager.cc
++++ b/chrome/browser/extensions/chrome_component_extension_resource_manager.cc
+@@ -37,6 +37,7 @@
+ #include "pdf/buildflags.h"
+ #include "ui/base/resource/resource_bundle.h"
+ #include "third_party/ublock/resources/grit/ublock_resources_map.h"
++#include "third_party/chromium_web_store/resources/grit/chromium_web_store_resources_map.h"
+ 
+ #if BUILDFLAG(IS_CHROMEOS)
+ #include "ash/keyboard/ui/resources/keyboard_resource_util.h"
+@@ -132,6 +133,7 @@
+     AddComponentResourceEntries(kContextualTasksExtensionResources);
+   }
+   AddComponentResourceEntries(kUblockResources);
++  AddComponentResourceEntries(kChromiumWebStoreResources);
+ 
+ #if !BUILDFLAG(IS_ANDROID)
+   if (base::FeatureList::IsEnabled(features::kIndigo)) {
+--- a/chrome/browser/extensions/component_extensions_allowlist/allowlist.cc
++++ b/chrome/browser/extensions/component_extensions_allowlist/allowlist.cc
+@@ -23,6 +23,7 @@
+ #include "extensions/common/constants.h"
+ #include "printing/buildflags/buildflags.h"
+ #include "third_party/ublock/resources/grit/ublock_resources.h"
++#include "third_party/chromium_web_store/resources/grit/chromium_web_store_resources.h"
+ 
+ #if BUILDFLAG(IS_CHROMEOS)
+ #include "ash/constants/ash_extension_constants.h"
+@@ -42,6 +43,7 @@
+       extension_misc::kGlicExtensionId,
+       extension_misc::kPdfExtensionId,
+       helium::kUBlockOriginComponentId,
++      helium::kChromiumWebStoreComponentId,
+ #if BUILDFLAG(IS_CHROMEOS)
+       extension_misc::kAssessmentAssistantExtensionId,
+       extension_misc::kAccessibilityCommonExtensionId,
+@@ -105,6 +107,7 @@
+     case IDR_READING_MODE_GDOCS_HELPER_MANIFEST:
+     case IDR_WEBSTORE_MANIFEST:
+     case IDR_UBLOCK_MANIFEST_JSON:
++    case IDR_CHROMIUM_WEB_STORE_MANIFEST_JSON:
+ 
+ #if BUILDFLAG(IS_CHROMEOS)
+     // Separate ChromeOS list, as it is quite large.
+--- a/chrome/browser/extensions/component_loader.cc
++++ b/chrome/browser/extensions/component_loader.cc
+@@ -65,6 +65,7 @@
+ #include "ui/base/l10n/l10n_util.h"
+ #include "ui/base/resource/resource_bundle.h"
+ #include "third_party/ublock/resources/grit/ublock_resources.h"
++#include "third_party/chromium_web_store/resources/grit/chromium_web_store_resources.h"
+ 
+ #if BUILDFLAG(IS_CHROMEOS)
+ #include "ash/constants/ash_extension_constants.h"
+@@ -471,6 +472,21 @@
+   }
+ }
+ 
++void ComponentLoader::AddChromiumWebStore() {
++  Add(IDR_CHROMIUM_WEB_STORE_MANIFEST_JSON,
++      base::FilePath(FILE_PATH_LITERAL("chromium_web_store")));
++
++  using namespace extension_l10n_util;
++  ComponentExtensionInfo& info = component_extensions_.back();
++  std::string error;
++  bool localized = LocalizeExtension(
++      info.root_directory, &info.manifest,
++      GzippedMessagesPermission::kAllowForTrustedSource, &error, true);
++  if (!localized) {
++    LOG(ERROR) << "Failed to localize chromium-web-store: " << error;
++  }
++}
++
+ #if BUILDFLAG(IS_CHROMEOS)
+ void ComponentLoader::AddChromeApp() {
+   AddWithNameAndDescription(
+@@ -549,6 +565,7 @@
+   if (!skip_session_components) {
+     AddWebStoreApp();
+     AddUBlock();
++    AddChromiumWebStore();
+ #if BUILDFLAG(IS_CHROMEOS)
+     AddChromeApp();
+ #endif  // BUILDFLAG(IS_CHROMEOS)
+--- a/chrome/browser/extensions/component_loader.h
++++ b/chrome/browser/extensions/component_loader.h
+@@ -223,6 +223,7 @@
+                                  const std::string& description_string);
+   void AddWebStoreApp();
+   void AddUBlock();
++  void AddChromiumWebStore();
+ 
+ #if BUILDFLAG(IS_CHROMEOS)
+   void AddChromeApp();
+--- a/chrome/chrome_paks.gni
++++ b/chrome/chrome_paks.gni
+@@ -150,6 +150,7 @@
+       "$root_gen_dir/third_party/blink/public/resources/inspector_overlay_resources.pak",
+       "$root_gen_dir/third_party/blink/public/strings/permission_element_generated_strings.pak",
+       "$root_gen_dir/third_party/ublock/resources/ublock_resources.pak",
++      "$root_gen_dir/third_party/chromium_web_store/resources/chromium_web_store_resources.pak",
+       "$root_gen_dir/ui/resources/ui_lottie_resources.pak",
+       "$root_gen_dir/ui/webui/resources/webui_resources.pak",
+     ]
+@@ -181,6 +182,7 @@
+       "//third_party/blink/public:resources",
+       "//third_party/blink/public/strings:permission_element_generated_strings",
+       "//third_party/ublock",
++      "//third_party/chromium_web_store",
+       "//ui/resources:ui_lottie_resources_grd",
+       "//ui/webui/resources",
+     ]
+--- a/components/helium_services/extension_ids.h
++++ b/components/helium_services/extension_ids.h
+@@ -13,6 +13,10 @@
+ inline constexpr char kUBlockOriginComponentId[] =
+     "blockjmkbacgjkknlgpkjjiijinjdanf";
+ 
++// NeverDecaf/chromium-web-store 1.5.5.4: id derivado da "key" do manifest.
++inline constexpr char kChromiumWebStoreComponentId[] =
++    "ocaahdebbfolfmndjeplogmgcagdmblk";
++
+ inline constexpr char kUblockOriginComponentIdHashed[] =
+     // SHA1(kUBlockOriginComponentId)
+     "70C2895ED505C532A80761F0928B821B103D0786";
+--- /dev/null
++++ b/third_party/chromium_web_store/BUILD.gn
+@@ -0,0 +1,49 @@
++# aerographene: molde de third_party/ublock/BUILD.gn (Helium, GPL-3.0), sem assets comprimidos.
++
++import("//ui/webui/resources/tools/generate_grd.gni")
++import("//tools/grit/grit_rule.gni")
++
++file_list = "$target_gen_dir/files.json"
++generated_grd = "$target_gen_dir/chromium_web_store_resources.grd"
++
++action("generate_file_list") {
++    script = "generate_file_list.py"
++    args = [
++        rebase_path("."),
++        rebase_path(file_list),
++    ]
++    inputs = [
++        "manifest.json",
++        "generate_file_list.py",
++    ]
++    outputs = [ file_list ]
++}
++
++generate_grd("chromium_web_store_grd") {
++    out_grd = generated_grd
++
++    grd_prefix = "chromium_web_store"
++    resource_path_prefix = "chromium_web_store"
++
++    manifest_files = [ file_list ]
++    deps = [":generate_file_list"]
++}
++
++grit("chromium_web_store") {
++    source = generated_grd
++
++    # Required because the .grd is generated.
++    enable_input_discovery_for_gn_analyze = false
++    use_brotli = true
++
++    output_dir = "$target_gen_dir/resources"
++
++    outputs = [
++        "grit/chromium_web_store_resources.h",
++        "grit/chromium_web_store_resources_map.cc",
++        "grit/chromium_web_store_resources_map.h",
++        "chromium_web_store_resources.pak"
++    ]
++
++    deps = [":chromium_web_store_grd"]
++}
+--- /dev/null
++++ b/third_party/chromium_web_store/README.chromium
+@@ -0,0 +1,15 @@
++Name: Chromium Web Store
++Short Name: chromium_web_store
++URL: https://github.com/NeverDecaf/chromium-web-store
++Version: 1.5.5.4
++License: MIT
++License File: LICENSE
++Shipped: yes
++Security Critical: yes
++
++Description:
++Extension that installs extensions from the Chrome Web Store in
++Chromium-based browsers without Google services.
++
++Local Modifications:
++None (release CRX unpacked by build/inner.sh, sha256 pinned).
+--- /dev/null
++++ b/third_party/chromium_web_store/generate_file_list.py
+@@ -0,0 +1,26 @@
++# aerographene: molde de third_party/ublock/generate_file_list.py (Helium, GPL-3.0).
++
++import json
++import os
++from fnmatch import fnmatchcase
++from sys import argv
++from pathlib import Path
++
++EXCLUDED_FILES = (
++    'BUILD.gn',
++    'README.chromium',
++    'generate_file_list.py',
++)
++
++src = Path(argv[1])
++files = []
++for root, _, filenames in os.walk(src):
++  for filename in filenames:
++    relative = (Path(root) / filename).relative_to(src).as_posix()
++    if any(fnmatchcase(relative, pattern) for pattern in EXCLUDED_FILES):
++      continue
++    files.append(relative)
++files.sort()
++
++with open(argv[2], 'w') as f:
++  json.dump({'base_dir': src.as_posix(), 'files': files}, f)
+--- a/tools/gritsettings/resource_ids.spec
++++ b/tools/gritsettings/resource_ids.spec
+@@ -1799,6 +1799,11 @@
+     "includes": [10140],
+   },
+ 
++  "<(SHARED_INTERMEDIATE_DIR)/third_party/chromium_web_store/chromium_web_store_resources.grd": {
++    "META": {"sizes": {"includes": [100]}},
++    "includes": [10300],
++  },
++
+   "<(SHARED_INTERMEDIATE_DIR)/THIS_IS_A_PLACEHOLDER.grd": {
+     "META": {"sizes": {"includes": [800]}},
+     "includes": [12000],

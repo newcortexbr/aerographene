@@ -19,6 +19,9 @@ GNFILE_REL=build/config/compiler/BUILD.gn
 # build/branding_strings.py reescreve o .grdp dele (Helium -> aerographene, traduções pt-BR)
 ob_ver=202609160835
 ob_sha=35ce782dc9534b5bff59af7937f22c90179ca9610883acb2e0d698cc6f799366
+# NeverDecaf/chromium-web-store (MIT), release fixada por versão + sha256 do .crx (fatia F4)
+cws_ver=1.5.5.4
+cws_sha=63c075b4a25b11af2c536dad191946e8d9547f92d5b6c257b2ce4138d2996f32
 
 _memmon=""
 _ccache_on=0
@@ -40,6 +43,7 @@ patch_hash() {
         echo "march=${MARCH}"
         cat /aero/build/branding_strings.py /aero/build/strings_ptbr_extra.json
         echo "onboarding=${ob_ver}"
+        echo "chromium-web-store=${cws_ver}"
     } | sha256sum | cut -d' ' -f1
 }
 
@@ -195,6 +199,36 @@ with zipfile.ZipFile(zpath) as z:
             d.write(s.read())
 PY
     touch "${_src_dir}/.aero-ublock-${ub_ver}"  # fora de ub_dir: generate_file_list empacota tudo lá
+fi
+
+echo "== chromium-web-store ${cws_ver} (release do GitHub, sha256 fixado)"
+# como o uBlock: antes dos patches (defaults-f4 cria BUILD.gn/grit em third_party/chromium_web_store)
+cws_dir="${_src_dir}/third_party/chromium_web_store"
+if [ ! -f "${_src_dir}/.aero-patches.hash" ] && [ ! -f "${_src_dir}/.aero-cws-${cws_ver}" ]; then
+    cws_crx="${_root}/build/chromium-web-store-${cws_ver}.crx"
+    [ -s "$cws_crx" ] || curl -fL --retry 3 -o "$cws_crx" \
+        "https://github.com/NeverDecaf/chromium-web-store/releases/download/v${cws_ver}/Chromium.Web.Store.crx"
+    echo "${cws_sha}  ${cws_crx}" | sha256sum -c -
+    rm -rf "$cws_dir"; mkdir -p "$cws_dir"
+    # CRX3: "Cr24", versão (4 bytes), tamanho do cabeçalho (4 bytes), cabeçalho, depois o zip
+    python3 - "$cws_crx" "$cws_dir" <<'PY'
+import sys, io, struct, zipfile, os
+crx, dest = sys.argv[1], sys.argv[2]
+d = open(crx, 'rb').read()
+assert d[:4] == b'Cr24' and struct.unpack('<I', d[4:8])[0] == 3
+hlen = struct.unpack('<I', d[8:12])[0]
+with zipfile.ZipFile(io.BytesIO(d[12 + hlen:])) as z:
+    for m in z.infolist():
+        if m.is_dir() or m.filename.startswith('/') or '..' in m.filename.split('/'):
+            continue
+        out = os.path.join(dest, m.filename)
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        with z.open(m) as s, open(out, 'wb') as f:
+            f.write(s.read())
+PY
+    curl -fL --retry 3 -o "${cws_dir}/LICENSE" \
+        "https://raw.githubusercontent.com/NeverDecaf/chromium-web-store/v${cws_ver}/LICENSE"
+    touch "${_src_dir}/.aero-cws-${cws_ver}"
 fi
 
 echo "== helium-onboarding ${ob_ver} (deps.ini do Helium, sha256 fixado)"
@@ -407,6 +441,11 @@ done
 if [ -f "${_src_dir}/third_party/ublock/managed_storage.json" ]; then
     mkdir -p "$stage/resources/ublock"
     cp "${_src_dir}/third_party/ublock/managed_storage.json" "$stage/resources/ublock/"
+fi
+# chromium-web-store: mesmo caso (manifest tem storage.managed_schema = managed_storage.json)
+if [ -f "${_src_dir}/third_party/chromium_web_store/managed_storage.json" ]; then
+    mkdir -p "$stage/resources/chromium_web_store"
+    cp "${_src_dir}/third_party/chromium_web_store/managed_storage.json" "$stage/resources/chromium_web_store/"
 fi
 # tabela de símbolos fora do pacote (~234 MB no chrome; o Helium distribui sem).
 # Não muda código executado: .symtab/.strtab não são carregadas em runtime.
