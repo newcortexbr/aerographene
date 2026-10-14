@@ -93,6 +93,19 @@ o caminho de cada arquivo vem da página e é tratado como não confiável:
 
 o antigo limite (alguém trocar um componente por symlink entre conferir e abrir) foi fechado na B4: a abertura percorre o caminho com `openat(O_NOFOLLOW)` (seção "segurança da escrita").
 
+## rolagem e interface (F2)
+
+`patches/aerographene/notes-f2.patch`, só recursos da página. Corrige a página que não rolava: o grid agora usa `minmax(0, 1fr)`, então árvore, editor/preview e resultados da busca rolam cada um no seu painel e a janela não estoura. Interface no tema (quadrada, contornos, rótulos mono):
+
+- cabeçalho da nota: breadcrumb das pastas, nome do arquivo e estado (`salvo`, `● alterado`, `! conflito` em vermelho enquanto o conflito não for resolvido).
+- lateral: cabeçalho `VAULT <nome>`, ações `+ nota`, `+ pasta` e `buscar`, arquivo ativo destacado (barra de destaque e negrito), rodapé com atalhos. `+ pasta` está desabilitado: o backend só cria notas e esta fatia não mexe nele.
+- barra inferior da nota: `N palavras · M caracteres`; sem nota aberta, `N notas visíveis`.
+- estado vazio com os atalhos; vault vazia explica como criar a primeira nota.
+- atalhos: Ctrl+S salvar, Ctrl+K buscar (também Ctrl+Shift+F), Ctrl+N nova nota. O navegador pode reservar Ctrl+N para nova janela; o botão `+ nota` sempre funciona.
+- lateral redimensionável (mouse ou setas no divisor); duplo clique restaura 260 px.
+
+verificado só no Chrome headless com backend simulado (`tests/notes-editor/run.sh`, 90 verificações; `index-f2.html` com janela 1000x600 cobre rolagem, contagem, breadcrumb, Ctrl+K, conflito). Não testado como `chrome://notes` real nem Ctrl+N dentro do navegador.
+
 ## arquivos
 
 - `chrome/browser/ui/webui/aero_notes/aero_notes_ui.{h,cc}`: configuração e controlador.
@@ -118,3 +131,4 @@ o antigo limite (alguém trocar um componente por symlink entre conferir e abrir
 - B5: `watchVault` (resposta bool; depois o evento `vaultChanged` por `FireWebUIListener`, shim `cr.webUIListenerCallback` em `notes.js`), `searchVault(query)` -> `{hits:[{path,nameMatch,snippet}], truncated}`, `readImage(path, noteDir)` -> `{mime, data}`. Backend em `vault_reader.*` (`SearchVault`, `FindVaultFileByName`, `ReadVaultImage`) e `vault_watcher.*`. O watcher é `SequenceBound<VaultWatcher>` no handler: morre com a aba. Patch `notes-b5` é o último da série.
 - a página, ao receber `vaultChanged`: `syncExternal` (limpa cache de imagens, refaz a árvore, refaz a busca ativa, `checkOpenNote`). Edição externa em nota alterada reutiliza `resolveConflict` do B4. `markdown.js` recebe `opts.loadImage(path, img, onFail)` do editor; sem ele (ou com URL remota/absoluta) imagem vira texto.
 - B6 (`notes-b6`, último da série): `aerographene::ParseNotesCommand(text)` -> `optional<u16string>` (termo; `""` para `o:` sozinho) e `NotesCommandUrl(termo)` (`chrome://notes/?q=<termo>` ou `?new=1`) em `components/omnibox/browser/aero_notes_command.*`, chamados em `BuiltinProvider::Start` logo após o `-t` do terminal-c4 (patch depende dele pelo contexto). Aba única: bloco em `NavigateImpl` (`browser_navigator.cc`, depois do hunk `kHeliumUIScheme`) converte para `SINGLETON_TAB` + `IGNORE_AND_NAVIGATE` quando `GetIndexOfExistingTabMatchingURL` acha uma aba `chrome://notes`; `query == "new=1"` fica de fora. Página: `openFromQuery()` em `notes.js` e `renderHits(target, r)` (compartilhada com a busca lateral). Teste da página com `?q=`: `tests/notes-editor/test-q.js` (rodado por `run.sh`).
+- F2 (`notes-f2`, último da série): só `notes.{html,css,js}`; `emptyState()`, `setCrumbs()`, `updateStats()`, flag `conflict` em `updateState()`; Ctrl+K/Ctrl+N/Ctrl+Shift+F no `keydown` da janela; `#btnNewDir` desabilitado de propósito. Teste: `tests/notes-editor/test-f2.js`.

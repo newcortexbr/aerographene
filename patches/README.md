@@ -470,3 +470,7 @@ v0.3, fatia C4. Pan/zoom do quadro, layout em `localStorage` por workspace, tít
 ### `aerographene/terminal-bridge.patch` (GPL-3.0)
 
 v0.3, fatia C3. `aerographene::TerminalHandler` (`aero_terminal/terminal_handler.*`, só no `AeroTerminalUI`, confere frame principal e origem `chrome://terminal` em cada mensagem) e `TerminalHost` (alvo `aero_terminal:host`, sessões de uma aba em sequência ThreadPool `BLOCK_SHUTDOWN`, leitura com `FileDescriptorWatcher`). `open(cols, rows)` sem comando nem cwd, até 16 sessões, escrita até 64 KiB, saída em base64; recarregar ou fechar a página mata as sessões. Página com xterm.js por janela; `style-src 'unsafe-inline'` só nesta página (xterm cria `<style>`). Teste `terminal_host_unittest.cc`. Depende de `terminal-webui`, `terminal-pty`, `terminal-xterm` e `notes-render`; fim da série.
+
+### `aerographene/notes-f2.patch` (GPL-3.0)
+
+v0.3, fatia F2, fim da série (depende de `notes-b6` e da cadeia `notes-*`). Só `notes.{html,css,js}` de `chrome/browser/resources/aero_notes`: rolagem por painel (grid com `minmax(0,1fr)`), cabeçalho da nota com breadcrumb e estado (salvo/alterado/conflito), cabeçalho e ações da vault, estados vazios com atalhos, contagem de palavras, atalhos Ctrl+S/N/K visíveis, lateral redimensionável. Sem mudança no backend; "+ pasta" desabilitado (o backend só cria notas). Teste: `tests/notes-editor/run.sh` (`test-f2.js`).
