@@ -87,7 +87,7 @@ arquivo novo sempre entra por temporário + `mv`, então nada é escrito atravé
 ## problemas conhecidos
 
 - `use_sysroot=false` (do `flags.windows.gn` do ungoogled) quebra o cross: vale também para a toolchain host Linux, que passa a pedir glib via `pkg-config` do host. O sysroot Debian da árvore serve.
-- quatro patches do Helium (`keyboard-shortcuts`, `ublock-install-as-component`, `crash-reporting-prefs`, `toolbar-button-prefs`) só aplicam com o fuzz padrão do `patch`, porque a domain substitution muda linhas de contexto; o CI aplica assim. Os patches próprios novos devem aplicar com `--fuzz=0`.
+- desde 14/10/2026 a série inteira aplica com `--fuzz=0` (com `--ignore-whitespace`, como o CI): `keyboard-shortcuts` e `crash-reporting-prefs` saíram da série e `ublock-install-as-component`/`toolbar-button-prefs` foram regenerados sobre a árvore com domain substitution. Sem `crash-reporting-prefs`, `chrome_crash_reporter_client_win.cc`, `chrome_elf.def` e `components/crash` ficam como no upstream; o upload continua desligado pelo `disable-crash-reporter` do ungoogled. Patches novos devem aplicar com `--fuzz=0`.
 - `base_unittests` não compila (substituição de domínios do ungoogled em `rtl_unittest.cc`); só testes.
 - `lld-link: warning: ignoring unknown argument '-Wl,--icf=all'`: flag ICF de ELF chegando ao link Windows; tratar em D4.
 - o ninja do `out/Win` roda dentro do `aerographene-builder:v2` (node, tsc etc. do container; montar `~/aerographene-win` no mesmo caminho) com `--ulimit nofile=65536:65536`: com o limite padrão os objetos bluetooth WinRT falham com "Too many open files".
