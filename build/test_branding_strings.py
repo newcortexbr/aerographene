@@ -147,11 +147,10 @@ class Integration(unittest.TestCase):
             pt = self.count("chrome/app/generated_resources.grd", "pt-BR")
             self.assertTrue(pt["IDS_SETTINGS_APPEARANCE_AND_BEHAVIOR"])
             g = open(os.path.join(self.tmp, "chrome/app/settings_strings.grdp"), encoding="utf-8").read()
-            # "Helium" só sobra nas mensagens de KEEP_NAMES (serviços operados pelo Helium)
+            # nenhuma mensagem mantém "Helium" (KEEP_NAMES vazio)
             left = {m.group(1) for m in re.finditer(r'<message\b[^>]*\bname="([^"]+)"[^>]*>((?:(?!</message>).)*)</message>', g, re.S)
                     if re.search(r"\bHelium\b", re.sub(r"<[^>]+>", "", m.group(2)))}
             self.assertTrue(left <= bs.KEEP_NAMES, left - bs.KEEP_NAMES)
-            self.assertIn("IDS_SETTINGS_HELIUM_SERVICES", left)
         # o texto inglês mudou de fato
         s = open(os.path.join(self.tmp, "chrome/app/chromium_strings.grd"), encoding="utf-8").read()
         self.assertIn("aerographene", s)

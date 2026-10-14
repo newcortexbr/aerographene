@@ -34,34 +34,8 @@ NAME = "aerographene"
 HERE = os.path.dirname(os.path.abspath(__file__))
 EXTRA_DEFAULT = os.path.join(HERE, "strings_ptbr_extra.json")
 EXTRA_LANG = "pt-BR"
-# mensagens que falam do projeto Helium ou dos servidores operados por ele (não do navegador):
-# mantêm o nome, para não dizer que o aerographene opera esses serviços
-KEEP_NAMES = {
-    "IDS_HELIUM_ONBOARDING_PARTNER_TITLE",
-    "IDS_HELIUM_ONBOARDING_PARTNER_TOOLTIP",
-    "IDS_SETTINGS_HELIUM_SERVICES",
-    "IDS_SETTINGS_HELIUM_SERVICES_DESCRIPTION",
-    "IDS_SETTINGS_HELIUM_SCHEMA_NOTICE_TITLE",
-    "IDS_SETTINGS_HELIUM_SERVICES_TOGGLE",
-    "IDS_SETTINGS_HELIUM_SERVICES_TOGGLE_DESCRIPTION",
-    "IDS_SETTINGS_HELIUM_SERVICES_OVERRIDE",
-    "IDS_SETTINGS_HELIUM_SERVICES_OVERRIDE_DESCRIPTION",
-    "IDS_SETTINGS_HELIUM_SERVICES_OVERRIDE_ARIA_LABEL",
-    "IDS_SETTINGS_HELIUM_SERVICES_SETUP_PENDING_TEXT",
-    "IDS_HELIUM_ONBOARDING_WELCOME_FOOTER",
-    "IDS_HELIUM_ONBOARDING_SERVICES_TITLE",
-    "IDS_HELIUM_ONBOARDING_SERVICES_CONNECTION_TITLE",
-    "IDS_HELIUM_ONBOARDING_SERVICES_CONNECTION_DESC",
-    "IDS_HELIUM_ONBOARDING_SERVICES_BANGS_DESC",
-    "IDS_HELIUM_ONBOARDING_SERVICES_EXTENSIONS_DESC",
-    "IDS_HELIUM_ONBOARDING_SERVICES_UBLOCK_DESC",
-    "IDS_HELIUM_ONBOARDING_SERVICES_AUTOUPDATES_DESC",
-    "IDS_HELIUM_ONBOARDING_SERVICES_AUTOUPDATES_DESC_LINUX",
-    "IDS_HELIUM_ONBOARDING_SERVICES_SPELLCHECK_DESC",
-    "IDS_HELIUM_ONBOARDING_SERVICES_INSTANCE_TITLE",
-    "IDS_HELIUM_ONBOARDING_SERVICES_INSTANCE_DESC",
-    "IDS_HELIUM_ONBOARDING_SEARCH_CATEGORIES_CUSTOM",
-}
+# mensagens que mantêm o nome original (vazio desde a remoção dos serviços e do setup do Helium)
+KEEP_NAMES = set()
 
 # grds raiz (relativos a --src) cujas mensagens são procuradas; partes (<part file=...>)
 # e xtb (<translations>) saem do próprio grd. Ausentes na árvore são ignorados.
@@ -82,7 +56,7 @@ _EXCLUDE_AFTER = (
     r"Dino|Updater|Nearby|Sync\sfor\b)"
 )
 # \w e "/" "." "-" antes: não pegar "mychrome", URLs "www.Chrome" etc. Só maiúscula inicial.
-# Helium: nome do navegador-base (patches do Helium e helium-onboarding); sem exclusões.
+# Helium: nome do navegador-base (patches do Helium); sem exclusões.
 _PRODUCT = re.compile(
     r"(?<![\w/.-])(?:(?:Google\s(?:&nbsp;)?)?Chrom(?:e|ium)(?!\w)(?!" + _EXCLUDE_AFTER + r")|Helium(?!\w))"
 )
