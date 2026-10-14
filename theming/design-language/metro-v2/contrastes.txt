@@ -1,0 +1,26 @@
+dark  fg    #ffffff sobre page  #000000  21.00  AA
+dark  fg    #ffffff sobre frame #1f1f1f  16.48  AA
+dark  fg    #ffffff sobre panel #2b2b2b  14.16  AA
+dark  fg2   #c8c8c8 sobre panel #2b2b2b   8.46  AA
+dark  fg3   #a8a8a8 sobre panel #2b2b2b   5.95  AA
+dark  fg3   #a8a8a8 sobre frame #1f1f1f   6.93  AA
+dark  link  #4cc2ff sobre page  #000000  10.47  AA
+dark  link  #4cc2ff sobre panel #2b2b2b   7.06  AA
+dark  btnfg #ffffff sobre btn   #333333  12.63  AA
+dark  fg3   #a8a8a8 sobre btn   #333333   5.31  AA
+dark  fg    #ffffff sobre sel   #3e3e3e  10.70  AA
+dark  branco sobre destaque #0072cb   4.92  AA
+dark  borda de campo #666666 sobre #000000  3.66 (não texto, mínimo 3)
+light fg    #000000 sobre page  #ffffff  21.00  AA
+light fg    #000000 sobre frame #f2f2f2  18.76  AA
+light fg    #000000 sobre panel #e6e6e6  16.83  AA
+light fg2   #333333 sobre panel #e6e6e6  10.12  AA
+light fg3   #4a4a4a sobre panel #e6e6e6   7.10  AA
+light fg3   #4a4a4a sobre frame #f2f2f2   7.92  AA
+light link  #0063b1 sobre page  #ffffff   6.14  AA
+light link  #0063b1 sobre panel #e6e6e6   4.92  AA
+light btnfg #000000 sobre btn   #cccccc  13.08  AA
+light fg3   #4a4a4a sobre btn   #cccccc   5.52  AA
+light fg    #000000 sobre sel   #cccccc  13.08  AA
+light branco sobre destaque #0063b1   6.14  AA
+light borda de campo #7a7a7a sobre #ffffff  4.29 (não texto, mínimo 3)
