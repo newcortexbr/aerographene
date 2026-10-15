@@ -1,0 +1,2154 @@
+aerographene: editor de notas com live preview (v0.3, fatia B4).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/notes-webui.patch, aerographene/notes-vault-reader.patch,
+aerographene/notes-render.patch.
+Propósito: escrita na vault do chrome://notes. Backend (vault_reader.*):
+OpenVaultFileNoFollow abre `relativo` a partir de um descritor da raiz real
+com openat(O_NOFOLLOW) um componente por vez, então qualquer componente
+(inclusive o último) que seja ou vire symlink faz a abertura falhar: o arquivo
+aberto é sempre o conferido (fecha o TOCTOU anotado na B2). Leitura passa a
+usar essa primitiva (symlink interno à vault continua aceito: é resolvido uma
+vez por ResolveInVault e aberto sem seguir). WriteVaultNote: arquivo
+temporário oculto (.aero-N.tmp) na mesma pasta, fsync, rename; mantém o modo;
+conflito por mtime em microssegundos (token devolvido por readNote), conferido
+antes e de novo logo antes do rename: kConflict não toca o disco e o texto
+fica na página; nullopt sobrescreve de propósito. CreateVaultNote (O_EXCL,
+nunca segue symlink), RenameVaultNote (renameat2 RENAME_NOREPLACE, com
+fallback; nunca sobrescreve) e DeleteVaultNote (unlink, sem lixeira). Só
+nomes .md, sem ponto inicial, até 255 bytes; só arquivos regulares; entrada
+que é symlink não é renomeada nem apagada. Janela restante: escrita externa
+entre a segunda conferência e o rename. NotesHandler: writeNote, createNote,
+renameNote, deleteNote (resposta {status, mtime}) e readNote passa a devolver
+{text, mtime}; mesma conferência de frame, I/O em ThreadPool. Windows:
+funções de escrita respondem kUnsupported ("unsupported") e o handler recusa
+antes (kVaultReadSupported false), sem fallback sem confinamento.
+Página: editor.js (modelo puro + visão) com live preview em coluna única:
+a linha com o cursor é um textarea com o Markdown cru, as outras linhas
+vêm de markdown.js (blocos: trecho de linhas não vazias, bloco de código ou
+linha vazia; só os blocos afetados são refeitos). Enter continua listas e
+citações, Backspace/Delete juntam linhas, setas mudam de linha, colar
+várias linhas divide, desfazer/refazer próprios, Ctrl+S salva. Sem seleção
+entre linhas durante a edição. Salvar/renomear/apagar/nova nota; conflito
+mostra aviso com "salvar como cópia", "sobrescrever" ou "recarregar", sem
+perder o texto; nota alterada pede salvar ou descartar antes de trocar.
+Decisão do dono (13/10/2026): o título da aba é sempre "o: <nome da vault>",
+nunca o arquivo aberto. Nenhum sink de Trusted Types.
+
+--- a/chrome/browser/browser_resources.grd
++++ b/chrome/browser/browser_resources.grd
+@@ -112,6 +112,7 @@
+         <include name="IDR_AERO_NOTES_CSS" file="resources\aero_notes\notes.css" type="BINDATA" />
+         <include name="IDR_AERO_NOTES_JS" file="resources\aero_notes\notes.js" type="BINDATA" />
+         <include name="IDR_AERO_NOTES_MARKDOWN_JS" file="resources\aero_notes\markdown.js" type="BINDATA" />
++        <include name="IDR_AERO_NOTES_EDITOR_JS" file="resources\aero_notes\editor.js" type="BINDATA" />
+       </if>
+       <if expr="is_linux">
+         <include name="IDR_AERO_TERMINAL_HTML" file="resources\aero_terminal\terminal.html" type="BINDATA" />
+--- /dev/null
++++ b/chrome/browser/resources/aero_notes/editor.js
+@@ -0,0 +1,428 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++// Live-preview editor for chrome://notes (fatia B4). One view: the line that
++// has the caret is shown as raw Markdown (a textarea), every other line is
++// rendered by markdown.js. No split, no second pane. The note is kept as an
++// array of source lines; rendering works on chunks (runs of non-blank lines,
++// a fenced block, or a blank line) so only the chunks that change are
++// rebuilt. Only DOM nodes are created (no innerHTML: Trusted Types).
++//
++// Limits: selection across several lines is not supported while editing
++// (copy from the rendered text still works); the line has to be activated
++// with a click or the arrow keys.
++
++import {renderMarkdown} from './markdown.js';
++
++const RE_FENCE = /^\s*(```|~~~)/;
++const RE_LIST = /^(\s*)([-*+]|\d{1,9}[.)])(\s+)(\[[ xX]\]\s+)?/;
++const RE_QUOTE = /^(\s*>\s?)/;
++const HISTORY_MAX = 200;
++const BURST_MS = 800;
++
++// --- pure model (also run under Node in the checks) -----------------------
++
++// Splits lines into chunks: {s, e, kind} with kind 'blank' | 'fence' | 'text'.
++export function computeChunks(lines) {
++  const chunks = [];
++  let i = 0;
++  while (i < lines.length) {
++    const line = lines[i];
++    if (line.trim() === '') {
++      chunks.push({s: i, e: i + 1, kind: 'blank'});
++      i++;
++    } else if (RE_FENCE.test(line)) {
++      const marker = RE_FENCE.exec(line)[1];
++      let j = i + 1;
++      while (j < lines.length && !lines[j].trimStart().startsWith(marker)) {
++        j++;
++      }
++      const e = Math.min(j + 1, lines.length);
++      chunks.push({s: i, e, kind: 'fence'});
++      i = e;
++    } else {
++      let j = i + 1;
++      while (j < lines.length && lines[j].trim() !== '' &&
++             !RE_FENCE.test(lines[j])) {
++        j++;
++      }
++      chunks.push({s: i, e: j, kind: 'text'});
++      i = j;
++    }
++  }
++  return chunks;
++}
++
++export function chunkSignature(chunks) {
++  return chunks.map((c) => `${c.s}-${c.e}${c.kind[0]}`).join(',');
++}
++
++// What Enter does at `col` in `line`: returns {before, after} (the two
++// lines). Continues lists and quotes; Enter on an empty item removes the
++// marker and ends the list.
++export function splitLine(line, col) {
++  const before = line.slice(0, col);
++  const after = line.slice(col);
++  const list = RE_LIST.exec(line);
++  if (list && col >= list[0].length) {
++    if (line.slice(list[0].length).trim() === '' && after === '') {
++      return {before: '', after: '', ended: true};
++    }
++    let marker = list[2];
++    const n = /^(\d+)([.)])$/.exec(marker);
++    if (n) {
++      marker = `${Number(n[1]) + 1}${n[2]}`;
++    }
++    const task = list[4] ? '[ ] ' : '';
++    return {before, after:
++        `${list[1]}${marker}${list[3]}${task}${after.replace(/^\s+/, '')}`};
++  }
++  const quote = RE_QUOTE.exec(line);
++  if (quote && col >= quote[0].length) {
++    if (line.slice(quote[0].length).trim() === '' && after === '') {
++      return {before: '', after: '', ended: true};
++    }
++    return {before, after: quote[1] + after};
++  }
++  return {before, after};
++}
++
++// Normalises a text for editing: '\n' lines and whether to restore CRLF.
++export function splitText(text) {
++  const crlf = text.includes('\r\n');
++  return {lines: text.replace(/\r\n?/g, '\n').split('\n'), crlf};
++}
++
++export function joinLines(lines, crlf) {
++  const text = lines.join('\n');
++  return crlf ? text.replace(/\n/g, '\r\n') : text;
++}
++
++// --- view ------------------------------------------------------------------
++
++export function createEditor(root, opts = {}) {
++  let lines = [''];
++  let crlf = false;
++  let active = -1;
++  let chunks = computeChunks(lines);
++  let sig = chunkSignature(chunks);
++  let wrappers = [];
++  let dirty = false;
++  let undo = [];
++  let redo = [];
++  let lastPush = 0;
++  let input = null;
++
++  const snapshot = () => ({lines: lines.slice(), active,
++                           caret: input ? input.selectionStart : 0});
++
++  function pushHistory() {
++    undo.push(snapshot());
++    if (undo.length > HISTORY_MAX) {
++      undo.shift();
++    }
++    redo = [];
++    lastPush = Date.now();
++  }
++
++  function changed() {
++    dirty = true;
++    if (opts.onChange) {
++      opts.onChange();
++    }
++  }
++
++  function chunkOf(index) {
++    return chunks.findIndex((c) => index >= c.s && index < c.e);
++  }
++
++  function piece(start, end) {
++    const div = document.createElement('div');
++    div.className = 'piece';
++    div.dataset.s = String(start);
++    div.dataset.n = String(end - start);
++    div.append(renderMarkdown(lines.slice(start, end).join('\n'),
++                              {onWikilink: opts.onWikilink}));
++    return div;
++  }
++
++  function rawLine(index) {
++    const div = document.createElement('div');
++    div.className = 'ln raw';
++    div.dataset.s = String(index);
++    div.dataset.n = '1';
++    div.textContent = lines[index];
++    return div;
++  }
++
++  function makeInput() {
++    const ta = document.createElement('textarea');
++    ta.className = 'ln-input';
++    ta.rows = 1;
++    ta.spellcheck = false;
++    ta.setAttribute('aria-label', 'linha em edição (Markdown)');
++    ta.value = lines[active];
++    ta.addEventListener('input', onInput);
++    ta.addEventListener('beforeinput', () => {
++      if (Date.now() - lastPush > BURST_MS) {
++        pushHistory();
++      }
++    });
++    ta.addEventListener('keydown', onKeydown);
++    ta.addEventListener('paste', onPaste);
++    return ta;
++  }
++
++  function buildChunk(ci) {
++    const c = chunks[ci];
++    const wrap = document.createElement('div');
++    wrap.className = `chunk ${c.kind}`;
++    const isActive = active >= c.s && active < c.e;
++    if (!isActive) {
++      if (c.kind === 'blank') {
++        const div = document.createElement('div');
++        div.className = 'ln blank';
++        div.dataset.s = String(c.s);
++        div.dataset.n = '1';
++        wrap.append(div);
++      } else {
++        wrap.append(piece(c.s, c.e));
++      }
++      return wrap;
++    }
++    input = makeInput();
++    wrap.classList.add('editing');
++    if (c.kind === 'fence') {
++      for (let k = c.s; k < c.e; k++) {
++        wrap.append(k === active ? input : rawLine(k));
++      }
++    } else {
++      if (active > c.s) {
++        wrap.append(piece(c.s, active));
++      }
++      wrap.append(input);
++      if (active + 1 < c.e) {
++        wrap.append(piece(active + 1, c.e));
++      }
++    }
++    return wrap;
++  }
++
++  function resize() {
++    if (input) {
++      input.style.height = 'auto';
++      input.style.height = `${input.scrollHeight}px`;
++    }
++  }
++
++  function renderAll() {
++    input = null;
++    chunks = computeChunks(lines);
++    sig = chunkSignature(chunks);
++    wrappers = chunks.map((_, ci) => buildChunk(ci));
++    root.replaceChildren(...wrappers);
++    resize();
++  }
++
++  function focusInput(caret) {
++    if (!input) {
++      return;
++    }
++    input.focus();
++    const pos = caret === 'end' ? input.value.length :
++        Math.max(0, Math.min(caret, input.value.length));
++    input.setSelectionRange(pos, pos);
++    resize();
++    input.scrollIntoView({block: 'nearest'});
++  }
++
++  // Moves the caret line to `index`; only the old and the new chunk are
++  // rebuilt unless the typed text changed how the lines group.
++  function activate(index, caret) {
++    index = Math.max(0, Math.min(lines.length - 1, index));
++    const prev = active;
++    if (prev === index && input) {
++      focusInput(caret);
++      return;
++    }
++    const prevChunk = prev >= 0 ? chunkOf(prev) : -1;
++    active = index;
++    const next = computeChunks(lines);
++    if (chunkSignature(next) !== sig) {
++      renderAll();
++    } else {
++      const touched = new Set([prevChunk, chunkOf(index)]);
++      input = null;
++      for (const ci of touched) {
++        if (ci >= 0) {
++          const fresh = buildChunk(ci);
++          wrappers[ci].replaceWith(fresh);
++          wrappers[ci] = fresh;
++        }
++      }
++      resize();
++    }
++    focusInput(caret);
++  }
++
++  function restructure(newActive, caret) {
++    active = newActive;
++    renderAll();
++    focusInput(caret);
++    changed();
++  }
++
++  function onInput() {
++    lines[active] = input.value;
++    resize();
++    changed();
++  }
++
++  function insertLines(text, col, end) {
++    const parts = text.replace(/\r\n?/g, '\n').split('\n');
++    const line = lines[active];
++    const head = line.slice(0, col);
++    const tail = line.slice(end);
++    const last = parts.length - 1;
++    const caret = last === 0 ? head.length + parts[0].length :
++                               parts[last].length;
++    parts[0] = head + parts[0];
++    parts[last] += tail;
++    lines.splice(active, 1, ...parts);
++    return {index: active + last, caret};
++  }
++
++  function onPaste(e) {
++    const text = e.clipboardData ? e.clipboardData.getData('text/plain') : '';
++    if (!/[\r\n]/.test(text)) {
++      return;  // single line: the textarea pastes it itself
++    }
++    e.preventDefault();
++    pushHistory();
++    const r = insertLines(text, input.selectionStart, input.selectionEnd);
++    restructure(r.index, r.caret);
++  }
++
++  function singleRow() {
++    return input.scrollHeight <= parseFloat(getComputedStyle(input).lineHeight) *
++        1.6;
++  }
++
++  function doUndo(from, to) {
++    if (!from.length) {
++      return;
++    }
++    to.push(snapshot());
++    const s = from.pop();
++    lines = s.lines;
++    restructure(Math.min(s.active, lines.length - 1), s.caret);
++  }
++
++  function onKeydown(e) {
++    if (e.isComposing) {
++      return;
++    }
++    const mod = e.ctrlKey || e.metaKey;
++    if (mod && e.key.toLowerCase() === 's') {
++      e.preventDefault();
++      if (opts.onSave) {
++        opts.onSave();
++      }
++      return;
++    }
++    if (mod && !e.shiftKey && e.key.toLowerCase() === 'z') {
++      e.preventDefault();
++      doUndo(undo, redo);
++      return;
++    }
++    if (mod && (e.key.toLowerCase() === 'y' ||
++                (e.shiftKey && e.key.toLowerCase() === 'z'))) {
++      e.preventDefault();
++      doUndo(redo, undo);
++      return;
++    }
++    const start = input.selectionStart;
++    const end = input.selectionEnd;
++    if (e.key === 'Enter' && !e.shiftKey && !mod) {
++      e.preventDefault();
++      pushHistory();
++      const line = lines[active];
++      const r = splitLine(line.slice(0, start) + line.slice(end), start);
++      if (r.ended) {
++        lines[active] = '';
++        restructure(active, 0);
++        return;
++      }
++      lines.splice(active, 1, r.before, r.after);
++      const rest = lines[active + 1];
++      const tailLen = line.length - end;
++      restructure(active + 1, rest.length - tailLen);
++    } else if (e.key === 'Backspace' && start === 0 && end === 0 &&
++               active > 0) {
++      e.preventDefault();
++      pushHistory();
++      const joinAt = lines[active - 1].length;
++      lines.splice(active - 1, 2, lines[active - 1] + lines[active]);
++      restructure(active - 1, joinAt);
++    } else if (e.key === 'Delete' && start === input.value.length &&
++               end === start && active < lines.length - 1) {
++      e.preventDefault();
++      pushHistory();
++      const joinAt = lines[active].length;
++      lines.splice(active, 2, lines[active] + lines[active + 1]);
++      restructure(active, joinAt);
++    } else if (e.key === 'ArrowUp' && !e.shiftKey && !mod && active > 0 &&
++               (start === 0 || singleRow())) {
++      e.preventDefault();
++      activate(active - 1, Math.min(start, lines[active - 1].length));
++    } else if (e.key === 'ArrowDown' && !e.shiftKey && !mod &&
++               active < lines.length - 1 &&
++               (end === input.value.length || singleRow())) {
++      e.preventDefault();
++      activate(active + 1, Math.min(end, lines[active + 1].length));
++    } else if (e.key === 'Escape') {
++      input.blur();
++    }
++  }
++
++  // Click on a rendered piece: pick the line by the vertical position.
++  root.addEventListener('click', (e) => {
++    if (e.target.closest('a')) {
++      return;  // links keep working; they do not enter edit mode
++    }
++    const el = e.target.closest('[data-s]');
++    if (!el) {
++      if (e.target === root && lines.length) {
++        activate(lines.length - 1, 'end');
++      }
++      return;
++    }
++    const s = Number(el.dataset.s);
++    const n = Math.max(1, Number(el.dataset.n));
++    const rect = el.getBoundingClientRect();
++    const frac = rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0;
++    const k = Math.max(0, Math.min(n - 1, Math.floor(frac * n)));
++    activate(s + k, 'end');
++  });
++
++  return {
++    load(text) {
++      const parsed = splitText(text);
++      lines = parsed.lines;
++      crlf = parsed.crlf;
++      active = -1;
++      undo = [];
++      redo = [];
++      dirty = false;
++      renderAll();
++    },
++    getText: () => joinLines(lines, crlf),
++    isDirty: () => dirty,
++    markSaved() {
++      dirty = false;
++    },
++    focus() {
++      activate(active >= 0 ? active : 0, 'end');
++    },
++  };
++}
+--- a/chrome/browser/resources/aero_notes/notes.html
++++ b/chrome/browser/resources/aero_notes/notes.html
+@@ -14,6 +14,8 @@
+       <span class="vault-name" id="vaultName">vault</span>
+       <button class="vault-pick" id="vaultPick" type="button" disabled
+           title="escolher pasta (ainda não disponível)">escolher pasta</button>
++      <button class="vault-pick" id="btnNew" type="button" disabled
++          title="nova nota">+ nota</button>
+     </header>
+     <nav class="tree" id="tree" role="tree" aria-label="arquivos da vault">
+       <p class="empty">nenhuma vault escolhida</p>
+@@ -24,8 +26,14 @@
+   <main class="note" id="note">
+     <header class="note-head">
+       <span class="note-title" id="noteTitle">sem nota aberta</span>
++      <span class="note-state" id="noteState" role="status"></span>
++      <button class="vault-pick" id="btnSave" type="button" disabled
++          title="salvar (Ctrl+S)">salvar</button>
++      <button class="vault-pick" id="btnRename" type="button" disabled>renomear</button>
++      <button class="vault-pick" id="btnDelete" type="button" disabled>apagar</button>
+     </header>
+-    <div class="editor" id="editor" aria-readonly="true">
++    <div class="banner" id="banner" role="alert" hidden></div>
++    <div class="editor" id="editor">
+       <p class="hint">Pick a vault folder to start.</p>
+       <button class="vault-pick empty-pick" id="emptyPick" type="button">Choose folder</button>
+     </div>
+--- a/chrome/browser/resources/aero_notes/notes.css
++++ b/chrome/browser/resources/aero_notes/notes.css
+@@ -80,3 +80,58 @@
+   padding: 32px 24px;
+   width: 100%;
+ }
++.note-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++.note-state { color: var(--text2); font-size: 12px; }
++.note-state.dirty { color: var(--accent); }
++.vault-pick:disabled { opacity: 0.4; }
++.vault-pick:not(:disabled):hover { border-color: var(--accent); color: var(--text); }
++.banner {
++  align-items: center;
++  background: var(--panel);
++  border-bottom: 1px solid var(--accent);
++  display: flex;
++  flex-wrap: wrap;
++  gap: 8px;
++  padding: 8px 12px;
++}
++.banner[hidden] { display: none; }
++.banner-text { flex: 1 1 260px; }
++.banner input {
++  background: var(--bg);
++  border: 1px solid var(--line);
++  border-radius: 4px;
++  color: var(--text);
++  flex: 1 1 260px;
++  font: inherit;
++  padding: 2px 6px;
++}
++.banner .danger { border-color: #e06c75; color: #e06c75; }
++.node.active { background: var(--line); color: var(--text); }
++/* live preview: raw line in edit, the rest rendered */
++.chunk .ln.blank { min-height: 1.5em; }
++.chunk .ln.raw {
++  font-family: "DejaVu Sans Mono", ui-monospace, monospace;
++  min-height: 1.5em;
++  white-space: pre-wrap;
++}
++.chunk.fence.editing { background: var(--panel); border-radius: 4px; }
++.ln-input {
++  background: transparent;
++  border: 0;
++  border-left: 2px solid var(--accent);
++  color: var(--text);
++  display: block;
++  font: 13px/1.5 "DejaVu Sans Mono", ui-monospace, monospace;
++  outline: none;
++  overflow: hidden;
++  padding: 0 0 0 6px;
++  resize: none;
++  white-space: pre-wrap;
++  width: 100%;
++}
++.piece { cursor: text; }
++.piece a { cursor: pointer; }
++.node { cursor: pointer; padding-bottom: 2px; padding-top: 2px; white-space: nowrap; }
++.node.dir { color: var(--accent); }
++.node.muted { cursor: default; opacity: 0.5; }
++.node:hover { background: var(--line); }
+--- a/chrome/browser/resources/aero_notes/notes.js
++++ b/chrome/browser/resources/aero_notes/notes.js
+@@ -1,8 +1,9 @@
+ // Copyright 2026 The aerographene Authors
+ // Use of this source code is governed by the GPL-3.0 license.
+ 
+-// chrome://notes: resizable vault sidebar, lazy tree and Markdown view. No
+-// network, no innerHTML (Trusted Types is enforced by the WebUI CSP).
++// chrome://notes: resizable vault sidebar, lazy tree and live-preview editor
++// (editor.js). No network, no innerHTML (Trusted Types is enforced by the
++// WebUI CSP). The tab title is always "o: <vault name>", never the open file.
+ 
+ const MIN_W = 160;
+ const MAX_W = 560;
+@@ -55,7 +56,7 @@
+ 
+ // --- vault (B2/B3): read-only access through the page's WebUI handler. ---
+ 
+-import {renderMarkdown} from './markdown.js';
++import {createEditor} from './editor.js';
+ 
+ // Minimal replacement for cr.sendWithPromise: the browser answers with
+ // cr.webUIResponse(id, ok, value) (WebUIMessageHandler::Resolve/Reject).
+@@ -84,7 +85,30 @@
+ const vaultPick = document.getElementById('vaultPick');
+ const emptyPick = document.getElementById('emptyPick');
+ const emptyNodes = Array.from(editor.childNodes);
++const noteState = document.getElementById('noteState');
++const banner = document.getElementById('banner');
++const btnNew = document.getElementById('btnNew');
++const btnSave = document.getElementById('btnSave');
++const btnRename = document.getElementById('btnRename');
++const btnDelete = document.getElementById('btnDelete');
++const expanded = new Set();
+ let current = '';
++let mtime = 0;
++let doc = null;
++let saving = false;
++let vaultTitle = '';
++
++const STATUS_TEXT = {
++  conflict: 'o arquivo mudou no disco',
++  notFound: 'a nota ou a pasta não existe',
++  exists: 'já existe uma nota com esse nome',
++  invalid: 'nome ou caminho inválido (use .md, sem começar com ponto)',
++  tooLarge: 'a nota passa de 4 MiB',
++  ioError: 'erro ao gravar no disco',
++  unsupported: 'escrita ainda não disponível neste sistema',
++  noVault: 'nenhuma vault escolhida',
++};
++const statusText = (s) => STATUS_TEXT[s] || `erro: ${s}`;
+ 
+ function message(parent, text) {
+   parent.replaceChildren();
+@@ -117,6 +141,9 @@
+     row.style.paddingLeft = `${12 + depth * 14}px`;
+     row.textContent = baseName(entry.path);
+     row.dataset.path = entry.path;
++    if (entry.path === current) {
++      row.classList.add('active');
++    }
+     container.append(row);
+     if (entry.dir) {
+       const kids = document.createElement('div');
+@@ -124,16 +151,24 @@
+       kids.hidden = true;
+       container.append(kids);
+       row.setAttribute('aria-expanded', 'false');
+-      row.addEventListener('click', () => {
+-        const open = kids.hidden;
++      const setOpen = (open) => {
+         kids.hidden = !open;
+         row.setAttribute('aria-expanded', String(open));
++        if (open) {
++          expanded.add(entry.path);
++        } else {
++          expanded.delete(entry.path);
++        }
+         if (open && !kids.childElementCount) {
+           fillDir(kids, entry.path, depth + 1);
+         }
+-      });
++      };
++      row.addEventListener('click', () => setOpen(kids.hidden));
++      if (expanded.has(entry.path)) {
++        setOpen(true);
++      }
+     } else if (entry.path.toLowerCase().endsWith('.md')) {
+-      row.addEventListener('click', () => openNote(entry.path));
++      row.addEventListener('click', () => requestOpen(entry.path));
+     } else {
+       row.classList.add('muted');
+     }
+@@ -149,19 +184,123 @@
+   }
+ }
+ 
+-async function openNote(path) {
+-  let text;
++function updateState() {
++  const dirty = !!doc && doc.isDirty();
++  noteState.textContent = !current ? '' : dirty ? '● alterado' : 'salvo';
++  noteState.classList.toggle('dirty', dirty);
++  btnSave.disabled = !current || !dirty;
++  btnRename.disabled = !current;
++  btnDelete.disabled = !current;
++}
++
++// Inline question: resolves with {id, value} of the button pressed, or null
++// (cancel / Escape). `opts.input` adds a text field with that initial value.
++function ask(text, buttons, opts = {}) {
++  return new Promise((resolve) => {
++    banner.replaceChildren();
++    const label = document.createElement('span');
++    label.className = 'banner-text';
++    label.textContent = text;
++    banner.append(label);
++    let field = null;
++    const ac = new AbortController();
++    const done = (v) => {
++      ac.abort();
++      banner.hidden = true;
++      banner.replaceChildren();
++      resolve(v);
++    };
++    if (opts.input !== undefined) {
++      field = document.createElement('input');
++      field.type = 'text';
++      field.value = opts.input;
++      field.spellcheck = false;
++      field.setAttribute('aria-label', text);
++      banner.append(field);
++    }
++    for (const b of [...buttons, {id: null, label: 'cancelar'}]) {
++      const btn = document.createElement('button');
++      btn.type = 'button';
++      btn.className = b.danger ? 'vault-pick danger' : 'vault-pick';
++      btn.textContent = b.label;
++      btn.addEventListener('click', () => done(
++          b.id === null ? null : {id: b.id, value: field && field.value}));
++      banner.append(btn);
++    }
++    banner.addEventListener('keydown', (e) => {
++      if (e.key === 'Escape') {
++        done(null);
++      } else if (e.key === 'Enter' && field && e.target === field) {
++        done({id: buttons[0].id, value: field.value});
++      }
++    }, {signal: ac.signal});
++    banner.hidden = false;
++    (field || banner.querySelector('button')).focus();
++  });
++}
++
++function notice(text) {
++  banner.replaceChildren();
++  const label = document.createElement('span');
++  label.className = 'banner-text';
++  label.textContent = text;
++  const ok = document.createElement('button');
++  ok.type = 'button';
++  ok.className = 'vault-pick';
++  ok.textContent = 'ok';
++  ok.addEventListener('click', () => {
++    banner.hidden = true;
++  });
++  banner.append(label, ok);
++  banner.hidden = false;
++}
++
++function dirOf(path) {
++  return path.includes('/') ? path.slice(0, path.lastIndexOf('/') + 1) : '';
++}
++
++// Unsaved edits: save, discard or stay. Resolves true when it is safe to
++// replace the editor content.
++async function confirmLeave() {
++  if (!doc || !doc.isDirty()) {
++    return true;
++  }
++  const r = await ask(
++      `alterações não salvas em ${baseName(current)}.`,
++      [{id: 'save', label: 'salvar'},
++       {id: 'discard', label: 'descartar', danger: true}]);
++  if (!r) {
++    return false;
++  }
++  return r.id === 'discard' ? true : save();
++}
++
++async function requestOpen(path) {
++  if (path === current && doc && !doc.isDirty()) {
++    return;
++  }
++  if (await confirmLeave()) {
++    await loadNote(path);
++  }
++}
++
++async function loadNote(path) {
++  let note;
+   try {
+-    text = await send('readNote', path);
++    note = await send('readNote', path);
+   } catch (e) {
+     noteTitle.textContent = e === 'unsupported' ?
+         `${baseName(path)} (leitura ainda não disponível neste sistema)` :
+         `${baseName(path)} (não foi possível ler)`;
+     return;
+   }
++  showNote(path, note.text, note.mtime);
++}
++
++function showNote(path, text, fileMtime) {
+   current = path;
++  mtime = fileMtime;
+   noteTitle.textContent = baseName(path);
+-  document.title = `o: ${baseName(path)}`;
+   for (const n of tree.querySelectorAll('.node.active')) {
+     n.classList.remove('active');
+   }
+@@ -170,13 +309,231 @@
+   if (row) {
+     row.classList.add('active');
+   }
+-  const article = document.createElement('article');
+-  article.className = 'md';
+-  article.append(renderMarkdown(text, {onWikilink: openWikilink}));
+-  editor.replaceChildren(article);
++  const host = document.createElement('article');
++  host.className = 'md live';
++  editor.replaceChildren(host);
++  doc = createEditor(host, {
++    onChange: updateState,
++    onSave: () => save(),
++    onWikilink: openWikilink,
++  });
++  doc.load(text);
+   editor.scrollTop = 0;
++  updateState();
++}
++
++function clearNote() {
++  current = '';
++  doc = null;
++  noteTitle.textContent = 'sem nota aberta';
++  const hint = document.createElement('p');
++  hint.className = 'hint';
++  hint.textContent = 'Select a note from the vault tree.';
++  editor.replaceChildren(hint);
++  updateState();
++}
++
++// Atomic save with the mtime read when the note was opened. A conflict never
++// drops the text: it stays in the editor and the user chooses.
++async function save(overwrite = false) {
++  if (!current || !doc || saving) {
++    return false;
++  }
++  saving = true;
++  const text = doc.getText();
++  const path = current;
++  let r;
++  try {
++    r = await send('writeNote', path, text, overwrite ? null : mtime);
++  } catch (e) {
++    saving = false;
++    notice(`não foi possível salvar: ${statusText(e)}`);
++    return false;
++  }
++  saving = false;
++  if (r.status === 'ok') {
++    if (path === current) {
++      mtime = r.mtime;
++      if (doc.getText() === text) {
++        doc.markSaved();
++      }
++    }
++    banner.hidden = true;
++    updateState();
++    return true;
++  }
++  if (r.status === 'conflict') {
++    return resolveConflict(path, text);
++  }
++  if (r.status === 'notFound') {
++    const a = await ask(
++        `${baseName(path)} não existe mais no disco. O texto continua aqui.`,
++        [{id: 'recreate', label: 'recriar com este texto'}]);
++    if (a) {
++      const c = await send('createNote', path, text);
++      if (c.status === 'ok') {
++        mtime = c.mtime;
++        doc.markSaved();
++        updateState();
++        refreshTree();
++        return true;
++      }
++      notice(statusText(c.status));
++    }
++    return false;
++  }
++  notice(`não foi possível salvar: ${statusText(r.status)}`);
++  return false;
++}
++
++function conflictCopyName(path) {
++  const stem = baseName(path).replace(/\.md$/i, '');
++  const d = new Date();
++  const p = (n) => String(n).padStart(2, '0');
++  const stamp = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
++      `${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
++  return `${dirOf(path)}${stem} (conflito ${stamp}).md`;
++}
++
++async function resolveConflict(path, text) {
++  const a = await ask(
++      `${baseName(path)} mudou no disco depois de aberta. ` +
++          'O seu texto continua no editor; nada foi gravado.',
++      [{id: 'copy', label: 'salvar como cópia'},
++       {id: 'overwrite', label: 'sobrescrever o arquivo', danger: true},
++       {id: 'reload', label: 'recarregar do disco (descarta o meu texto)',
++        danger: true}]);
++  if (!a) {
++    return false;
++  }
++  if (a.id === 'overwrite') {
++    return save(true);
++  }
++  if (a.id === 'reload') {
++    await loadNote(path);
++    return false;
++  }
++  const copy = conflictCopyName(path);
++  const c = await send('createNote', copy, text);
++  if (c.status !== 'ok') {
++    notice(`não foi possível criar a cópia: ${statusText(c.status)}`);
++    return false;
++  }
++  await refreshTree();
++  showNote(copy, text, c.mtime);
++  return true;
++}
++
++function refreshTree() {
++  return fillDir(tree, '', 0);
++}
++
++async function newNote() {
++  if (!(await confirmLeave())) {
++    return;
++  }
++  const a = await ask('nome da nova nota (pasta/nome.md):',
++                      [{id: 'create', label: 'criar'}],
++                      {input: `${dirOf(current)}sem-titulo.md`});
++  if (!a) {
++    return;
++  }
++  let path = a.value.trim();
++  if (!path.toLowerCase().endsWith('.md')) {
++    path += '.md';
++  }
++  let r;
++  try {
++    r = await send('createNote', path, '');
++  } catch (e) {
++    notice(statusText(e));
++    return;
++  }
++  if (r.status !== 'ok') {
++    notice(`não foi possível criar: ${statusText(r.status)}`);
++    return;
++  }
++  await refreshTree();
++  showNote(path, '', r.mtime);
++  doc.focus();
+ }
+ 
++async function renameNote() {
++  if (!current) {
++    return;
++  }
++  const a = await ask('novo caminho da nota:', [{id: 'rename', label: 'renomear'}],
++                      {input: current});
++  if (!a) {
++    return;
++  }
++  let to = a.value.trim();
++  if (!to.toLowerCase().endsWith('.md')) {
++    to += '.md';
++  }
++  if (to === current) {
++    return;
++  }
++  let r;
++  try {
++    r = await send('renameNote', current, to);
++  } catch (e) {
++    notice(statusText(e));
++    return;
++  }
++  if (r.status !== 'ok') {
++    notice(`não foi possível renomear: ${statusText(r.status)}`);
++    return;
++  }
++  // The file keeps its mtime across a rename, so `mtime` stays valid and
++  // unsaved text stays in the editor.
++  current = to;
++  noteTitle.textContent = baseName(to);
++  await refreshTree();
++  updateState();
++}
++
++async function deleteNote() {
++  if (!current) {
++    return;
++  }
++  const a = await ask(
++      `apagar ${baseName(current)}? Não vai para a lixeira.`,
++      [{id: 'delete', label: 'apagar', danger: true}]);
++  if (!a) {
++    return;
++  }
++  let r;
++  try {
++    r = await send('deleteNote', current);
++  } catch (e) {
++    notice(statusText(e));
++    return;
++  }
++  if (r.status !== 'ok' && r.status !== 'notFound') {
++    notice(`não foi possível apagar: ${statusText(r.status)}`);
++    return;
++  }
++  clearNote();
++  refreshTree();
++}
++
++btnNew.addEventListener('click', newNote);
++btnSave.addEventListener('click', () => save());
++btnRename.addEventListener('click', renameNote);
++btnDelete.addEventListener('click', deleteNote);
++window.addEventListener('keydown', (e) => {
++  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
++    e.preventDefault();
++    save();
++  }
++});
++window.addEventListener('beforeunload', (e) => {
++  if (doc && doc.isDirty()) {
++    e.preventDefault();
++  }
++});
++
+ // [[name]] resolves next to the current note, then at the vault root.
+ function openWikilink(target) {
+   let name = target.split('#')[0].trim();
+@@ -189,16 +546,18 @@
+   const dir = current.includes('/') ?
+       current.slice(0, current.lastIndexOf('/') + 1) : '';
+   if (!dir) {
+-    openNote(name);
++    requestOpen(name);
+     return;
+   }
+   send('readNote', dir + name)
+-      .then(() => openNote(dir + name), () => openNote(name));
++      .then(() => requestOpen(dir + name), () => requestOpen(name));
+ }
+ 
+ function showVault(info) {
+   if (!info || !info.path) {
+     vaultName.textContent = 'vault';
++    btnNew.disabled = true;
++    document.title = 'o: notas';
+     message(tree, 'nenhuma vault escolhida');
+     editor.replaceChildren(...emptyNodes);
+     return;
+@@ -211,15 +570,25 @@
+   }
+   vaultName.textContent = info.name || info.path;
+   vaultName.title = info.path;
++  // Tab title: always the vault, never the open file.
++  vaultTitle = info.name || info.path;
++  document.title = `o: ${vaultTitle}`;
++  btnNew.disabled = false;
+   fillDir(tree, '', 0);
+ }
+ 
+ vaultPick.disabled = false;
+ vaultPick.title = 'escolher a pasta da vault';
+ async function pickVault() {
++  if (!(await confirmLeave())) {
++    return;
++  }
+   const info = await send('pickVault');
+   if (info) {
+     current = '';
++    doc = null;
++    expanded.clear();
++    updateState();
+     showVault(info);
+   }
+ }
+--- a/chrome/browser/ui/webui/aero_notes/aero_notes_ui.cc
++++ b/chrome/browser/ui/webui/aero_notes/aero_notes_ui.cc
+@@ -23,9 +23,10 @@
+   source->AddResourcePath("notes.css", IDR_AERO_NOTES_CSS);
+   source->AddResourcePath("notes.js", IDR_AERO_NOTES_JS);
+   source->AddResourcePath("markdown.js", IDR_AERO_NOTES_MARKDOWN_JS);
++  source->AddResourcePath("editor.js", IDR_AERO_NOTES_EDITOR_JS);
+   source->SetDefaultResource(IDR_AERO_NOTES_HTML);
+ 
+-  // Read-only vault access (B2/B3). WebUI bindings, and so these messages,
++  // Vault access: read (B2/B3) and write (B4). WebUI bindings, and so these messages,
+   // exist only in this page's renderer.
+   web_ui->AddMessageHandler(std::make_unique<aerographene::notes::NotesHandler>(
+       Profile::FromWebUI(web_ui)->GetPrefs()));
+--- a/chrome/browser/ui/webui/aero_notes/notes_handler.cc
++++ b/chrome/browser/ui/webui/aero_notes/notes_handler.cc
+@@ -57,6 +57,18 @@
+   web_ui()->RegisterMessageCallback(
+       "readNote", base::BindRepeating(&NotesHandler::HandleReadNote,
+                                       base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "writeNote", base::BindRepeating(&NotesHandler::HandleWriteNote,
++                                       base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "createNote", base::BindRepeating(&NotesHandler::HandleCreateNote,
++                                        base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "renameNote", base::BindRepeating(&NotesHandler::HandleRenameNote,
++                                        base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "deleteNote", base::BindRepeating(&NotesHandler::HandleDeleteNote,
++                                        base::Unretained(this)));
+ }
+ 
+ void NotesHandler::OnJavascriptDisallowed() {
+@@ -202,7 +214,7 @@
+       FROM_HERE, kIoTraits,
+       base::BindOnce(
+           [](base::FilePath root, std::string rel) {
+-            return ReadVaultNote(root, rel);
++            return ReadVaultNoteWithMtime(root, rel);
+           },
+           root, *rel),
+       base::BindOnce(&NotesHandler::OnRead, weak_ptr_factory_.GetWeakPtr(),
+@@ -210,20 +222,129 @@
+ }
+ 
+ void NotesHandler::OnRead(base::Value callback_id,
+-                          std::optional<std::string> text) {
++                          std::optional<NoteContent> note) {
+   if (!IsJavascriptAllowed()) {
+     return;
+   }
+-  if (!text) {
++  if (!note) {
+     RejectJavascriptCallback(callback_id, base::Value("notFound"));
+     return;
+   }
+   // base::Value strings must be UTF-8; invalid notes are refused.
+-  if (!base::IsStringUTF8(*text)) {
++  if (!base::IsStringUTF8(note->text)) {
+     RejectJavascriptCallback(callback_id, base::Value("notUtf8"));
+     return;
+   }
+-  ResolveJavascriptCallback(callback_id, base::Value(std::move(*text)));
++  base::DictValue result;
++  result.Set("text", std::move(note->text));
++  result.Set("mtime", static_cast<double>(note->mtime_us));
++  ResolveJavascriptCallback(callback_id, base::Value(std::move(result)));
++}
++
++bool NotesHandler::PrepareWrite(const base::ListValue& args,
++                                size_t expected_args,
++                                base::FilePath* root) {
++  if (args.size() != expected_args || !args[1].is_string() ||
++      (expected_args >= 3 && !args[2].is_string()) || !FromNotesPage()) {
++    return false;
++  }
++  AllowJavascript();
++  *root = prefs_->GetFilePath(kVaultPathPref);
++  if (root->empty()) {
++    RejectJavascriptCallback(args[0], base::Value("noVault"));
++    return false;
++  }
++  if (!kVaultReadSupported) {
++    // Windows until D3c: no confined writer yet, nothing is written.
++    RejectJavascriptCallback(args[0], base::Value("unsupported"));
++    return false;
++  }
++  return true;
++}
++
++void NotesHandler::RunWrite(const base::Value& callback_id,
++                            base::OnceCallback<WriteResult()> job) {
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, kIoTraits, std::move(job),
++      base::BindOnce(&NotesHandler::OnWritten, weak_ptr_factory_.GetWeakPtr(),
++                     callback_id.Clone()));
++}
++
++void NotesHandler::OnWritten(base::Value callback_id, WriteResult result) {
++  if (!IsJavascriptAllowed()) {
++    return;
++  }
++  base::DictValue reply;
++  reply.Set("status", std::string(WriteStatusName(result.status)));
++  reply.Set("mtime", static_cast<double>(result.mtime_us));
++  ResolveJavascriptCallback(callback_id, base::Value(std::move(reply)));
++}
++
++// args = [callback_id, path, text, expected_mtime | null]. null overwrites
++// on purpose (the page asks only after showing the conflict).
++void NotesHandler::HandleWriteNote(const base::ListValue& args) {
++  base::FilePath root;
++  if (args.size() == 4 && !args[3].is_none() && !args[3].is_int() &&
++      !args[3].is_double()) {
++    return;
++  }
++  if (!PrepareWrite(args, 4, &root)) {
++    return;
++  }
++  std::optional<int64_t> expected;
++  if (args[3].is_int()) {
++    expected = args[3].GetInt();
++  } else if (args[3].is_double()) {
++    expected = static_cast<int64_t>(args[3].GetDouble());
++  }
++  RunWrite(args[0],
++           base::BindOnce(
++               [](base::FilePath root, std::string rel, std::string text,
++                  std::optional<int64_t> expected) {
++                 return WriteVaultNote(root, rel, text, expected);
++               },
++               root, args[1].GetString(), args[2].GetString(), expected));
++}
++
++// args = [callback_id, path, text]
++void NotesHandler::HandleCreateNote(const base::ListValue& args) {
++  base::FilePath root;
++  if (!PrepareWrite(args, 3, &root)) {
++    return;
++  }
++  RunWrite(args[0], base::BindOnce(
++                        [](base::FilePath root, std::string rel,
++                           std::string text) {
++                          return CreateVaultNote(root, rel, text);
++                        },
++                        root, args[1].GetString(), args[2].GetString()));
++}
++
++// args = [callback_id, from, to]
++void NotesHandler::HandleRenameNote(const base::ListValue& args) {
++  base::FilePath root;
++  if (!PrepareWrite(args, 3, &root)) {
++    return;
++  }
++  RunWrite(args[0], base::BindOnce(
++                        [](base::FilePath root, std::string from,
++                           std::string to) {
++                          return RenameVaultNote(root, from, to);
++                        },
++                        root, args[1].GetString(), args[2].GetString()));
++}
++
++// args = [callback_id, path]
++void NotesHandler::HandleDeleteNote(const base::ListValue& args) {
++  base::FilePath root;
++  if (!PrepareWrite(args, 2, &root)) {
++    return;
++  }
++  RunWrite(args[0], base::BindOnce(
++                        [](base::FilePath root, std::string rel) {
++                          return DeleteVaultNote(root, rel);
++                        },
++                        root, args[1].GetString()));
+ }
+ 
+ }  // namespace aerographene::notes
+--- a/chrome/browser/ui/webui/aero_notes/notes_handler.h
++++ b/chrome/browser/ui/webui/aero_notes/notes_handler.h
+@@ -9,6 +9,7 @@
+ #include <vector>
+ 
+ #include "base/files/file_path.h"
++#include "base/functional/callback.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/memory/scoped_refptr.h"
+ #include "base/memory/weak_ptr.h"
+@@ -26,8 +27,10 @@
+ inline constexpr char kVaultPathPref[] = "aerographene.notes.vault_path";
+ 
+ // Messages from chrome://notes only (WebUI bindings exist only in that
+-// page's renderer). Read-only: getVault, pickVault, listDir, readNote.
+-// Paths from the page are untrusted and go through vault_reader.
++// page's renderer). getVault, pickVault, listDir, readNote (text + mtime) and,
++// from B4, writeNote (atomic, mtime conflict check), createNote, renameNote,
++// deleteNote; all replies for writes are {status, mtime}. Paths from the page
++// are untrusted and go through vault_reader.
+ class NotesHandler : public content::WebUIMessageHandler,
+                      public ui::SelectFileDialog::Listener {
+  public:
+@@ -51,11 +54,23 @@
+   void HandlePickVault(const base::ListValue& args);
+   void HandleListDir(const base::ListValue& args);
+   void HandleReadNote(const base::ListValue& args);
++  void HandleWriteNote(const base::ListValue& args);
++  void HandleCreateNote(const base::ListValue& args);
++  void HandleRenameNote(const base::ListValue& args);
++  void HandleDeleteNote(const base::ListValue& args);
++
++  // Common checks for a write message; false when it was answered/dropped.
++  bool PrepareWrite(const base::ListValue& args,
++                    size_t expected_args,
++                    base::FilePath* root);
++  void RunWrite(const base::Value& callback_id,
++                base::OnceCallback<WriteResult()> job);
++  void OnWritten(base::Value callback_id, WriteResult result);
+ 
+   base::Value VaultInfo() const;
+   void OnListed(base::Value callback_id,
+                 std::optional<std::vector<VaultEntry>> entries);
+-  void OnRead(base::Value callback_id, std::optional<std::string> text);
++  void OnRead(base::Value callback_id, std::optional<NoteContent> note);
+ 
+   raw_ptr<PrefService> prefs_;
+   scoped_refptr<ui::SelectFileDialog> select_file_dialog_;
+--- a/chrome/browser/ui/webui/aero_notes/vault_reader.cc
++++ b/chrome/browser/ui/webui/aero_notes/vault_reader.cc
+@@ -28,12 +28,48 @@
+   return std::nullopt;
+ }
+ 
++std::optional<NoteContent> ReadVaultNoteWithMtime(const base::FilePath& root,
++                                                  std::string_view relative) {
++  return std::nullopt;
++}
++
++// B4 on Windows: no write path before the D3c confined reader/writer.
++std::string_view WriteStatusName(WriteStatus status) {
++  return status == WriteStatus::kUnsupported ? "unsupported" : "ioError";
++}
++
++WriteResult WriteVaultNote(const base::FilePath& root,
++                           std::string_view relative,
++                           std::string_view text,
++                           std::optional<int64_t> expected_mtime_us) {
++  return {WriteStatus::kUnsupported, 0};
++}
++
++WriteResult CreateVaultNote(const base::FilePath& root,
++                            std::string_view relative,
++                            std::string_view text) {
++  return {WriteStatus::kUnsupported, 0};
++}
++
++WriteResult RenameVaultNote(const base::FilePath& root,
++                            std::string_view from,
++                            std::string_view to) {
++  return {WriteStatus::kUnsupported, 0};
++}
++
++WriteResult DeleteVaultNote(const base::FilePath& root,
++                            std::string_view relative) {
++  return {WriteStatus::kUnsupported, 0};
++}
++
+ }  // namespace aerographene::notes
+ 
+ #else  // BUILDFLAG(IS_WIN)
+ 
++#include <errno.h>
+ #include <fcntl.h>
+ #include <sys/stat.h>
++#include <sys/syscall.h>
+ #include <unistd.h>
+ 
+ #include <algorithm>
+@@ -42,6 +78,8 @@
+ #include "base/files/file_util.h"
+ #include "base/files/scoped_file.h"
+ #include "base/posix/eintr_wrapper.h"
++#include "base/rand_util.h"
++#include "base/strings/string_number_conversions.h"
+ #include "base/strings/string_split.h"
+ #include "base/strings/string_util.h"
+ 
+@@ -96,8 +134,170 @@
+   return st;
+ }
+ 
++
++constexpr int kDirFlags =
++    O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC | O_NOCTTY;
++constexpr size_t kMaxNameBytes = 255;
++
++#ifndef RENAME_NOREPLACE
++#define RENAME_NOREPLACE (1 << 0)
++#endif
++
++int64_t MtimeUs(const struct stat& st) {
++  return static_cast<int64_t>(st.st_mtim.tv_sec) * 1000000 +
++         st.st_mtim.tv_nsec / 1000;
++}
++
++// Type, size and mtime of `name` inside `dirfd`, without following a final
++// symlink and without opening it.
++std::optional<struct stat> StatAt(int dirfd, const std::string& name) {
++  struct stat st = {};
++  if (fstatat(dirfd, name.c_str(), &st, AT_SYMLINK_NOFOLLOW) != 0) {
++    return std::nullopt;
++  }
++  return st;
++}
++
++// A note file name that can be created or renamed to: ".md", visible (the
++// tree hides names starting with '.'), at most 255 bytes.
++bool IsValidNoteName(std::string_view name) {
++  return !name.empty() && name.size() <= kMaxNameBytes && name.front() != '.' &&
++         IsNote(base::FilePath(std::string(name)));
++}
++
++std::string_view LeafOf(std::string_view relative) {
++  return relative.substr(relative.rfind('/') + 1);  // npos + 1 == 0
++}
++
++// A directory descriptor reached with openat(O_NOFOLLOW) per component from
++// the real root, and the last component, still unopened.
++struct Parent {
++  base::ScopedFD fd;
++  std::string leaf;
++};
++
++std::optional<Parent> OpenParent(const base::FilePath& real_root,
++                                 std::string_view rel) {
++  if (rel.empty() || !IsValidRelative(rel)) {
++    return std::nullopt;
++  }
++  base::ScopedFD dir(HANDLE_EINTR(open(real_root.value().c_str(), kDirFlags)));
++  if (!dir.is_valid()) {
++    return std::nullopt;
++  }
++  const std::vector<std::string_view> parts = base::SplitStringPiece(
++      rel, "/", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
++  for (size_t i = 0; i + 1 < parts.size(); ++i) {
++    base::ScopedFD next(HANDLE_EINTR(
++        openat(dir.get(), std::string(parts[i]).c_str(), kDirFlags)));
++    if (!next.is_valid()) {
++      return std::nullopt;  // missing, not a directory, or a symlink
++    }
++    dir = std::move(next);
++  }
++  return Parent{std::move(dir), std::string(parts.back())};
++}
++
++// Real root and the path of an existing entry relative to it, symlinks
++// resolved (links inside the vault are followed once, here; the open that
++// follows follows none).
++struct RealRef {
++  base::FilePath root;
++  std::string rel;
++};
++
++std::optional<RealRef> ResolveReal(const base::FilePath& root,
++                                   std::string_view relative) {
++  if (relative.empty()) {
++    return std::nullopt;
++  }
++  std::optional<base::FilePath> real = ResolveInVault(root, relative);
++  if (!real) {
++    return std::nullopt;
++  }
++  RealRef ref;
++  ref.root = base::MakeAbsoluteFilePath(root);
++  base::FilePath rel;
++  if (ref.root.empty() || !ref.root.AppendRelativePath(*real, &rel) ||
++      rel.empty()) {
++    return std::nullopt;
++  }
++  ref.rel = rel.value();
++  return ref;
++}
++
++// Same for an entry that may not exist yet (create/rename/delete): the
++// folder is resolved, the last component is taken literally and must not be
++// a symlink when it exists.
++std::optional<RealRef> ResolveParentRef(const base::FilePath& root,
++                                        std::string_view relative) {
++  if (relative.empty() || !IsValidRelative(relative)) {
++    return std::nullopt;
++  }
++  const size_t slash = relative.rfind('/');
++  const std::string_view dir_rel =
++      slash == std::string_view::npos ? std::string_view()
++                                      : relative.substr(0, slash);
++  std::optional<base::FilePath> dir = ResolveInVault(root, dir_rel);
++  if (!dir) {
++    return std::nullopt;
++  }
++  RealRef ref;
++  ref.root = base::MakeAbsoluteFilePath(root);
++  base::FilePath rel_dir;
++  if (ref.root.empty()) {
++    return std::nullopt;
++  }
++  if (*dir == ref.root) {
++    ref.rel = std::string(LeafOf(relative));
++    return ref;
++  }
++  if (!ref.root.AppendRelativePath(*dir, &rel_dir)) {
++    return std::nullopt;
++  }
++  ref.rel = rel_dir.value() + "/" + std::string(LeafOf(relative));
++  return ref;
++}
++
++bool WriteAll(int fd, std::string_view data) {
++  while (!data.empty()) {
++    const ssize_t n = HANDLE_EINTR(write(fd, data.data(), data.size()));
++    if (n <= 0) {
++      return false;
++    }
++    data.remove_prefix(static_cast<size_t>(n));
++  }
++  return true;
++}
++
++WriteResult Fail(WriteStatus status) {
++  return {status, 0};
++}
++
+ }  // namespace
+ 
++std::string_view WriteStatusName(WriteStatus status) {
++  switch (status) {
++    case WriteStatus::kOk:
++      return "ok";
++    case WriteStatus::kInvalid:
++      return "invalid";
++    case WriteStatus::kNotFound:
++      return "notFound";
++    case WriteStatus::kExists:
++      return "exists";
++    case WriteStatus::kConflict:
++      return "conflict";
++    case WriteStatus::kTooLarge:
++      return "tooLarge";
++    case WriteStatus::kUnsupported:
++      return "unsupported";
++    case WriteStatus::kIoError:
++      return "ioError";
++  }
++  return "ioError";
++}
++
+ std::optional<base::FilePath> ResolveInVault(const base::FilePath& root,
+                                              std::string_view relative) {
+   if (!root.IsAbsolute() || !IsValidRelative(relative)) {
+@@ -171,19 +371,30 @@
+   return entries;
+ }
+ 
+-std::optional<std::string> ReadVaultNote(const base::FilePath& root,
+-                                         std::string_view relative) {
+-  std::optional<base::FilePath> path = ResolveInVault(root, relative);
+-  if (!path || !IsNote(*path)) {
++base::ScopedFD OpenVaultFileNoFollow(const base::FilePath& real_root,
++                                     std::string_view relative,
++                                     int flags) {
++  std::optional<Parent> parent = OpenParent(real_root, relative);
++  if (!parent) {
++    return base::ScopedFD();
++  }
++  return base::ScopedFD(HANDLE_EINTR(
++      openat(parent->fd.get(), parent->leaf.c_str(),
++             flags | O_NOFOLLOW | O_CLOEXEC)));
++}
++
++std::optional<NoteContent> ReadVaultNoteWithMtime(const base::FilePath& root,
++                                                  std::string_view relative) {
++  std::optional<RealRef> ref = ResolveReal(root, relative);
++  if (!ref || !IsNote(base::FilePath(ref->rel))) {
+     return std::nullopt;
+   }
+   // O_NONBLOCK: opening a FIFO named x.md must not wait for a writer.
+-  // O_NOFOLLOW: `path` is already resolved; a symlink swapped in now is
+-  // refused. fstat then requires a regular file (TOCTOU of the parents is
+-  // tracked for B4).
+-  base::ScopedFD fd(HANDLE_EINTR(
+-      open(path->value().c_str(),
+-           O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC | O_NOCTTY)));
++  // `ref` has no symlinks left; one swapped in after the check (any
++  // component) makes the open fail, so the file read is the file checked.
++  // fstat then requires a regular file.
++  base::ScopedFD fd = OpenVaultFileNoFollow(
++      ref->root, ref->rel, O_RDONLY | O_NONBLOCK | O_NOCTTY);
+   if (!fd.is_valid()) {
+     return std::nullopt;
+   }
+@@ -192,7 +403,8 @@
+       static_cast<uint64_t>(st.st_size) > kMaxNoteBytes) {
+     return std::nullopt;
+   }
+-  std::string contents;
++  NoteContent note;
++  note.mtime_us = MtimeUs(st);
+   char buf[64 * 1024];
+   while (true) {
+     const ssize_t n = HANDLE_EINTR(read(fd.get(), buf, sizeof(buf)));
+@@ -202,12 +414,192 @@
+     if (n == 0) {
+       break;
+     }
+-    contents.append(buf, static_cast<size_t>(n));
+-    if (contents.size() > kMaxNoteBytes) {
++    note.text.append(buf, static_cast<size_t>(n));
++    if (note.text.size() > kMaxNoteBytes) {
+       return std::nullopt;  // grew while reading
+     }
+   }
+-  return contents;
++  return note;
++}
++
++std::optional<std::string> ReadVaultNote(const base::FilePath& root,
++                                         std::string_view relative) {
++  std::optional<NoteContent> note = ReadVaultNoteWithMtime(root, relative);
++  if (!note) {
++    return std::nullopt;
++  }
++  return std::move(note->text);
++}
++
++WriteResult WriteVaultNote(const base::FilePath& root,
++                           std::string_view relative,
++                           std::string_view text,
++                           std::optional<int64_t> expected_mtime_us) {
++  if (!IsValidRelative(relative) || relative.empty() ||
++      !IsNote(base::FilePath(std::string(relative)))) {
++    return Fail(WriteStatus::kInvalid);
++  }
++  if (text.size() > kMaxNoteBytes) {
++    return Fail(WriteStatus::kTooLarge);
++  }
++  std::optional<RealRef> ref = ResolveReal(root, relative);
++  if (!ref) {
++    return Fail(WriteStatus::kNotFound);
++  }
++  std::optional<Parent> parent = OpenParent(ref->root, ref->rel);
++  if (!parent) {
++    return Fail(WriteStatus::kNotFound);
++  }
++  const int dirfd = parent->fd.get();
++  std::optional<struct stat> st = StatAt(dirfd, parent->leaf);
++  if (!st) {
++    return Fail(WriteStatus::kNotFound);
++  }
++  if (!S_ISREG(st->st_mode)) {
++    return Fail(WriteStatus::kInvalid);
++  }
++  if (expected_mtime_us && MtimeUs(*st) != *expected_mtime_us) {
++    return {WriteStatus::kConflict, MtimeUs(*st)};
++  }
++
++  // Temporary name starts with '.', so the tree never lists it.
++  const std::string tmp =
++      ".aero-" + base::NumberToString(base::RandUint64()) + ".tmp";
++  base::ScopedFD out(HANDLE_EINTR(
++      openat(dirfd, tmp.c_str(),
++             O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC | O_NOCTTY,
++             0600)));
++  if (!out.is_valid()) {
++    return Fail(WriteStatus::kIoError);
++  }
++  fchmod(out.get(), st->st_mode & 0777);  // best effort: keep the old mode
++  const bool written = WriteAll(out.get(), text) && fsync(out.get()) == 0;
++  const bool closed = close(out.release()) == 0;
++  if (!written || !closed) {
++    unlinkat(dirfd, tmp.c_str(), 0);
++    return Fail(WriteStatus::kIoError);
++  }
++  // Second check, right before the rename.
++  if (expected_mtime_us) {
++    std::optional<struct stat> now = StatAt(dirfd, parent->leaf);
++    if (!now || MtimeUs(*now) != *expected_mtime_us) {
++      unlinkat(dirfd, tmp.c_str(), 0);
++      return {WriteStatus::kConflict, now ? MtimeUs(*now) : 0};
++    }
++  }
++  if (renameat(dirfd, tmp.c_str(), dirfd, parent->leaf.c_str()) != 0) {
++    unlinkat(dirfd, tmp.c_str(), 0);
++    return Fail(WriteStatus::kIoError);
++  }
++  fsync(dirfd);  // best effort: make the rename durable
++  std::optional<struct stat> after = StatAt(dirfd, parent->leaf);
++  return {WriteStatus::kOk, after ? MtimeUs(*after) : 0};
++}
++
++WriteResult CreateVaultNote(const base::FilePath& root,
++                            std::string_view relative,
++                            std::string_view text) {
++  if (!IsValidRelative(relative) || !IsValidNoteName(LeafOf(relative))) {
++    return Fail(WriteStatus::kInvalid);
++  }
++  if (text.size() > kMaxNoteBytes) {
++    return Fail(WriteStatus::kTooLarge);
++  }
++  std::optional<RealRef> ref = ResolveParentRef(root, relative);
++  if (!ref) {
++    return Fail(WriteStatus::kNotFound);
++  }
++  std::optional<Parent> parent = OpenParent(ref->root, ref->rel);
++  if (!parent) {
++    return Fail(WriteStatus::kNotFound);
++  }
++  const int dirfd = parent->fd.get();
++  // O_EXCL | O_NOFOLLOW: never replaces, never writes through a symlink.
++  base::ScopedFD out(HANDLE_EINTR(
++      openat(dirfd, parent->leaf.c_str(),
++             O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC | O_NOCTTY,
++             0644)));
++  if (!out.is_valid()) {
++    return Fail(errno == EEXIST ? WriteStatus::kExists : WriteStatus::kIoError);
++  }
++  const bool written = WriteAll(out.get(), text) && fsync(out.get()) == 0;
++  const bool closed = close(out.release()) == 0;
++  if (!written || !closed) {
++    unlinkat(dirfd, parent->leaf.c_str(), 0);
++    return Fail(WriteStatus::kIoError);
++  }
++  std::optional<struct stat> st = StatAt(dirfd, parent->leaf);
++  return {WriteStatus::kOk, st ? MtimeUs(*st) : 0};
++}
++
++WriteResult RenameVaultNote(const base::FilePath& root,
++                            std::string_view from,
++                            std::string_view to) {
++  if (!IsValidRelative(from) || !IsValidRelative(to) ||
++      !IsValidNoteName(LeafOf(from)) || !IsValidNoteName(LeafOf(to))) {
++    return Fail(WriteStatus::kInvalid);
++  }
++  std::optional<RealRef> from_ref = ResolveParentRef(root, from);
++  std::optional<RealRef> to_ref = ResolveParentRef(root, to);
++  if (!from_ref || !to_ref) {
++    return Fail(WriteStatus::kNotFound);
++  }
++  std::optional<Parent> from_parent = OpenParent(from_ref->root, from_ref->rel);
++  std::optional<Parent> to_parent = OpenParent(to_ref->root, to_ref->rel);
++  if (!from_parent || !to_parent) {
++    return Fail(WriteStatus::kNotFound);
++  }
++  std::optional<struct stat> st =
++      StatAt(from_parent->fd.get(), from_parent->leaf);
++  if (!st) {
++    return Fail(WriteStatus::kNotFound);
++  }
++  if (!S_ISREG(st->st_mode)) {
++    return Fail(WriteStatus::kInvalid);
++  }
++  // RENAME_NOREPLACE: the destination is never overwritten, atomically.
++  long rc = syscall(SYS_renameat2, from_parent->fd.get(),
++                    from_parent->leaf.c_str(), to_parent->fd.get(),
++                    to_parent->leaf.c_str(), RENAME_NOREPLACE);
++  if (rc != 0 && (errno == ENOSYS || errno == EINVAL)) {
++    // Kernel or filesystem without the flag: check, then rename.
++    if (StatAt(to_parent->fd.get(), to_parent->leaf)) {
++      return Fail(WriteStatus::kExists);
++    }
++    rc = renameat(from_parent->fd.get(), from_parent->leaf.c_str(),
++                  to_parent->fd.get(), to_parent->leaf.c_str());
++  }
++  if (rc != 0) {
++    return Fail(errno == EEXIST ? WriteStatus::kExists : WriteStatus::kIoError);
++  }
++  return {WriteStatus::kOk, MtimeUs(*st)};
++}
++
++WriteResult DeleteVaultNote(const base::FilePath& root,
++                            std::string_view relative) {
++  if (!IsValidRelative(relative) || relative.empty() ||
++      !IsNote(base::FilePath(std::string(LeafOf(relative))))) {
++    return Fail(WriteStatus::kInvalid);
++  }
++  std::optional<RealRef> ref = ResolveParentRef(root, relative);
++  if (!ref) {
++    return Fail(WriteStatus::kNotFound);
++  }
++  std::optional<Parent> parent = OpenParent(ref->root, ref->rel);
++  if (!parent) {
++    return Fail(WriteStatus::kNotFound);
++  }
++  std::optional<struct stat> st = StatAt(parent->fd.get(), parent->leaf);
++  if (!st) {
++    return Fail(WriteStatus::kNotFound);
++  }
++  if (!S_ISREG(st->st_mode)) {
++    return Fail(WriteStatus::kInvalid);
++  }
++  if (unlinkat(parent->fd.get(), parent->leaf.c_str(), 0) != 0) {
++    return Fail(WriteStatus::kIoError);
++  }
++  return {WriteStatus::kOk, 0};
+ }
+ 
+ }  // namespace aerographene::notes
+--- a/chrome/browser/ui/webui/aero_notes/vault_reader.h
++++ b/chrome/browser/ui/webui/aero_notes/vault_reader.h
+@@ -13,13 +13,18 @@
+ #include <vector>
+ 
+ #include "base/files/file_path.h"
++#include "base/files/scoped_file.h"
+ #include "build/build_config.h"
+ 
+-// Read-only access to a notes vault (a local folder of Markdown files),
++// Access to a notes vault (a local folder of Markdown files),
+ // confined to the vault root. Paths coming from the page are untrusted:
+ // relative, '/'-separated, no empty, "." or ".." components, no NUL, and
+ // after resolving symlinks the result must stay inside the real root.
+-// Blocking file I/O: call on a MayBlock sequence. Not wired to Mojo yet.
++// Blocking file I/O: call on a MayBlock sequence.
++// Opening (read and write) walks the path component by component with
++// openat(O_NOFOLLOW) from a descriptor of the real root, so the file that is
++// opened is the file that was checked: a component swapped for a symlink
++// after the check makes the call fail instead of escaping the vault.
+ namespace aerographene::notes {
+ 
+ inline constexpr size_t kMaxRelativePathLength = 4096;
+@@ -54,10 +59,80 @@
+     const base::FilePath& root,
+     std::string_view relative);
+ 
++#if !BUILDFLAG(IS_WIN)
++// The primitive behind every open: `real_root` must already be a real path
++// (MakeAbsoluteFilePath). Opens `relative` with openat(O_NOFOLLOW) one
++// component at a time starting from a descriptor of `real_root`, so it fails
++// (invalid fd) when ANY component, including the last, is a symlink or is
++// swapped for one. `flags` are the open(2) flags of the last component;
++// O_NOFOLLOW and O_CLOEXEC are added.
++base::ScopedFD OpenVaultFileNoFollow(const base::FilePath& real_root,
++                                     std::string_view relative,
++                                     int flags);
++#endif
++
+ // Contents of a ".md" regular file in the vault, up to kMaxNoteBytes.
+ std::optional<std::string> ReadVaultNote(const base::FilePath& root,
+                                          std::string_view relative);
+ 
++// Same, plus the modification time (microseconds since the Unix epoch) taken
++// from the opened descriptor; the page sends it back as the conflict token.
++struct NoteContent {
++  std::string text;
++  int64_t mtime_us = 0;
++};
++std::optional<NoteContent> ReadVaultNoteWithMtime(const base::FilePath& root,
++                                                  std::string_view relative);
++
++// Writes (B4). Only ".md" names (no leading '.', at most 255 bytes per
++// component), regular files, never through a symlink of the entry itself.
++enum class WriteStatus {
++  kOk,
++  kInvalid,      // malformed path/name, not ".md", not a regular file
++  kNotFound,     // target (or its folder) does not exist
++  kExists,       // create/rename destination already exists
++  kConflict,     // mtime on disk differs from the one the page opened
++  kTooLarge,     // more than kMaxNoteBytes
++  kUnsupported,  // Windows until the D3c confined reader
++  kIoError,
++};
++
++// Name sent to the page ("ok", "conflict", ...).
++std::string_view WriteStatusName(WriteStatus status);
++
++struct WriteResult {
++  WriteStatus status = WriteStatus::kIoError;
++  // New mtime on success; on kConflict the mtime currently on disk.
++  int64_t mtime_us = 0;
++};
++
++// Atomic replace of an existing note: temporary file in the same folder,
++// fsync, rename. With `expected_mtime_us` the save is refused (kConflict, the
++// file is left untouched, the caller keeps the text) when the file on disk
++// has another mtime, checked before and again right before the rename;
++// nullopt overwrites on purpose (the user chose it after a conflict).
++// Remaining window: an external write between the second check and the
++// rename (microseconds) is overwritten.
++WriteResult WriteVaultNote(const base::FilePath& root,
++                           std::string_view relative,
++                           std::string_view text,
++                           std::optional<int64_t> expected_mtime_us);
++
++// New note with `text`, in an existing folder; kExists if it is there.
++WriteResult CreateVaultNote(const base::FilePath& root,
++                            std::string_view relative,
++                            std::string_view text);
++
++// Moves/renames a note inside the vault; kExists if `to` exists (never
++// overwrites: renameat2(RENAME_NOREPLACE)).
++WriteResult RenameVaultNote(const base::FilePath& root,
++                            std::string_view from,
++                            std::string_view to);
++
++// Deletes a note (unlink; no trash).
++WriteResult DeleteVaultNote(const base::FilePath& root,
++                            std::string_view relative);
++
+ }  // namespace aerographene::notes
+ 
+ #endif  // CHROME_BROWSER_UI_WEBUI_AERO_NOTES_VAULT_READER_H_
+--- a/chrome/browser/ui/webui/aero_notes/vault_reader_unittest.cc
++++ b/chrome/browser/ui/webui/aero_notes/vault_reader_unittest.cc
+@@ -3,13 +3,17 @@
+ 
+ #include "chrome/browser/ui/webui/aero_notes/vault_reader.h"
+ 
++#include <fcntl.h>
+ #include <sys/stat.h>
+ #include <sys/types.h>
++#include <unistd.h>
+ 
+ #include <string>
+ 
+ #include "base/files/file_util.h"
++#include "base/files/file_enumerator.h"
+ #include "base/files/scoped_temp_dir.h"
++#include "base/time/time.h"
+ #include "testing/gtest/include/gtest/gtest.h"
+ 
+ namespace aerographene::notes {
+@@ -112,5 +116,255 @@
+   EXPECT_FALSE(ListVaultDir(root_, "a.md"));
+ }
+ 
++// --- B4: writes, conflict, rename/delete, symlinks -------------------------
++
++class VaultWriterTest : public VaultReaderTest {
++ protected:
++  std::string Disk(const char* name) {
++    std::string out;
++    EXPECT_TRUE(base::ReadFileToString(root_.AppendASCII(name), &out));
++    return out;
++  }
++
++  int64_t MtimeOf(const char* name) {
++    auto note = ReadVaultNoteWithMtime(root_, name);
++    EXPECT_TRUE(note);
++    return note ? note->mtime_us : 0;
++  }
++
++  // Changes the file behind the vault's back and gives it another mtime
++  // (filesystem timestamps can be coarser than two quick writes).
++  void ExternalEdit(const char* name, const std::string& text) {
++    ASSERT_TRUE(base::WriteFile(root_.AppendASCII(name), text));
++    const base::Time t = base::Time::Now() + base::Hours(1);
++    ASSERT_TRUE(base::TouchFile(root_.AppendASCII(name), t, t));
++  }
++
++  bool HasTemp() {
++    base::FileEnumerator e(root_, true, base::FileEnumerator::FILES);
++    for (base::FilePath p = e.Next(); !p.empty(); p = e.Next()) {
++      if (p.BaseName().value().find(".aero-") == 0) {
++        return true;
++      }
++    }
++    return false;
++  }
++};
++
++TEST_F(VaultWriterTest, ReadReturnsMtime) {
++  auto note = ReadVaultNoteWithMtime(root_, "a.md");
++  ASSERT_TRUE(note);
++  EXPECT_EQ(note->text, "# a");
++  base::File::Info info;
++  ASSERT_TRUE(base::GetFileInfo(root_.Append("a.md"), &info));
++  EXPECT_EQ(note->mtime_us,
++            (info.last_modified - base::Time::UnixEpoch()).InMicroseconds());
++}
++
++TEST_F(VaultWriterTest, SaveReplacesAtomicallyAndKeepsMode) {
++  ASSERT_EQ(chmod(root_.Append("a.md").value().c_str(), 0640), 0);
++  const int64_t mtime = MtimeOf("a.md");
++  WriteResult r = WriteVaultNote(root_, "a.md", "# novo\n", mtime);
++  EXPECT_EQ(r.status, WriteStatus::kOk);
++  EXPECT_EQ(Disk("a.md"), "# novo\n");
++  EXPECT_EQ(r.mtime_us, MtimeOf("a.md"));
++  EXPECT_FALSE(HasTemp());
++  struct stat st = {};
++  ASSERT_EQ(stat(root_.Append("a.md").value().c_str(), &st), 0);
++  EXPECT_EQ(st.st_mode & 0777, 0640u);
++  // The new mtime is the token for the next save.
++  EXPECT_EQ(WriteVaultNote(root_, "a.md", "# 3", r.mtime_us).status,
++            WriteStatus::kOk);
++  EXPECT_EQ(Disk("a.md"), "# 3");
++}
++
++TEST_F(VaultWriterTest, ConflictKeepsDiskAndReportsMtime) {
++  const int64_t opened = MtimeOf("a.md");
++  ExternalEdit("a.md", "externo");
++  const int64_t on_disk = MtimeOf("a.md");
++  ASSERT_NE(opened, on_disk);
++  WriteResult r = WriteVaultNote(root_, "a.md", "meu texto", opened);
++  EXPECT_EQ(r.status, WriteStatus::kConflict);
++  EXPECT_EQ(r.mtime_us, on_disk);
++  EXPECT_EQ(Disk("a.md"), "externo");  // untouched; the page keeps its text
++  EXPECT_FALSE(HasTemp());
++  // Overwrite on purpose (expected = nullopt) after the user chose it.
++  EXPECT_EQ(WriteVaultNote(root_, "a.md", "meu texto", std::nullopt).status,
++            WriteStatus::kOk);
++  EXPECT_EQ(Disk("a.md"), "meu texto");
++}
++
++TEST_F(VaultWriterTest, SaveRefusesBadTargets) {
++  EXPECT_EQ(WriteVaultNote(root_, "missing.md", "x", 0).status,
++            WriteStatus::kNotFound);
++  EXPECT_EQ(WriteVaultNote(root_, "x.txt", "x", std::nullopt).status,
++            WriteStatus::kInvalid);
++  EXPECT_EQ(Disk("x.txt"), "txt");
++  EXPECT_EQ(WriteVaultNote(root_, "../secret.md", "x", std::nullopt).status,
++            WriteStatus::kInvalid);
++  EXPECT_EQ(WriteVaultNote(root_, "/etc/passwd.md", "x", std::nullopt).status,
++            WriteStatus::kInvalid);
++  EXPECT_EQ(WriteVaultNote(root_, "sub.md", "x", std::nullopt).status,
++            WriteStatus::kNotFound);
++  ASSERT_TRUE(base::CreateDirectory(root_.Append("dir.md")));
++  EXPECT_EQ(WriteVaultNote(root_, "dir.md", "x", std::nullopt).status,
++            WriteStatus::kInvalid);
++  EXPECT_EQ(WriteVaultNote(root_, "a.md", std::string(kMaxNoteBytes + 1, 'x'),
++                           std::nullopt)
++                .status,
++            WriteStatus::kTooLarge);
++  EXPECT_EQ(Disk("a.md"), "# a");
++}
++
++TEST_F(VaultWriterTest, SaveNeverWritesThroughSymlinkOutside) {
++  ASSERT_TRUE(base::CreateSymbolicLink(outer_.GetPath().Append("secret.md"),
++                                       root_.Append("link.md")));
++  ASSERT_TRUE(base::CreateSymbolicLink(outer_.GetPath().Append("outdir"),
++                                       root_.Append("linkdir")));
++  ASSERT_TRUE(base::WriteFile(outer_.GetPath().Append("outdir/o.md"), "o"));
++  EXPECT_NE(WriteVaultNote(root_, "link.md", "pwn", std::nullopt).status,
++            WriteStatus::kOk);
++  EXPECT_NE(WriteVaultNote(root_, "linkdir/o.md", "pwn", std::nullopt).status,
++            WriteStatus::kOk);
++  EXPECT_NE(CreateVaultNote(root_, "linkdir/new.md", "pwn").status,
++            WriteStatus::kOk);
++  EXPECT_NE(RenameVaultNote(root_, "a.md", "linkdir/a.md").status,
++            WriteStatus::kOk);
++  EXPECT_NE(DeleteVaultNote(root_, "linkdir/o.md").status, WriteStatus::kOk);
++  std::string s;
++  ASSERT_TRUE(base::ReadFileToString(outer_.GetPath().Append("secret.md"), &s));
++  EXPECT_EQ(s, "s");
++  ASSERT_TRUE(base::ReadFileToString(outer_.GetPath().Append("outdir/o.md"), &s));
++  EXPECT_EQ(s, "o");
++  EXPECT_FALSE(base::PathExists(outer_.GetPath().Append("outdir/new.md")));
++  EXPECT_FALSE(base::PathExists(outer_.GetPath().Append("outdir/a.md")));
++  EXPECT_TRUE(base::PathExists(root_.Append("a.md")));
++}
++
++TEST_F(VaultWriterTest, SaveThroughSymlinkInsideWritesTargetKeepsLink) {
++  ASSERT_TRUE(base::CreateSymbolicLink(root_.Append("sub/b.md"),
++                                       root_.Append("alias.md")));
++  EXPECT_EQ(WriteVaultNote(root_, "alias.md", "via alias", std::nullopt).status,
++            WriteStatus::kOk);
++  EXPECT_EQ(Disk("sub/b.md"), "via alias");
++  base::FilePath target;
++  EXPECT_TRUE(base::ReadSymbolicLink(root_.Append("alias.md"), &target));
++}
++
++TEST_F(VaultWriterTest, OpenNoFollowRefusesAnySymlinkComponent) {
++  // The primitive behind every open, which is what a component swapped for a
++  // symlink after the check runs into.
++  const base::FilePath real_root = base::MakeAbsoluteFilePath(root_);
++  ASSERT_TRUE(base::CreateDirectory(outer_.GetPath().Append("outdir")));
++  ASSERT_TRUE(base::WriteFile(outer_.GetPath().Append("outdir/o.md"), "o"));
++  ASSERT_TRUE(base::CreateSymbolicLink(outer_.GetPath().Append("outdir"),
++                                       root_.Append("linkdir")));
++  ASSERT_TRUE(base::CreateSymbolicLink(root_.Append("sub"),
++                                       root_.Append("linkin")));
++  ASSERT_TRUE(base::CreateSymbolicLink(root_.Append("a.md"),
++                                       root_.Append("alias.md")));
++  EXPECT_TRUE(OpenVaultFileNoFollow(real_root, "a.md", O_RDONLY).is_valid());
++  EXPECT_TRUE(OpenVaultFileNoFollow(real_root, "sub/b.md", O_RDONLY).is_valid());
++  EXPECT_FALSE(OpenVaultFileNoFollow(real_root, "linkdir/o.md", O_RDONLY)
++                   .is_valid());  // symlink to outside, middle component
++  EXPECT_FALSE(OpenVaultFileNoFollow(real_root, "linkin/b.md", O_RDONLY)
++                   .is_valid());  // symlink to inside, middle component
++  EXPECT_FALSE(OpenVaultFileNoFollow(real_root, "alias.md", O_RDONLY)
++                   .is_valid());  // symlink as the last component
++  EXPECT_FALSE(OpenVaultFileNoFollow(real_root, "../secret.md", O_RDONLY)
++                   .is_valid());
++  // The tree resolves inside links once, then opens without following: the
++  // read of an inside alias still works through ReadVaultNote.
++  EXPECT_EQ(ReadVaultNote(root_, "alias.md"), "# a");
++  EXPECT_EQ(ReadVaultNote(root_, "linkin/b.md"), "b");
++}
++
++TEST_F(VaultWriterTest, CreateNewNote) {
++  WriteResult r = CreateVaultNote(root_, "sub/nova.md", "# nova");
++  EXPECT_EQ(r.status, WriteStatus::kOk);
++  EXPECT_EQ(Disk("sub/nova.md"), "# nova");
++  EXPECT_EQ(r.mtime_us, MtimeOf("sub/nova.md"));
++  EXPECT_EQ(CreateVaultNote(root_, "sub/nova.md", "x").status,
++            WriteStatus::kExists);
++  EXPECT_EQ(Disk("sub/nova.md"), "# nova");
++  EXPECT_EQ(CreateVaultNote(root_, "a.md", "x").status, WriteStatus::kExists);
++  EXPECT_EQ(Disk("a.md"), "# a");
++  EXPECT_EQ(CreateVaultNote(root_, "nodir/n.md", "x").status,
++            WriteStatus::kNotFound);
++  for (const char* bad : {"n.txt", ".oculta.md", "../n.md", "/n.md", "sub/",
++                          "sub//n.md", "n"}) {
++    EXPECT_EQ(CreateVaultNote(root_, bad, "x").status, WriteStatus::kInvalid)
++        << bad;
++  }
++  EXPECT_EQ(CreateVaultNote(root_, std::string(256, 'a') + ".md", "x").status,
++            WriteStatus::kInvalid);
++  EXPECT_FALSE(base::PathExists(outer_.GetPath().Append("n.md")));
++}
++
++TEST_F(VaultWriterTest, CreateDoesNotFollowDanglingSymlink) {
++  ASSERT_TRUE(base::CreateSymbolicLink(outer_.GetPath().Append("novo.md"),
++                                       root_.Append("dangling.md")));
++  EXPECT_NE(CreateVaultNote(root_, "dangling.md", "pwn").status,
++            WriteStatus::kOk);
++  EXPECT_FALSE(base::PathExists(outer_.GetPath().Append("novo.md")));
++}
++
++TEST_F(VaultWriterTest, RenameMovesAndNeverOverwrites) {
++  EXPECT_EQ(RenameVaultNote(root_, "a.md", "c.md").status, WriteStatus::kOk);
++  EXPECT_FALSE(base::PathExists(root_.Append("a.md")));
++  EXPECT_EQ(Disk("c.md"), "# a");
++  EXPECT_EQ(RenameVaultNote(root_, "c.md", "sub/c.md").status,
++            WriteStatus::kOk);
++  EXPECT_EQ(Disk("sub/c.md"), "# a");
++  // Destination exists: refused, both files intact.
++  EXPECT_EQ(RenameVaultNote(root_, "sub/c.md", "sub/b.md").status,
++            WriteStatus::kExists);
++  EXPECT_EQ(Disk("sub/c.md"), "# a");
++  EXPECT_EQ(Disk("sub/b.md"), "b");
++  EXPECT_EQ(RenameVaultNote(root_, "missing.md", "z.md").status,
++            WriteStatus::kNotFound);
++  EXPECT_EQ(RenameVaultNote(root_, "sub/c.md", "nodir/c.md").status,
++            WriteStatus::kNotFound);
++  EXPECT_EQ(RenameVaultNote(root_, "sub/c.md", "c.txt").status,
++            WriteStatus::kInvalid);
++  EXPECT_EQ(RenameVaultNote(root_, "sub/c.md", "../c.md").status,
++            WriteStatus::kInvalid);
++  EXPECT_EQ(RenameVaultNote(root_, "x.txt", "x.md").status,
++            WriteStatus::kInvalid);
++  EXPECT_EQ(RenameVaultNote(root_, "sub", "sub2.md").status,
++            WriteStatus::kInvalid);
++  EXPECT_EQ(RenameVaultNote(root_, "sub/c.md", ".h.md").status,
++            WriteStatus::kInvalid);
++}
++
++TEST_F(VaultWriterTest, RenameRefusesSymlinkEntry) {
++  ASSERT_TRUE(base::CreateSymbolicLink(root_.Append("a.md"),
++                                       root_.Append("alias.md")));
++  EXPECT_EQ(RenameVaultNote(root_, "alias.md", "alias2.md").status,
++            WriteStatus::kInvalid);
++  EXPECT_EQ(DeleteVaultNote(root_, "alias.md").status, WriteStatus::kInvalid);
++  EXPECT_EQ(Disk("a.md"), "# a");
++}
++
++TEST_F(VaultWriterTest, DeleteOnlyNotes) {
++  EXPECT_EQ(DeleteVaultNote(root_, "sub/b.md").status, WriteStatus::kOk);
++  EXPECT_FALSE(base::PathExists(root_.Append("sub/b.md")));
++  EXPECT_EQ(DeleteVaultNote(root_, "sub/b.md").status, WriteStatus::kNotFound);
++  EXPECT_EQ(DeleteVaultNote(root_, "x.txt").status, WriteStatus::kInvalid);
++  EXPECT_TRUE(base::PathExists(root_.Append("x.txt")));
++  ASSERT_TRUE(base::CreateDirectory(root_.Append("dir.md")));
++  EXPECT_EQ(DeleteVaultNote(root_, "dir.md").status, WriteStatus::kInvalid);
++  EXPECT_EQ(DeleteVaultNote(root_, "../secret.md").status,
++            WriteStatus::kInvalid);
++  EXPECT_EQ(DeleteVaultNote(root_, "").status, WriteStatus::kInvalid);
++  EXPECT_TRUE(base::PathExists(outer_.GetPath().Append("secret.md")));
++}
++
++TEST_F(VaultWriterTest, StatusNames) {
++  EXPECT_EQ(WriteStatusName(WriteStatus::kOk), "ok");
++  EXPECT_EQ(WriteStatusName(WriteStatus::kConflict), "conflict");
++  EXPECT_EQ(WriteStatusName(WriteStatus::kExists), "exists");
++}
++
+ }  // namespace
+ }  // namespace aerographene::notes

@@ -1,4 +1,5 @@
 # aerographene: hunk de customize_toolbar_handler.cc (ListActions) rebaseado; resto sem alteração.
+# aerographene: contexto de pref_names.h rebaseado (sem crash-reporting-prefs); aplica com --fuzz=0.
 # Origem: https://github.com/imputnet/helium (tag 0.18.3, Chromium 154.0.8037.97)
 # Commit: 57a40ad82583d21787cff0500150539ce54c5960
 # Caminho original: patches/helium/ui/toolbar-button-prefs.patch
@@ -6,9 +7,9 @@
 #
 --- a/chrome/common/pref_names.h
 +++ b/chrome/common/pref_names.h
-@@ -677,6 +677,30 @@ inline constexpr char kCtrlTabMru[] = "b
- inline constexpr char kHeliumCrashReportingMode[] =
-     "helium.crash_reporting.mode";
+@@ -657,6 +657,30 @@ inline constexpr char kSplitViewDragAndDropNudgeUsedCount[] =
+ // recently used tabs.
+ inline constexpr char kCtrlTabMru[] = "browser.ctrl_tab_mru";
  
 +// A boolean pref set to true if the Back button should be visible on the
 +// toolbar.
@@ -39,7 +40,7 @@
  inline constexpr char kVoiceTypingSettings[] = "browser.voice_typing_settings";
 --- a/chrome/browser/ui/browser_ui_prefs.cc
 +++ b/chrome/browser/ui/browser_ui_prefs.cc
-@@ -150,6 +150,13 @@ void RegisterBrowserUserPrefs(user_prefs
+@@ -141,6 +141,13 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
    registry->RegisterBooleanPref(prefs::kPinSplitTabButton, false,
                                  pref_registration_flags);
  
@@ -55,7 +56,7 @@
    registry->RegisterBooleanPref(prefs::kWebAppCreateInQuickLaunchBar, true);
 --- a/chrome/browser/extensions/api/settings_private/prefs_util.cc
 +++ b/chrome/browser/extensions/api/settings_private/prefs_util.cc
-@@ -322,6 +322,20 @@ const PrefsUtil::TypedPrefMap& PrefsUtil
+@@ -313,6 +313,20 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetAllowlistedKeys() {
    (*s_allowlist)[::prefs::kSplitViewDragAndDropEnabled] =
        settings_api::PrefType::kBoolean;
  
@@ -90,7 +91,7 @@
    E(kActionSendSharedTabGroupFeedback, IDC_SEND_SHARED_TAB_GROUP_FEEDBACK) \
 --- a/chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.cc
 +++ b/chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.cc
-@@ -214,6 +214,13 @@ void PinnedToolbarActionsModel::UpdatePi
+@@ -214,6 +214,13 @@ void PinnedToolbarActionsModel::UpdatePinnedActionIds() {
  }
  
  void PinnedToolbarActionsModel::ResetToDefault() {
@@ -104,7 +105,7 @@
    pref_service_->ClearPref(prefs::kShowHomeButton);
    pref_service_->ClearPref(prefs::kShowForwardButton);
    pref_service_->ClearPref(prefs::kPinSplitTabButton);
-@@ -229,7 +236,13 @@ bool PinnedToolbarActionsModel::IsDefaul
+@@ -229,7 +236,13 @@ bool PinnedToolbarActionsModel::IsDefault() const {
    return std::ranges::all_of(
        std::initializer_list{prefs::kPinnedActions, prefs::kShowHomeButton,
                              prefs::kShowForwardButton,
@@ -139,7 +140,7 @@
  #endif  // CHROME_BROWSER_UI_GLOBAL_MEDIA_CONTROLS_MEDIA_TOOLBAR_BUTTON_CONTROLLER_H_
 --- a/chrome/browser/ui/global_media_controls/media_toolbar_button_controller.cc
 +++ b/chrome/browser/ui/global_media_controls/media_toolbar_button_controller.cc
-@@ -38,6 +38,15 @@ void MediaToolbarButtonController::OnMed
+@@ -38,6 +38,15 @@ void MediaToolbarButtonController::OnMediaDialogClosed() {
    delegate_->MaybeShowLocalMediaCastingPromo();
  }
  
@@ -155,7 +156,7 @@
  void MediaToolbarButtonController::ShowToolbarButton() {
    if (delegate_display_state_ != DisplayState::kShown) {
      delegate_->Show();
-@@ -47,6 +56,14 @@ void MediaToolbarButtonController::ShowT
+@@ -47,6 +56,14 @@ void MediaToolbarButtonController::ShowToolbarButton() {
  }
  
  void MediaToolbarButtonController::UpdateToolbarButtonState() {
@@ -180,7 +181,7 @@
  #include "chrome/browser/ui/intent_picker_tab_helper.h"
  #include "chrome/browser/ui/layout_constants.h"
  #include "chrome/browser/ui/omnibox/omnibox_view.h"
-@@ -637,6 +638,59 @@ void ToolbarView::Init() {
+@@ -676,6 +677,59 @@ void ToolbarView::Init() {
      UpdateGlicButtonVisibility();
    }
  
@@ -240,7 +241,7 @@
    InitLayout();
  
    for (auto* button : std::array<views::Button*, 5>{back_, forward_, reload_,
-@@ -1980,6 +2034,35 @@ void ToolbarView::OnShowHomeButtonChange
+@@ -1996,6 +2050,35 @@ void ToolbarView::OnShowHomeButtonChanged() {
    }
  }
  
@@ -278,7 +279,7 @@
      // Update the internal margins for touch layout.
 --- a/chrome/browser/ui/views/toolbar/toolbar_view.h
 +++ b/chrome/browser/ui/views/toolbar/toolbar_view.h
-@@ -343,6 +343,18 @@ class ToolbarView : public views::Access
+@@ -339,6 +339,18 @@ class ToolbarView : public views::AccessiblePaneView,
  
    void OnShowHomeButtonChanged();
  
@@ -297,7 +298,7 @@
    void OnTouchUiChanged();
  
    void InitGlicContainer();
-@@ -451,6 +463,18 @@ class ToolbarView : public views::Access
+@@ -447,6 +459,18 @@ class ToolbarView : public views::AccessiblePaneView,
    // Controls whether or not a home button should be shown on the toolbar.
    BooleanPrefMember show_home_button_;
  
@@ -333,7 +334,7 @@
    kShowPaymentMethods,
 --- a/chrome/browser/ui/webui/side_panel/customize_chrome/customize_toolbar/customize_toolbar_handler.cc
 +++ b/chrome/browser/ui/webui/side_panel/customize_chrome/customize_toolbar/customize_toolbar_handler.cc
-@@ -49,6 +49,18 @@ MojoActionForChromeAction(actions::Actio
+@@ -58,6 +58,18 @@ MojoActionForChromeAction(actions::ActionId action_id) {
        return side_panel::customize_chrome::mojom::ActionId::kHome;
      case kActionForward:
        return side_panel::customize_chrome::mojom::ActionId::kForward;
@@ -351,8 +352,8 @@
 +      return side_panel::customize_chrome::mojom::ActionId::kMediaControls;
      case kActionNewIncognitoWindow:
        return side_panel::customize_chrome::mojom::ActionId::kNewIncognitoWindow;
-     case kActionShowDownloads:
-@@ -98,6 +110,18 @@ std::optional<actions::ActionId> ChromeA
+     case kActionShowPasswordsBubbleOrPage:
+@@ -125,6 +137,18 @@ std::optional<actions::ActionId> ChromeActionForMojoAction(
        return kActionHome;
      case side_panel::customize_chrome::mojom::ActionId::kForward:
        return kActionForward;
@@ -370,8 +371,8 @@
 +      return kActionMediaControls;
      case side_panel::customize_chrome::mojom::ActionId::kNewIncognitoWindow:
        return kActionNewIncognitoWindow;
-     case side_panel::customize_chrome::mojom::ActionId::kShowDownloads:
-@@ -163,6 +187,36 @@ CustomizeToolbarHandler::CustomizeToolba
+     case side_panel::customize_chrome::mojom::ActionId::kShowPasswordManager:
+@@ -196,6 +220,36 @@ CustomizeToolbarHandler::CustomizeToolbarHandler(
        base::BindRepeating(&CustomizeToolbarHandler::OnActionPinnedChanged,
                            base::Unretained(this), kActionSplitTab,
                            prefs::kPinSplitTabButton));
@@ -408,7 +409,7 @@
  }
  
  CustomizeToolbarHandler::~CustomizeToolbarHandler() = default;
-@@ -211,8 +265,94 @@ void CustomizeToolbarHandler::ListAction
+@@ -244,8 +298,94 @@ void CustomizeToolbarHandler::ListActions(ListActionsCallback callback) {
                .Rasterize(&provider),
            scale_factor)));
  
@@ -504,7 +505,7 @@
  
    auto split_tab_action = side_panel::customize_chrome::mojom::Action::New(
        MojoActionForChromeAction(kActionSplitTab).value(),
-@@ -229,6 +369,11 @@ void CustomizeToolbarHandler::ListAction
+@@ -262,6 +402,11 @@ void CustomizeToolbarHandler::ListActions(ListActionsCallback callback) {
  
    actions.push_back(std::move(split_tab_action));
  
@@ -516,7 +517,7 @@
    const auto add_action =
        [&actions, this, &provider, scale_factor, bwi](
            actions::ActionId id,
-@@ -317,27 +317,26 @@ void CustomizeToolbarHandler::ListActions(
+@@ -317,9 +462,6 @@ void CustomizeToolbarHandler::ListActions(ListActionsCallback callback) {
          actions.push_back(std::move(mojo_action));
        };
  
@@ -526,7 +527,7 @@
    add_action(kActionShowPasswordsBubbleOrPage,
               side_panel::customize_chrome::mojom::CategoryId::kYourChrome);
    add_action(kActionShowPaymentsBubbleOrPage,
-              side_panel::customize_chrome::mojom::CategoryId::kYourChrome);
+@@ -327,17 +469,19 @@ void CustomizeToolbarHandler::ListActions(ListActionsCallback callback) {
    add_action(kActionShowAddressesBubbleOrPage,
               side_panel::customize_chrome::mojom::CategoryId::kYourChrome);
    add_action(kActionSidePanelShowBookmarks,
@@ -550,7 +551,7 @@
  
    add_action(kActionPrint,
               side_panel::customize_chrome::mojom::CategoryId::kTools);
-@@ -361,6 +505,24 @@ void CustomizeToolbarHandler::PinAction(
+@@ -410,6 +554,24 @@ void CustomizeToolbarHandler::PinAction(
      case kActionSplitTab:
        prefs()->SetBoolean(prefs::kPinSplitTabButton, pin);
        break;
@@ -577,7 +578,7 @@
        const std::optional<std::string> metrics_name =
 --- a/chrome/browser/ui/views/extensions/extensions_toolbar_desktop.cc
 +++ b/chrome/browser/ui/views/extensions/extensions_toolbar_desktop.cc
-@@ -589,7 +589,11 @@ void ExtensionsToolbarDesktop::AnchorAnd
+@@ -589,7 +589,11 @@ void ExtensionsToolbarDesktop::AnchorAndShowWidgetImmediately(
  
    // Fix the position of widgets. Without this fix, extension-installed-bubble
    // and extension-uninstall-dialog may be out of the window border on Linux.
@@ -590,7 +591,7 @@
      views::View* anchor_view =
          views::ElementTrackerViews::GetInstance()->GetFirstMatchingView(
              kToolbarAppMenuButtonElementId,
-@@ -1122,7 +1126,9 @@ void ExtensionsToolbarDesktop::UpdateCon
+@@ -1122,7 +1126,9 @@ void ExtensionsToolbarDesktop::UpdateContainerVisibility() {
  }
  
  bool ExtensionsToolbarDesktop::ShouldContainerBeVisible() const {
@@ -603,7 +604,7 @@
    // The container (and extensions-menu button) should not be visible if we have
 --- a/chrome/app/generated_resources.grd
 +++ b/chrome/app/generated_resources.grd
-@@ -11096,6 +11096,9 @@ Keep your key file in a safe place. You
+@@ -10967,6 +10967,9 @@ Keep your key file in a safe place. You will need it to create new versions of y
        <message name="IDS_ACCNAME_FIND" desc="The accessible name for the find button.">
          Find
        </message>
@@ -624,7 +625,7 @@
  #include "chrome/browser/ui/views/toolbar/app_menu.h"
  #include "chrome/browser/ui/views/toolbar/toolbar_ink_drop_util.h"
  #include "ui/base/metadata/metadata_impl_macros.h"
-@@ -54,11 +54,18 @@ views::BubbleAnchor AppMenuButton::GetAn
+@@ -54,11 +54,18 @@ views::BubbleAnchor AppMenuButton::GetAnchor() {
    // The app menu button is always present but might be non-visible or offscreen
    // in certain cases (e.g. content-fullscreen). In this case, use the fallback
    // anchor instead.
@@ -650,7 +651,7 @@
  bool AppMenuButton::IsDrawn() const {
 --- a/chrome/browser/ui/views/frame/browser_view.cc
 +++ b/chrome/browser/ui/views/frame/browser_view.cc
-@@ -5006,6 +5006,10 @@ void BrowserView::Layout(PassKey) {
+@@ -4907,6 +4907,10 @@ void BrowserView::Layout(PassKey) {
      rect.Outset(gfx::Outsets::TLBR(1, 1, 0, 1));
  
      if (fallback_popup_anchor_) {
@@ -661,7 +662,7 @@
        fallback_popup_anchor_->MaybeUpdateAnchor(rect);
      }
  
-@@ -5086,6 +5090,9 @@ void BrowserView::AddedToWidget() {
+@@ -4987,6 +4991,9 @@ void BrowserView::AddedToWidget() {
        base::BindRepeating(&BrowserView::GetActiveContentsWebView,
                            base::Unretained(this)));
  
@@ -671,7 +672,7 @@
    // Stow a pointer to this object onto the window handle so that we can get at
    // it later when all we have is a native view.
    GetWidget()->SetNativeWindowProperty(kBrowserViewKey, this);
-@@ -5248,8 +5255,6 @@ void BrowserView::AddedToWidget() {
+@@ -5149,8 +5156,6 @@ void BrowserView::AddedToWidget() {
  
    dialog_anchor_ = std::make_unique<views::ViewSubregionAnchor>(
        kBrowserDialogAnchorElementId, *this);
@@ -682,7 +683,7 @@
  }
 --- a/chrome/browser/ui/views/frame/browser_view.h
 +++ b/chrome/browser/ui/views/frame/browser_view.h
-@@ -289,6 +289,10 @@ class BrowserView : public BrowserWindow
+@@ -288,6 +288,10 @@ class BrowserView : public BrowserWindow,
    const ToolbarView* toolbar() const { return toolbar_; }
    ToolbarView* toolbar() { return toolbar_; }
  

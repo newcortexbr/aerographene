@@ -4,7 +4,8 @@
 # Env: AEROGRAPHENE_WORKDIR (padrão $HOME/aerographene-build), JOBS (padrão auto = nproc no container),
 #      AEROGRAPHENE_CCACHE (1 padrão, 0 desliga), AEROGRAPHENE_CCACHE_DIR (padrão $HOME/aerographene-ccache),
 #      AEROGRAPHENE_CCACHE_SIZE (padrão 40G),
-#      AEROGRAPHENE_PGO (1 padrão, 0 desliga), GOOGLE_API_KEY,
+#      AEROGRAPHENE_PGO (1 padrão, 0 desliga), AERO_CPU (avx2 padrão; avx1 = -march=ivybridge, out/Avx1,
+#      ccache próprio), AERO_O3 (off padrão | hot | wide: -O3 seletivo, ver docs/BUILD.md), MARCH (sobrescreve o -march do alvo), GOOGLE_API_KEY,
 #      GOOGLE_DEFAULT_CLIENT_ID, GOOGLE_DEFAULT_CLIENT_SECRET (opcionais).
 set -euo pipefail
 
@@ -13,7 +14,7 @@ AERO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 WORK="${AEROGRAPHENE_WORKDIR:-$HOME/aerographene-build}"
 PL_DIR="${WORK}/portablelinux"
-CCACHE_HOST="${AEROGRAPHENE_CCACHE_DIR:-$HOME/aerographene-ccache}"
+CCACHE_HOST="${AEROGRAPHENE_CCACHE_DIR:-$HOME/aerographene-ccache${AERO_CCACHE_SUFFIX}}"  # avx1: aerographene-ccache-avx1
 mkdir -p "${WORK}/home" "${WORK}/dist" "${CCACHE_HOST}"
 
 for bin in git docker; do
@@ -66,6 +67,7 @@ docker run --rm -i \
     -e AEROGRAPHENE_CCACHE="${AEROGRAPHENE_CCACHE:-1}" \
     -e AEROGRAPHENE_CCACHE_SIZE="${AEROGRAPHENE_CCACHE_SIZE:-40G}" \
     -e AEROGRAPHENE_PGO="${AEROGRAPHENE_PGO:-1}" \
+    -e AERO_CPU="${AERO_CPU}" -e MARCH="${MARCH}" -e AERO_O3="${AERO_O3:-off}" \
     -e GOOGLE_API_KEY -e GOOGLE_DEFAULT_CLIENT_ID -e GOOGLE_DEFAULT_CLIENT_SECRET \
     -e AERO_SHA="$(git -C "${AERO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo local)" \
     -v "${WORK}:/work" \

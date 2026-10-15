@@ -5,15 +5,12 @@
 `packaging/arch/initial_preferences` é instalado em `/opt/aerographene/initial_preferences`; o Chromium o lê ao lado do binário.
 
 - vale só para perfis novos; perfis existentes não mudam.
-- valores atuais (confirmados nos patches):
-  - `helium.completed_onboarding` = true (`patches/helium/core/onboarding-page.patch`). Pula a página de onboarding; `helium.services.user_consented` continua false.
-  - `helium.browser.new_tab_next_to_active` = true (`open-new-tabs-next-to-active-tab-option.patch`; padrão do patch é false).
+- valores atuais: nenhum (`{}`). Desde 14/10/2026 as duas chaves saíram junto com os patches que as liam: `helium.completed_onboarding` (`onboarding-page.patch`) e `helium.browser.new_tab_next_to_active` (`open-new-tabs-next-to-active-tab-option.patch`). O arquivo continua instalado para receber padrões futuros.
 - botões da barra (`helium.browser.show_*_button`) já têm padrão true nos patches, então ficam de fora.
 
 ### não confirmados (fora do arquivo)
 
 - memory saver: nenhum patch registra o pref; o nome upstream não foi verificado aqui.
-- crash reporting: `helium.crash_reporting.mode` é pref de local state (`crash-reporting-prefs.patch`), não de perfil; não se sabe se `initial_preferences` o alcança. Valores do enum não verificados.
 - smoke test no pacote ainda não feito: nenhuma build instalada validou que as chaves são aplicadas.
 
 ## wrapper /usr/bin/aerographene
@@ -83,11 +80,16 @@ Com `aerographene/branding.patch` e `aerographene/branding-version.patch`, `--ve
 
 Fluxo de release (cada passo exige pedido explícito do dono: dispatch de workflow, tag, publicação):
 
-1. `build.yml` (dispatch) gera o artifact `aerographene-linux-x86_64`.
+1. `build.yml` (dispatch; input `cpu`: `avx2` padrão, `avx1`) gera o artifact `aerographene-linux-x86_64` (avx2) ou `aerographene-linux-x86_64-avx1`.
 2. `smoke.yml` valida o artifact.
-3. `release.yml` (inputs `run_id`, `tag` vX.Y.Z) cria release em draft com o tarball renomeado e `SHA256SUMS`.
-4. Com o tarball acessível: `updpkgsums` em `packaging/arch/` (troca os `SKIP`).
-5. Dono publica o draft; só então `makepkg`.
+3. `release.yml` (inputs `run_id`, `tag` vX.Y.Z, `cpu`) roda `packaging/build-native.sh` e cria a release em draft (ou acrescenta ao draft existente da mesma tag; recusa release já publicada) com ``<cpu>-linux--aerographene-vX.Y.Z.tar.zst`, `<cpu>-arch--….pkg.tar.zst`, `<cpu>-debian--….deb`, `<cpu>-fedora--….rpm``, `SHA256SUMS` e `<cpu>-arch--namcap.txt`. Um dispatch por cpu.
+4. Dono publica o draft. Nada aqui publica.
+
+O pacote Arch sai do próprio `packaging/arch/PKGBUILD`, rodado em container `archlinux:base-devel` sobre o tarball local (nada é baixado): `build-native.sh` copia o tarball para o nome que o `source=` espera e passa `AERO_PKGVER` (versão da tag) e `AERO_TARBALL_SHA256` (conferido pelo makepkg). Sem essas variáveis o PKGBUILD continua utilizável à mão: baixa o asset `avx2-linux--aerographene-vX.Y.Z.tar.zst` da release e usa `SKIP`.
+
+`.deb` e `.rpm`: nfpm (`goreleaser/nfpm:v2.48.0` fixado por digest) com `packaging/nfpm.yaml`. O script extrai o `.pkg.tar.zst` (modos preservados), gera o manifesto de arquivos e anexa a lista de `contents:` ao cabeçalho do YAML, então os três formatos têm a mesma árvore. Dependências por distro estão em `overrides:` do `nfpm.yaml`. Sem scripts de pós-instalação: os triggers de MIME, desktop e ícones do dpkg/rpm já atualizam os caches (no Arch, hooks do pacman).
+
+Teste: `packaging/test-install.sh <dir> <cpu> <versão>` instala e remove em containers `archlinux`, `ubuntu:24.04` e `fedora:latest`. Resultado de 13/10/2026 no Cezanne com o artifact da run 38303973794 (v0.1.0 + série v0.2): ver `docs/wiki/pacotes.md` e a seção "teste dos pacotes" abaixo.
 
 Fontes: o `LICENSE` é cópia local da raiz (`packaging/arch/LICENSE`), pois makepkg resolve fontes relativas ao diretório do PKGBUILD e a URL raw do repo privado falharia sem token. Se o `LICENSE` da raiz mudar, recopie.
 
@@ -102,10 +104,18 @@ Sandbox: a partir do branch `fix/branding-gaps`, `build/inner.sh` copia `out/Def
 StartupWMClass: `aerographene` (nome do desktop file; padrão do binário desde `patches/aerographene/branding-desktop.patch`, ver abaixo). NÃO verificado: o app_id/WM_CLASS real só aparece com a janela aberta. Verificar: `xprop WM_CLASS` (X11), `swaymsg -t get_tree` ou `hyprctl clients` (Wayland); ajuste o valor se diferir.
 
 Pendências:
-- checksums todos `SKIP` (release inexistente; rodar `updpkgsums`).
+- fontes auxiliares do PKGBUILD com `SKIP` (só o tarball tem sha256, passado por `build-native.sh`).
 - ícone só 48x48 (`product_logo_48.png`, placeholder).
 - nenhuma tag existe no repositório.
-- `namcap` e `makepkg` não rodados.
+- `namcap` rodou (13/10/2026, `<cpu>-arch--namcap.txt` na release): sem erro que bloqueie; avisos esperados de dependências não declaradas (libs Qt dos `libqt5_shim`/`libqt6_shim`, carregados por dlopen e opcionais) e setuid do `chrome-sandbox`.
+
+### teste dos pacotes (13/10/2026)
+
+Cezanne, containers, entrada: artifact da run 38303973794 (`aerographene-0.1.0-...-x86_64_linux.tar.zst`, v0.1.0 + série v0.2), pacotes gerados como `0.3.0` avx2 por `build-native.sh`; `packaging/test-install.sh` em `archlinux`, `ubuntu:24.04` e `fedora:latest`:
+
+- instala (dependências resolvidas pelo gerenciador), `chrome-sandbox` 4755 root, `ldd chrome` sem faltas, `aerographene --version` = `aerographene 0.1.0 (Chromium 154.0.8037.97)`, `--headless --dump-dom about:blank` devolve DOM, remove sem sobrar arquivo do pacote.
+- observado: ao rodar como root o navegador cria `/opt/aerographene/extensions` (vazio), que sobra após a remoção em qualquer formato; o teste avisa e não reprova.
+- não testado: avx1 (sem artifact), interface gráfica, Debian/Ubuntu antigos, `pacman -U` fora de container limpo.
 
 ## ícones e identidade visual (`branding/`)
 

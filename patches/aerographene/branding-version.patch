@@ -2,8 +2,8 @@ aerographene: versão do produto v0.x.x (aero::kVersion) sem alterar a versão d
 
 Origem: aerographene (original; ideia de versão própria como helium/core/add-helium-versioning.patch,
 sem alterar mensagens GRIT nem HTML/TS). Licença: GPL-3.0.
-Efeito: `--version` imprime "aerographene 0.1.0 (Chromium 154.0.8037.97)"; `--product-version`
-imprime 0.1.0; chrome://version e a página Sobre mostram "0.1.0 (Chromium 154.0.8037.97)" no lugar do
+Efeito: `--version` imprime "aerographene 0.3.3 (Chromium 154.0.8037.97)"; `--product-version`
+imprime 0.3.3; chrome://version e a página Sobre mostram "0.3.3 (Chromium 154.0.8037.97)" no lugar do
 número de versão. UA, extensões e PRODUCT_VERSION seguem com a versão do Chromium.
 A versão fica em chrome/common/aero_version.h (header pequeno, incluído só por chrome_main_delegate.cc e
 version_ui.cc), não no BRANDING nem em base/version_info: subir a versão não recompila a árvore.
@@ -36,7 +36,7 @@ diff --git a/chrome/app/chrome_main_delegate.cc b/chrome/app/chrome_main_delegat
 -        "%s %s %s\n", version_info::GetProductName().data(),
 -        version_info::GetVersionNumber().data(),
 -        chrome::GetChannelName(chrome::WithExtendedStable(true)).c_str()));
-+    // aerographene: "aerographene 0.1.0 (Chromium 154.0.8037.97)".
++    // aerographene: "aerographene 0.3.3 (Chromium 154.0.8037.97)".
 +    UNSAFE_TODO(printf("%s %s (Chromium %s)\n",
 +                       version_info::GetProductName().data(),
 +                       aero::kVersion.data(),
@@ -67,7 +67,7 @@ diff --git a/chrome/browser/ui/webui/version/version_ui.cc b/chrome/browser/ui/w
  
  namespace {
  
-+// aerographene: "0.1.0 (Chromium 154.0.8037.97)". Aparece no lugar do número
++// aerographene: "0.3.3 (Chromium 154.0.8037.97)". Aparece no lugar do número
 +// de versão em chrome://version e na página Sobre; a versão do Chromium
 +// continua em version_info::GetVersionNumber() (UA, extensões).
 +std::string AeroVersionForUi() {
@@ -128,7 +128,7 @@ new file mode 100644
 +// a árvore (base/version_info e o BRANDING, incluídos em toda parte, ficam
 +// intactos). Mantido igual a AERO_VERSION de build/config.sh (checado em
 +// build/inner.sh).
-+inline constexpr std::string_view kVersion = "0.1.0";
++inline constexpr std::string_view kVersion = "0.3.3";
 +
 +}  // namespace aero
 +

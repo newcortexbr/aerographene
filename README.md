@@ -83,9 +83,28 @@ I IMMENSELY thank projects such as Ungoogled-Chromium, Helium, Thorium and Brave
   - ✅ theme folder names read as raw bytes (non-ASCII names now work under a `C` locale); unit tests for the theme repository and `.aerotheme` import ran for the first time: 18 of 18 pass
   - ✅ built and smoke-tested ([build 38346594627](https://github.com/newcortexbr/aerographene/actions/runs/38346594627)); known gaps: sidebar live tabs are not a drag source and drag has no image; no runtime check of internal pages
 - ⬜ v0.3
-  - ⬜ Windows 11 ([ADR 0008](docs/adr/0008-windows-11.md))
-  - ⬜ x86-64-v2 + AVX build for CPUs without AVX2 ([ADR 0009](docs/adr/0009-build-ivy-bridge.md))
-  - ⬜ Obsidian and terminals inside workspaces
+  - 🚧 Windows 10 and 11 (nothing 11-only; tested on 11) by cross-compiling on the Linux runner ([ADR 0008](docs/adr/0008-windows-11.md), [windows](docs/wiki/windows.md)): toolchain set up, `gn gen` passes and small Windows binaries link (PE32+); the same patch series now compiles for Windows (spaces, themes, notes page; vault reading and the terminal still Linux-only); the browser itself is not built yet
+  - 🚧 x86-64-v2 + AVX build for CPUs without AVX2 ([ADR 0009](docs/adr/0009-build-ivy-bridge.md)): build input `cpu=avx1` (separate `out/` and ccache) written; the first avx1 build has not run
+  - 🚧 native packages from the compiled tarball: `.pkg.tar.zst` (PKGBUILD), `.deb`, `.rpm` ([pacotes](docs/wiki/pacotes.md)); install/remove/`--version` tested in Arch, Ubuntu 24.04 and Fedora containers, release workflow not yet run
+  - 🚧 notes page `aerographene://notes` (Obsidian-style vault) ([notas](docs/wiki/notas.md)): approved F2B layout in code (side modes files/search/tags, open-note tabs with unsaved marker, folder counts, status bar with backlinks/words/line:column, read/edit toggle, recent notes; "+ folder", vault switcher and sort-by-date are visible but disabled until the backend supports them), folder picker, lazy vault tree, safe Markdown view and a live-preview editor (atomic save with conflict warning, create/rename/delete notes, no symlink following), vault watcher, search and embedded images, one notes tab per window, Ctrl+N creates a note while the notes tab is active (new window elsewhere; the "New window" menu item loses its Ctrl+N label; compiled in the green avx2 build below, not used in the browser) and command bar `o:` / `o: <term>` (term = search results in the page, bare `o:` = new tab) wired in code; unit tests pass; not tested as a real `chrome://notes` page yet; the tab title is always `o: <vault name>`
+  - 🚧 terminal board `aerographene://terminal` ([terminal](docs/wiki/terminal.md)): pannable and zoomable board of draggable windows with a persisted layout, each an xterm.js wired to a local shell (pty in the browser process, restricted to that page); tab title `t: workspace N`, opened in a new tab from the command bar with `t:` or `t: <command>` (the command is typed into the first terminal, never put in the URL); every terminal starts with a fastfetch-style summary with the cat; sidebar of open terminals; `o:` alone also opens a new notes tab; unit tests pass; not tested in the browser yet, security review pending
+  - 🚧 Ctrl+T opens the command bar centered in the window instead of an empty tab; Enter opens a new tab, Esc or a click outside closes it ([command bar](docs/wiki/command-bar.md)); compiled, not tested in the browser yet
+  - 🚧 settings in the One UI look (appearance only, same content): rounded cards, big toggles, pill selects and buttons, colored round icons in the side menu, also on Customise profile; light and dark follow the browser theme ([configurações](docs/wiki/settings.md)); series applies with fuzz 0 and the settings resources build; not tested in the browser yet
+  - 🚧 Ctrl+Tab tab switcher: a centered grid of the window's tabs in most-recently-used order (pinned included) with thumbnails, favicon, title and host; hold Ctrl and press Tab to move, release Ctrl to switch, Esc cancels; Ctrl+PgDn/PgUp unchanged ([tab switcher](docs/wiki/tab-switcher.md)); series applies and compiles in the green avx2 build below; known limit: when Ctrl is released before the panel exists the first key without Ctrl cancels (only mitigated); not tested in the browser yet
+  - 🚧 first-use defaults: Google as default search engine in new profiles, chromium-web-store extension bundled (pinned by version + sha256) and `extension-mime-request-handling` on, so `.crx` from the Chrome Web Store can be installed ([padrões e extensões](docs/wiki/padroes-e-extensoes.md)); patch applies and the affected targets compile; not tested in the browser yet
+  - 🚧 Helium services and setup page removed; no native Chromium first-run screen ([padrões e extensões](docs/wiki/padroes-e-extensoes.md)); series applies and the affected files compile (syntax-only)
+  - 🚧 own first-use page `aerographene://setup`, opened once per new profile (space) instead of the new tab page ([onboarding](docs/wiki/onboarding.md)): eight steps wired only to real controls (theme, search engine, notes folder, default browser, search suggestions, import page of settings); skip concludes with no change; never in incognito or guest, never again after it is concluded (`aerographene.onboarding_completed`); no network, no external font or image; page tested in headless Chrome with a fake backend; compiled in the green avx2 build below; not tested in the browser yet
+  - 🚧 Helium extras out of scope removed (MRU tab cycling, keyboard shortcuts, Shift+right-click native menu, new tabs next to the active one, window-menu customize item, crash-reporting prefs); the whole patch series now applies with `--fuzz=0`; affected files compile (syntax-only); not tested in the browser yet
+  - 🚧 optional selective `-O3` ([build](docs/BUILD.md)): V8, partition_alloc and Blink `core_hot` are already `-O3` upstream; build input `o3=hot|wide` raises Blink `platform`/`heap` (and `base`) to `-O3` and produces a `-o3<profile>` package; off by default, not measured yet
+  - 🚧 spaces look and wording ([spaces](docs/wiki/spaces.md)): avatar menu, space picker and new-space steps restyled in the mono look (square corners, no Chromium banners or origami avatars, the avatar is a glyph with the space's initial) the new-space step shows the approved mockup text and a single "Create space →" button, with no sign-in (a space is a local profile, no account), and "profile" worded as "space" (en and pt-BR, 37 messages through `build/strings_space.json`); looks only, same flow; the series applies with `--fuzz=0` and everything compiled in the green avx2 build below; "new space" is partial: step indicator, glyph choice, preview and the toolbar-border tint of the mockup are not done, and the per-account sign-in is hidden; none of it was seen in the browser yet
+  - 🚧 v0.3.2 (branch `v0.3`, state of 15/10/2026), status plain: validated = the full avx2 build on `82a7bf3` is green ([run 38671160082](https://github.com/newcortexbr/aerographene/actions/runs/38671160082)), so the patches below compile and link; in progress = the avx1 build ([run 38672821734](https://github.com/newcortexbr/aerographene/actions/runs/38672821734)); not verified = no function below was used in the browser, the package smoke test has not run, the `v0.3.2` pre-release and the `v0.3` → `main` merge are pending
+  - 🚧 new patches in v0.3.2: `onboarding-setup`, `first-run-off`, `tab-switcher`, `spaces-menu`, `spaces-picker` (includes the "new space" screen), `settings-oneui`, `notes-ctrl-n` (details in the items below and in [patches/README.md](patches/README.md)); texts in `build/strings_space.json`
+  - 🚧 shortcuts changed by the series (Ctrl+T, Ctrl+Tab, Ctrl+N; Helium shortcut extras removed) in one page ([atalhos](docs/wiki/atalhos.md))
+  - 🚧 known gaps, not fixed: the whole series was never dry-run against a real Chromium tree in one pass; `setup.css` of the onboarding has about 130 stylelint violations (whether CI lints it is not confirmed); "+ folder" in notes needs backend work; the Windows test (D4) was never run
+  - ⏸️ `-O3` builds (`o3=hot` and `o3=wide`) are paused by the owner; a profile enters the series only if it wins the measurement
+  - 🚧 v0.3.3 (state of 15/10/2026): Linux avx2 build green ([run 38676659389](https://github.com/newcortexbr/aerographene/actions/runs/38676659389), commit `fc39b55`, PGO off); bench quick: first_ms 772.1, all_ms 848.0, PSS 687.5 MiB, 20 processes; `-O3` wide tested and rejected (all_ms +2.31%); release draft by [run 38679676633](https://github.com/newcortexbr/aerographene/actions/runs/38679676633); Windows avx2 and avx1 zips untested; no Linux avx1
+  - 🚧 eight built-in themes (default, pixelized and six new: metro-v2, e-ink-gb, graphite, classical, e-ink, cli), dark only, no bundled fonts (Pixelify Sans and Doto use a fallback), names reserved on import ([temas embutidos](docs/wiki/temas-embutidos.md)); compiled, not seen in the browser
+  - ⬜ tintable themes: user picks 2 or 3 colors per theme and the rest is derived with contrast correction; spec and prototype exist, no patch, nothing implemented in Chromium ([temas tintáveis](docs/wiki/temas-tintaveis.md))
   - ⬜ Google Sync with own API keys ([ADR 0006](docs/adr/0006-google-sync-com-chaves-proprias.md))
 
 ## docs
@@ -94,6 +113,33 @@ the wiki lives in [`docs/wiki/`](docs/wiki/), in pt-BR.
 
 - [temas](docs/wiki/temas.md): how themes load (built-in theme, `theme.json` tokens, extension themes), where to change them and how to make your own. Ends with a dense spec you can paste into your AI agent so it writes a valid theme for you.
 - [benchmark](docs/wiki/benchmark.md): how the startup/memory baseline is measured and charted.
+
+- [notas](docs/wiki/notas.md): the notes page (`aerographene://notes`), what exists today and how vault access is confined. Ends with a summary for agents.
+
+- [terminal](docs/wiki/terminal.md): the terminal board (`aerographene://terminal`), the pty session and its security rules. Ends with a summary for agents.
+
+- [windows](docs/wiki/windows.md): cross-compiling the Windows 10/11 build on the Linux runner, what works, what the source tarball lacks. Ends with a summary for agents.
+
+- [command bar](docs/wiki/command-bar.md): how the command bar opens (URL click, Ctrl+L, Ctrl+T centered in the window), what Enter/Esc do. Ends with a summary for agents.
+
+- [tab switcher](docs/wiki/tab-switcher.md): Ctrl+Tab switcher, MRU order, thumbnails and their memory limits, what cancels it. Ends with a summary for agents.
+
+- [pacotes](docs/wiki/pacotes.md): release assets (`tar.zst`, `pkg.tar.zst`, `deb`, `rpm`, per CPU target), how to install and remove, what gets installed, how the packages are built. Ends with a summary for agents.
+
+- [configurações](docs/wiki/settings.md): the One UI look of `chrome://settings` and Customise profile, how the `--oneui-*` variables work. Ends with a summary for agents.
+- [onboarding](docs/wiki/onboarding.md): the first-use page (`aerographene://setup`), when it opens, what each step changes and what it does not. Ends with a summary for agents.
+
+- [spaces](docs/wiki/spaces.md): avatar menu, space picker and "new space" screen in the mono look, wording "space" instead of "profile", what is still missing. Ends with a summary for agents.
+
+- [atalhos](docs/wiki/atalhos.md): Ctrl+T, Ctrl+Tab and Ctrl+N as the series changes them, and the Helium shortcuts that were removed. Ends with a summary for agents.
+
+- [temas embutidos](docs/wiki/temas-embutidos.md): the eight built-in themes, how to pick one, reserved names, no bundled fonts. Ends with a summary for agents.
+
+- [temas tintáveis](docs/wiki/temas-tintaveis.md): proposal for 2 or 3 user colors per theme (not implemented). Ends with a summary for agents.
+
+- [padrões e extensões](docs/wiki/padroes-e-extensoes.md): Google as default search engine in new profiles, the bundled chromium-web-store extension (pinned by version + sha256) and `extension-mime-request-handling` on by default. Ends with a summary for agents.
+
+- [spaces](docs/wiki/spaces.md): how the avatar menu, the space picker and the new-space steps look, how "profile" becomes "space" in the strings, and what is not done (glyph choice, themed picker). Ends with a summary for agents.
 
 for builders: [scope](docs/SCOPE.md), [build](docs/BUILD.md), [packaging](docs/PACKAGING.md), [decisions](docs/adr/), [patch origins](patches/README.md).
 
@@ -110,10 +156,10 @@ the base. Every aerographene build is ungoogled-chromium plus our patch series.
 
 ### Helium
 
-the source of most of our ported work: 42 of the patches in [`patches/series`](patches/series) come from Helium.
+the source of most of our ported work: 34 of the patches in [`patches/series`](patches/series) come from Helium.
 
-- taken: infinite tab freezing, memory saver on by default, lazy session restore, low-power framerate flag, uBlock Origin installed as a component, vertical and compact layouts, centered address bar, split view, side panel, tab context menus, MRU tab cycling, keyboard shortcuts, Arc importer, onboarding and the custom internal-page protocol.
-- changed: hunks rebased onto Chromium 154 without the rest of Helium's tree; `helium://` shown as `aerographene://`; the vertical layout trimmed (no tab search host, no corner refs) and given a compact toolbar width; uBlock defaults reconfigured and its toolbar icon themed; Helium's own services and sync left out.
+- taken: infinite tab freezing, memory saver on by default, lazy session restore, low-power framerate flag, uBlock Origin installed as a component, vertical and compact layouts, centered address bar, split view, side panel, tab context menus (hibernate, copy URL), Arc importer and the custom internal-page protocol.
+- changed: hunks rebased onto Chromium 154 without the rest of Helium's tree; `helium://` shown as `aerographene://`; the vertical layout trimmed (no tab search host, no corner refs) and given a compact toolbar width; uBlock defaults reconfigured and its toolbar icon themed; Helium's own services (settings page, `services.helium.imput.net`), its setup page (`chrome://setup`) and sync left out; MRU tab cycling, keyboard shortcuts, Shift+right-click native menu, new tabs next to the active one, window-menu customize item and crash-reporting prefs removed as out of scope.
 
 ### Thorium
 
@@ -122,4 +168,4 @@ the performance yardstick and the model for a few decisions.
 - taken: Thorium is part of our benchmark baseline ([BASELINE](docs/BASELINE.md)); its approach of shipping builds with the maintainer's own Google API keys is the plan for sync ([ADR 0006](docs/adr/0006-google-sync-com-chaves-proprias.md)).
 - changed: no Thorium code is in the tree; the sync plan adapts its key approach to an ungoogled base, which first needs a login test.
 
-also thanks to Brave, for the three patches behind the Arc importer and MRU tab cycling.
+also thanks to Brave, for the two patches behind the Arc importer.

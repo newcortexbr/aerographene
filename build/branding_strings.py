@@ -12,12 +12,16 @@ Para cada mensagem afetada este script:
      na tradução quando ele aparece literal.
 Depois, para cada mensagem cujo nome está no JSON de extras, calcula o id do texto inglês
 (já trocado) e acrescenta <translation> no .xtb pt-BR do grd se o id ainda não existir.
+Vocabulário de produto: build/strings_space.json lista, por nome IDS, o texto en e pt-BR final
+(ex.: "Customize profile" -> "Customise space"). Para cada mensagem listada o corpo do .grd/.grdp vira o
+texto en, o id GRIT é recalculado e o .xtb pt-BR (e en-GB) ganha o texto do JSON sob o id novo; os
+outros idiomas só têm o id renomeado (mantêm a tradução antiga).
 Idempotente: depois da troca não sobra texto a trocar e ids já presentes não são reinjetados. Chamado por build/inner.sh depois
 dos patches e antes do `gn gen`. Detalhes e exclusões: docs/BUILD.md (seção branding).
 
 Uso:
   branding_strings.py [--src DIR] [--check [--list]] [--root grd ...] [--backup DIR]
-                      [--extra JSON | --no-extra]
+                      [--extra JSON | --no-extra] [--space JSON | --no-space]
 """
 import argparse
 import io
@@ -33,35 +37,10 @@ from xml.sax.saxutils import escape
 NAME = "aerographene"
 HERE = os.path.dirname(os.path.abspath(__file__))
 EXTRA_DEFAULT = os.path.join(HERE, "strings_ptbr_extra.json")
+SPACE_DEFAULT = os.path.join(HERE, "strings_space.json")
 EXTRA_LANG = "pt-BR"
-# mensagens que falam do projeto Helium ou dos servidores operados por ele (não do navegador):
-# mantêm o nome, para não dizer que o aerographene opera esses serviços
-KEEP_NAMES = {
-    "IDS_HELIUM_ONBOARDING_PARTNER_TITLE",
-    "IDS_HELIUM_ONBOARDING_PARTNER_TOOLTIP",
-    "IDS_SETTINGS_HELIUM_SERVICES",
-    "IDS_SETTINGS_HELIUM_SERVICES_DESCRIPTION",
-    "IDS_SETTINGS_HELIUM_SCHEMA_NOTICE_TITLE",
-    "IDS_SETTINGS_HELIUM_SERVICES_TOGGLE",
-    "IDS_SETTINGS_HELIUM_SERVICES_TOGGLE_DESCRIPTION",
-    "IDS_SETTINGS_HELIUM_SERVICES_OVERRIDE",
-    "IDS_SETTINGS_HELIUM_SERVICES_OVERRIDE_DESCRIPTION",
-    "IDS_SETTINGS_HELIUM_SERVICES_OVERRIDE_ARIA_LABEL",
-    "IDS_SETTINGS_HELIUM_SERVICES_SETUP_PENDING_TEXT",
-    "IDS_HELIUM_ONBOARDING_WELCOME_FOOTER",
-    "IDS_HELIUM_ONBOARDING_SERVICES_TITLE",
-    "IDS_HELIUM_ONBOARDING_SERVICES_CONNECTION_TITLE",
-    "IDS_HELIUM_ONBOARDING_SERVICES_CONNECTION_DESC",
-    "IDS_HELIUM_ONBOARDING_SERVICES_BANGS_DESC",
-    "IDS_HELIUM_ONBOARDING_SERVICES_EXTENSIONS_DESC",
-    "IDS_HELIUM_ONBOARDING_SERVICES_UBLOCK_DESC",
-    "IDS_HELIUM_ONBOARDING_SERVICES_AUTOUPDATES_DESC",
-    "IDS_HELIUM_ONBOARDING_SERVICES_AUTOUPDATES_DESC_LINUX",
-    "IDS_HELIUM_ONBOARDING_SERVICES_SPELLCHECK_DESC",
-    "IDS_HELIUM_ONBOARDING_SERVICES_INSTANCE_TITLE",
-    "IDS_HELIUM_ONBOARDING_SERVICES_INSTANCE_DESC",
-    "IDS_HELIUM_ONBOARDING_SEARCH_CATEGORIES_CUSTOM",
-}
+# mensagens que mantêm o nome original (vazio desde a remoção dos serviços e do setup do Helium)
+KEEP_NAMES = set()
 
 # grds raiz (relativos a --src) cujas mensagens são procuradas; partes (<part file=...>)
 # e xtb (<translations>) saem do próprio grd. Ausentes na árvore são ignorados.
@@ -82,7 +61,7 @@ _EXCLUDE_AFTER = (
     r"Dino|Updater|Nearby|Sync\sfor\b)"
 )
 # \w e "/" "." "-" antes: não pegar "mychrome", URLs "www.Chrome" etc. Só maiúscula inicial.
-# Helium: nome do navegador-base (patches do Helium e helium-onboarding); sem exclusões.
+# Helium: nome do navegador-base (patches do Helium); sem exclusões.
 _PRODUCT = re.compile(
     r"(?<![\w/.-])(?:(?:Google\s(?:&nbsp;)?)?Chrom(?:e|ium)(?!\w)(?!" + _EXCLUDE_AFTER + r")|Helium(?!\w))"
 )
@@ -241,6 +220,38 @@ def load_extra(path):
     return {k: v for k, v in data.items() if not k.startswith("_")}
 
 
+def load_space(path):
+    """JSON nome IDS -> {"en": ..., "pt-BR": ...} (chaves com "_" no início são comentários)."""
+    if not path:
+        return {}
+    data = json.load(open(path, encoding="utf-8"))
+    return {k: v for k, v in data.items() if not k.startswith("_")}
+
+
+_PH_ELEM = r'<ph\s+name="%s"[^>]*>.*?</ph>'
+
+
+def space_body(body, text):
+    """Corpo novo de <message> para o texto en do JSON (com <ph name="X"/>): escapa o texto,
+    restaura os <ph> originais de `body` e mantém o espaço em volta. None se os placeholders divergem."""
+    want = set(_PH.findall(body))
+    got = set(re.findall(r'<ph\s+name="([^"]+)"\s*/>', text))
+    if want != got:
+        return None
+    out = []
+    for part in _PH_XTB.split(text):
+        m = _PH_XTB.fullmatch(part)
+        if m:
+            name = re.search(r'name="([^"]+)"', part).group(1)
+            orig = re.search(_PH_ELEM % re.escape(name), body, re.S)
+            out.append(orig.group(0))
+        else:
+            out.append(escape(part))
+    lead = body[: len(body) - len(body.lstrip())]
+    trail = body[len(body.rstrip()):]
+    return lead + "".join(out) + trail
+
+
 def xtb_text(text):
     """Texto do JSON -> conteúdo de <translation>: escapa tudo exceto <ph name="X"/>."""
     return "".join(part if _PH_XTB.fullmatch(part) else escape(part) for part in _PH_XTB.split(text))
@@ -283,7 +294,8 @@ def inject_extra(files, contents, xtb_path, xtb_txt, extra, ids, stats, src):
     return xtb_txt[:end] + "".join(add) + xtb_txt[end:]
 
 
-def process_root(root, ids, check, stats, src, backup, listing=False, extra=None):
+def process_root(root, ids, check, stats, src, backup, listing=False, extra=None, space=None):
+    space = space or {}
     files = collect_files(root)
     if not files:
         return
@@ -301,9 +313,16 @@ def process_root(root, ids, check, stats, src, backup, listing=False, extra=None
             if nm and nm.group(1) in KEEP_NAMES:
                 return m.group(0)
             nb, n = rebrand_markup(body, True)
+            is_space = False
+            if nm and nm.group(1) in space:
+                sb = space_body(body, space[nm.group(1)]["en"])
+                if sb is None:
+                    print("aviso: %s: placeholders do JSON space divergem, mantido" % nm.group(1))
+                elif sb != body:
+                    nb, n, is_space = sb, 1, True
             if not n:
                 return m.group(0)
-            affected.append((p, attrs, body, nb, nm.group(1) if nm else "?"))
+            affected.append((p, attrs, body, nb, nm.group(1) if nm else "?", is_space))
             return m.group(0)[: m.start("body") - m.start(0)] + nb + "</message>"
 
         out = _MSG.sub(repl, txt)
@@ -325,9 +344,14 @@ def process_root(root, ids, check, stats, src, backup, listing=False, extra=None
         old_ids = ids.ids([(affected[i][1], affected[i][2]) for i in movable])
         new_ids = ids.ids([(affected[i][1], affected[i][3]) for i in movable])
         idmap = {}
+        space_old = {}  # id antigo -> nome IDS (mensagens do vocabulário space)
+        space_new = {}  # id novo -> nome IDS
         for i, o, n in zip(movable, old_ids, new_ids):
             if o and n and o != n:
                 idmap[o] = n
+                if affected[i][5]:
+                    space_old[o] = affected[i][4]
+                    space_new[n] = affected[i][4]
         per_file = Counter()
         for p, *_ in affected:
             per_file[p] += 1
@@ -355,6 +379,11 @@ def process_root(root, ids, check, stats, src, backup, listing=False, extra=None
                     dups += 1
                     return ""
                 emitted.add(new)
+                if old in space_old and (english or lang == EXTRA_LANG):
+                    txt = space[space_old[old]].get("en" if english else EXTRA_LANG)
+                    if txt is not None:
+                        renamed += 1
+                        return m.group(1) + new + m.group(3) + m.group(4) + xtb_text(txt) + m.group(6)
                 body, n = rebrand_markup(m.group(5), english)
                 literal += 1 if n else 0
                 renamed += 1
@@ -366,9 +395,24 @@ def process_root(root, ids, check, stats, src, backup, listing=False, extra=None
                 stats["xtb_entries"] += renamed
                 stats["xtb_literal"] += literal
                 stats["xtb_dups"] += dups
+            # space: o xtb pode não ter o id antigo (ex.: chromium_strings não traz traduções); garante o novo
+            added = 0
+            if space_new and (english or lang == EXTRA_LANG):
+                cur = new_xtb.get(xp, xtxt)
+                have_now = set(m.group(2) for m in _XTB.finditer(cur))
+                add = []
+                for nid, name in space_new.items():
+                    txt = space[name].get("en" if english else EXTRA_LANG)
+                    if txt is not None and nid not in have_now:
+                        have_now.add(nid)
+                        add.append('<translation id="%s">%s</translation>\n' % (nid, xtb_text(txt)))
+                if add:
+                    end = cur.rindex("</translationbundle>")
+                    new_xtb[xp] = cur[:end] + "".join(add) + cur[end:]
+                    added = len(add)
             if lang in ("pt-BR", "en-GB") or check:
-                if renamed or dups:
-                    print("  xtb %-6s renomeados=%-4d com_nome_literal=%-4d duplicados=%d  %s" % (lang, renamed, literal, dups, xp))
+                if renamed or dups or added:
+                    print("  xtb %-6s renomeados=%-4d com_nome_literal=%-4d duplicados=%d space_novos=%d  %s" % (lang, renamed, literal, dups, added, xp))
 
     if extra:
         for xp, lang in xtbs:
@@ -395,7 +439,7 @@ def process_root(root, ids, check, stats, src, backup, listing=False, extra=None
 
     if check:
         if listing:
-            for p, attrs, old, new, name in affected:
+            for p, attrs, old, new, name, _ in affected:
                 print("    %s: %s" % (os.path.relpath(p, src), name))
         return
     for path, content in list(new_xtb.items()) + list(new_text.items()):  # xtb antes do grd
@@ -419,18 +463,21 @@ def main():
     ap.add_argument("--backup", help="copia aqui cada arquivo (caminho relativo a --src) antes de reescrevê-lo")
     ap.add_argument("--extra", default=EXTRA_DEFAULT, help="JSON nome IDS -> tradução pt-BR (padrão: %(default)s)")
     ap.add_argument("--no-extra", action="store_true", help="não injeta traduções extras")
+    ap.add_argument("--space", default=SPACE_DEFAULT, help="JSON nome IDS -> {en, pt-BR} do vocabulário space (padrão: %(default)s)")
+    ap.add_argument("--no-space", action="store_true", help="não troca o vocabulário profile -> space")
     a = ap.parse_args()
     src = os.path.abspath(a.src)
     ids = Ids(src)
     stats = Counter()
     extra = {} if a.no_extra else load_extra(a.extra)
+    space = {} if a.no_space else load_space(a.space)
     for rel in a.root or DEFAULT_ROOTS:
         root = os.path.join(src, rel)
         if not os.path.isfile(root):
             print("== %s: ausente, ignorado" % rel)
             continue
         print("== %s" % rel)
-        process_root(root, ids, a.check, stats, src, a.backup, a.list, extra)
+        process_root(root, ids, a.check, stats, src, a.backup, a.list, extra, space)
     print("== total: mensagens=%d ids_novos=%d xtb_arquivos=%d xtb_entradas=%d (com nome literal=%d, duplicadas descartadas=%d)%s"
           % (stats["messages"], stats["ids"], stats["xtb_files"], stats["xtb_entries"],
              stats["xtb_literal"], stats["xtb_dups"], " [--check: nada escrito]" if a.check else ""))

@@ -1,0 +1,808 @@
+aerographene: terminal em quadro, fatia C4 (pan/zoom, layout, título, -t).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/terminal-bridge.patch (e, por ele, terminal-webui,
+terminal-pty, terminal-xterm) e aerographene/branding-scheme.patch (hunk
+vizinho em builtin_provider.cc).
+Propósito: (1) o quadro de chrome://terminal ganha pan (arrastar o fundo ou
+roda) e zoom (Ctrl+roda, botões, 25%–200%) por transform num elemento
+.world; janelas em unidades do mundo, sem limite do quadro. (2) Layout
+(janelas e vista) persistido por workspace em localStorage da origem
+chrome://terminal, validado ao ler; as sessões não persistem, janelas
+restauradas abrem shells novos (máx. 16). (3) Título da aba sempre
+"t: workspace N" (N de ?w=N, padrão 1), nunca o processo; o processo em
+primeiro plano (tcgetpgrp + /proc/<pgid>/comm, só ASCII imprimível) aparece
+apenas no tooltip do cabeçalho da janela, pela mensagem "foreground".
+(4) Command bar: "-t" ou "-t N" (1..99) vira uma sugestão padrão que abre
+chrome://terminal/?w=N (BuiltinProvider::Start; o texto é QUERY, então era
+ignorado). Testes: TerminalSessionTest.ForegroundProcessName,
+TerminalHostTest.ForegroundProcess, AeroTerminalCommandTest.*.
+
+--- a/chrome/browser/resources/aero_terminal/terminal.js
++++ b/chrome/browser/resources/aero_terminal/terminal.js
+@@ -2,7 +2,8 @@
+ // Use of this source code is governed by the GPL-3.0 license.
+ 
+ // chrome://terminal: a board of terminal windows (drag, resize, focus,
+-// close), each an xterm.js (vendored, MIT) attached to a local pty owned by
++// close) on a pannable, zoomable workspace, each an xterm.js (vendored, MIT)
++// attached to a local pty owned by
+ // the browser (TerminalHandler/TerminalHost). The page only sends keystrokes
+ // and sizes; the browser picks the program (the user's shell). No network,
+ // no innerHTML (Trusted Types is enforced by the WebUI CSP).
+@@ -76,15 +77,112 @@
+ 
+ const MIN_W = 220;
+ const MIN_H = 120;
++const MAX_WINDOWS = 16;  // TerminalHost::kMaxSessions
++const MIN_ZOOM = 0.25;
++const MAX_ZOOM = 2;
++const GRID = 24;
++const SAVE_DELAY_MS = 300;
+ 
+ const board = document.getElementById('board');
++const world = document.getElementById('world');
++const zoomLabel = document.getElementById('zoom');
+ const tpl = document.getElementById('winTpl');
+-let count = 0;
+ let nextId = 1;
+ let topZ = 1;
+ 
+-function updateTitle() {
+-  document.title = count === 1 ? 't: 1 terminal' : `t: ${count} terminals`;
++// The workspace number comes from ?w=N (command bar "-t N"); the tab title is
++// always "t: workspace N", never the foreground process (that only shows in
++// the window tooltip).
++function workspaceNumber() {
++  const w = new URLSearchParams(location.search).get('w');
++  return w !== null && /^[1-9][0-9]?$/.test(w) ? Number(w) : 1;
++}
++const workspace = workspaceNumber();
++document.title = `t: workspace ${workspace}`;
++
++// Pan/zoom: world is translated and scaled; window boxes are in world units.
++const view = {x: 0, y: 0, k: 1};
++const wins = new Set();  // {box, win}
++
++function clamp(v, lo, hi) {
++  return Math.max(lo, Math.min(hi, v));
++}
++
++function applyView() {
++  world.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.k})`;
++  const g = GRID * view.k;
++  board.style.backgroundSize = `${g}px ${g}px`;
++  board.style.backgroundPosition = `${view.x}px ${view.y}px`;
++  zoomLabel.textContent = `${Math.round(view.k * 100)}%`;
++}
++
++// Zoom keeping the world point under (cx, cy) (board coordinates) fixed.
++function zoomAt(k, cx, cy) {
++  const nk = clamp(k, MIN_ZOOM, MAX_ZOOM);
++  view.x = cx - (cx - view.x) * (nk / view.k);
++  view.y = cy - (cy - view.y) * (nk / view.k);
++  view.k = nk;
++  applyView();
++  scheduleSave();
++}
++
++function zoomCentered(factor) {
++  const r = board.getBoundingClientRect();
++  zoomAt(view.k * factor, r.width / 2, r.height / 2);
++}
++
++// Layout (window boxes + view) per workspace, in the profile's localStorage
++// of this WebUI origin. Sessions never persist: restored windows start fresh
++// shells. Anything malformed is ignored.
++const STORE_KEY = `aero-terminal-layout-${workspace}`;
++let saveTimer = 0;
++
++function scheduleSave() {
++  clearTimeout(saveTimer);
++  saveTimer = setTimeout(saveLayout, SAVE_DELAY_MS);
++}
++
++function saveLayout() {
++  try {
++    const layout = {
++      v: 1,
++      view: {x: view.x, y: view.y, k: view.k},
++      wins: [...wins].map((w) => ({x: w.box.x, y: w.box.y, w: w.box.w, h: w.box.h})),
++    };
++    localStorage.setItem(STORE_KEY, JSON.stringify(layout));
++  } catch (e) {
++    // Storage unavailable or full: the layout just does not persist.
++  }
++}
++
++function num(v, lo, hi, def) {
++  return typeof v === 'number' && Number.isFinite(v) ? clamp(v, lo, hi) : def;
++}
++
++function loadLayout() {
++  try {
++    const raw = localStorage.getItem(STORE_KEY);
++    const l = raw && raw.length < 65536 ? JSON.parse(raw) : null;
++    if (!l || l.v !== 1 || !Array.isArray(l.wins)) {
++      return null;
++    }
++    const R = 100000;
++    return {
++      view: {
++        x: num(l.view?.x, -R, R, 0),
++        y: num(l.view?.y, -R, R, 0),
++        k: num(l.view?.k, MIN_ZOOM, MAX_ZOOM, 1),
++      },
++      wins: l.wins.slice(0, MAX_WINDOWS).map((w) => ({
++        x: num(w?.x, -R, R, 24),
++        y: num(w?.y, -R, R, 24),
++        w: num(w?.w, MIN_W, 4000, 520),
++        h: num(w?.h, MIN_H, 4000, 300),
++      })),
++    };
++  } catch (e) {
++    return null;
++  }
+ }
+ 
+ function focusWin(win) {
+@@ -95,12 +193,9 @@
+   win.style.zIndex = String(++topZ);
+ }
+ 
+-function clamp(v, lo, hi) {
+-  return Math.max(lo, Math.min(hi, v));
+-}
+-
+-// Calls onMove(dx, dy) while the pointer is captured by `handle`.
+-function track(handle, onStart, onMove) {
++// Calls onMove(dx, dy) while the pointer is captured by `handle`; onEnd runs
++// when the gesture ends.
++function track(handle, onStart, onMove, onEnd) {
+   let x0 = 0;
+   let y0 = 0;
+   handle.addEventListener('pointerdown', (e) => {
+@@ -121,25 +216,39 @@
+   const stop = (e) => {
+     if (handle.hasPointerCapture(e.pointerId)) {
+       handle.releasePointerCapture(e.pointerId);
++      if (onEnd) {
++        onEnd();
++      }
+     }
+   };
+   handle.addEventListener('pointerup', stop);
+   handle.addEventListener('pointercancel', stop);
+ }
+ 
+-function addWindow() {
++function addWindow(saved) {
++  if (wins.size >= MAX_WINDOWS) {
++    return;
++  }
+   const id = nextId++;
+   const win = tpl.content.firstElementChild.cloneNode(true);
+   const b = board.getBoundingClientRect();
+-  const w = Math.min(520, Math.max(MIN_W, b.width - 48));
+-  const h = Math.min(300, Math.max(MIN_H, b.height - 48));
+-  const offset = ((id - 1) % 8) * 28;
+-  const box = {
+-    x: clamp(24 + offset, 0, Math.max(0, b.width - w)),
+-    y: clamp(24 + offset, 0, Math.max(0, b.height - h)),
+-    w,
+-    h,
+-  };
++  let box;
++  if (saved) {
++    box = {...saved};
++  } else {
++    // Top-left of what is currently visible, in world units.
++    const w = Math.min(520, Math.max(MIN_W, b.width / view.k - 48));
++    const h = Math.min(300, Math.max(MIN_H, b.height / view.k - 48));
++    const offset = ((id - 1) % 8) * 28;
++    box = {
++      x: Math.round(-view.x / view.k + 24 + offset),
++      y: Math.round(-view.y / view.k + 24 + offset),
++      w,
++      h,
++    };
++  }
++  const entry = {box, win};
++  wins.add(entry);
+   const apply = () => {
+     win.style.left = `${box.x}px`;
+     win.style.top = `${box.y}px`;
+@@ -149,9 +258,24 @@
+   apply();
+ 
+   const titleEl = win.querySelector('.win-title');
++  const headEl = win.querySelector('.win-head');
++  let procName = '';
+   const setTitle = (t) => {
+     titleEl.textContent = t;
++    headEl.title = procName ? `${t} (${procName})` : t;
+   };
++  // Foreground process: asked on hover/focus, shown only as the tooltip.
++  const refreshProcess = () => {
++    if (sessionId === null) {
++      return;
++    }
++    call('foreground', sessionId).then((name) => {
++      procName = typeof name === 'string' ? name : '';
++      headEl.title = procName ? `${titleEl.textContent} (${procName})` :
++                                titleEl.textContent;
++    });
++  };
++  headEl.addEventListener('pointerenter', refreshProcess);
+   setTitle(`terminal ${id}`);
+   win.setAttribute('aria-label', `terminal ${id}`);
+   const body = win.querySelector('.win-body');
+@@ -186,25 +310,24 @@
+   };
+   new ResizeObserver(refit).observe(body);
+ 
++  // Pointer deltas are in screen pixels; boxes are in world units.
+   let start = {...box};
+-  track(win.querySelector('.win-head'), () => {
++  track(headEl, () => {
+     start = {...box};
+     focusWin(win);
+   }, (dx, dy) => {
+-    const r = board.getBoundingClientRect();
+-    box.x = clamp(start.x + dx, 0, Math.max(0, r.width - box.w));
+-    box.y = clamp(start.y + dy, 0, Math.max(0, r.height - box.h));
++    box.x = Math.round(start.x + dx / view.k);
++    box.y = Math.round(start.y + dy / view.k);
+     apply();
+-  });
++  }, scheduleSave);
+   track(win.querySelector('.win-resize'), () => {
+     start = {...box};
+     focusWin(win);
+   }, (dx, dy) => {
+-    const r = board.getBoundingClientRect();
+-    box.w = clamp(start.w + dx, MIN_W, Math.max(MIN_W, r.width - box.x));
+-    box.h = clamp(start.h + dy, MIN_H, Math.max(MIN_H, r.height - box.y));
++    box.w = Math.round(clamp(start.w + dx / view.k, MIN_W, 4000));
++    box.h = Math.round(clamp(start.h + dy / view.k, MIN_H, 4000));
+     apply();
+-  });
++  }, scheduleSave);
+   win.addEventListener('pointerdown', () => focusWin(win));
+   win.querySelector('.win-close').addEventListener('click', () => {
+     if (sessionId !== null) {
+@@ -213,14 +336,13 @@
+     }
+     term.dispose();
+     win.remove();
+-    count--;
+-    updateTitle();
++    wins.delete(entry);
++    scheduleSave();
+   });
+ 
+-  board.appendChild(win);
+-  count++;
++  world.appendChild(win);
+   focusWin(win);
+-  updateTitle();
++  scheduleSave();
+   term.open(body);
+   refit();
+   term.focus();
+@@ -238,5 +360,75 @@
+   });
+ }
+ 
+-document.getElementById('add').addEventListener('click', addWindow);
+-addWindow();
++// Pan: drag on the empty board; wheel pans, Ctrl+wheel zooms at the pointer.
++// Anything inside a window (terminal scrollback, selection) is left alone.
++const onBackground = (e) => e.target === board || e.target === world;
++let pan = null;
++board.addEventListener('pointerdown', (e) => {
++  if ((e.button !== 0 && e.button !== 1) || !onBackground(e)) {
++    return;
++  }
++  pan = {x: e.clientX, y: e.clientY, vx: view.x, vy: view.y};
++  board.setPointerCapture(e.pointerId);
++  board.classList.add('panning');
++  e.preventDefault();
++});
++board.addEventListener('pointermove', (e) => {
++  if (pan && board.hasPointerCapture(e.pointerId)) {
++    view.x = pan.vx + e.clientX - pan.x;
++    view.y = pan.vy + e.clientY - pan.y;
++    applyView();
++  }
++});
++const endPan = (e) => {
++  if (pan) {
++    pan = null;
++    board.classList.remove('panning');
++    if (board.hasPointerCapture(e.pointerId)) {
++      board.releasePointerCapture(e.pointerId);
++    }
++    scheduleSave();
++  }
++};
++board.addEventListener('pointerup', endPan);
++board.addEventListener('pointercancel', endPan);
++board.addEventListener('wheel', (e) => {
++  if (e.ctrlKey) {
++    const r = board.getBoundingClientRect();
++    zoomAt(view.k * Math.exp(-e.deltaY * 0.002), e.clientX - r.left,
++           e.clientY - r.top);
++    e.preventDefault();
++  } else if (onBackground(e)) {
++    view.x -= e.deltaX;
++    view.y -= e.deltaY;
++    applyView();
++    scheduleSave();
++    e.preventDefault();
++  }
++}, {passive: false});
++
++document.getElementById('zoomIn').addEventListener(
++    'click', () => zoomCentered(1.25));
++document.getElementById('zoomOut').addEventListener(
++    'click', () => zoomCentered(0.8));
++document.getElementById('zoomReset').addEventListener('click', () => {
++  view.x = 0;
++  view.y = 0;
++  view.k = 1;
++  applyView();
++  scheduleSave();
++});
++document.getElementById('add').addEventListener('click', () => addWindow());
++
++const restored = loadLayout();
++if (restored) {
++  Object.assign(view, restored.view);
++}
++applyView();
++if (restored && restored.wins.length > 0) {
++  for (const w of restored.wins) {
++    addWindow(w);
++  }
++} else {
++  addWindow();
++}
+--- a/chrome/browser/resources/aero_terminal/terminal.css
++++ b/chrome/browser/resources/aero_terminal/terminal.css
+@@ -35,6 +35,8 @@
+ }
+ .bar button:hover { border-color: var(--accent); }
+ .note { color: var(--text2); font-size: 12px; }
++.zoom { align-items: center; display: flex; gap: 6px; }
++.zoom #zoom { color: var(--text2); min-width: 4ch; text-align: center; }
+ .board {
+   background-color: var(--bg);
+   background-image:
+@@ -42,10 +44,22 @@
+       linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+   background-size: 24px 24px;
+   flex: 1;
++  cursor: grab;
+   overflow: hidden;
+   position: relative;
++  touch-action: none;
++}
++.board.panning { cursor: grabbing; }
++.world {
++  height: 0;
++  left: 0;
++  position: absolute;
++  top: 0;
++  transform-origin: 0 0;
++  width: 0;
+ }
+ .win {
++  cursor: auto;
+   background: var(--panel);
+   border: 1px solid var(--line);
+   border-radius: 6px;
+--- a/chrome/browser/resources/aero_terminal/terminal.html
++++ b/chrome/browser/resources/aero_terminal/terminal.html
+@@ -2,7 +2,7 @@
+ <html lang="pt-BR">
+ <head>
+ <meta charset="utf-8">
+-<title>t: 0 terminals</title>
++<title>t: workspace 1</title>
+ <meta name="color-scheme" content="dark">
+ <link rel="stylesheet" href="xterm.css">
+ <link rel="stylesheet" href="terminal.css">
+@@ -11,9 +11,17 @@
+ <body>
+ <header class="bar">
+   <button id="add" type="button">+ terminal</button>
+-  <span class="note" id="note"></span>
++  <span class="zoom">
++    <button id="zoomOut" type="button" aria-label="diminuir zoom">−</button>
++    <span id="zoom">100%</span>
++    <button id="zoomIn" type="button" aria-label="aumentar zoom">+</button>
++    <button id="zoomReset" type="button">1:1</button>
++  </span>
++  <span class="note" id="note">arraste o fundo para mover · Ctrl+roda para zoom</span>
+ </header>
+-<div class="board" id="board" aria-label="quadro de terminais"></div>
++<div class="board" id="board" aria-label="quadro de terminais">
++  <div class="world" id="world"></div>
++</div>
+ <template id="winTpl">
+   <section class="win" role="group">
+     <header class="win-head">
+--- a/chrome/browser/ui/webui/aero_terminal/terminal_session.h
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_session.h
+@@ -74,6 +74,11 @@
+   // group). False for out-of-range sizes or ioctl failure.
+   bool Resize(uint16_t cols, uint16_t rows);
+ 
++  // Name of the foreground process of the pty (tcgetpgrp + /proc/<pgid>/comm),
++  // printable ASCII only, at most 15 chars; empty when unknown. Shown only in
++  // the window tooltip, never in the tab title.
++  std::string ForegroundProcessName() const;
++
+   // Sends SIGHUP to the whole process group, waits up to `grace` for the
+   // leader, then SIGKILLs the group and reaps the leader. Idempotent.
+   // Returns the leader's exit code when it was reaped.
+--- a/chrome/browser/ui/webui/aero_terminal/terminal_session.cc
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_session.cc
+@@ -23,6 +23,7 @@
+ #include "base/path_service.h"
+ #include "base/posix/eintr_wrapper.h"
+ #include "base/process/launch.h"
++#include "base/strings/string_number_conversions.h"
+ #include "base/threading/platform_thread.h"
+ 
+ namespace aerographene {
+@@ -190,6 +191,31 @@
+   return done;
+ }
+ 
++std::string TerminalSession::ForegroundProcessName() const {
++  if (terminated_) {
++    return std::string();
++  }
++  const pid_t pgid = tcgetpgrp(master_.get());
++  if (pgid <= 0) {
++    return std::string();
++  }
++  std::string comm;
++  if (!base::ReadFileToStringWithMaxSize(
++          base::FilePath("/proc/" + base::NumberToString(pgid) + "/comm"),
++          &comm, 64) &&
++      comm.empty()) {
++    return std::string();
++  }
++  std::string out;
++  for (char c : comm) {
++    if (c == '\n') {
++      break;
++    }
++    out.push_back(c >= 0x20 && c <= 0x7e ? c : '?');
++  }
++  return out;
++}
++
+ bool TerminalSession::Resize(uint16_t cols, uint16_t rows) {
+   if (terminated_ || !ValidSize(cols, rows)) {
+     return false;
+--- a/chrome/browser/ui/webui/aero_terminal/terminal_session_unittest.cc
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_session_unittest.cc
+@@ -12,6 +12,7 @@
+ 
+ #include "base/posix/eintr_wrapper.h"
+ #include "base/strings/string_number_conversions.h"
++#include "base/threading/platform_thread.h"
+ #include "base/time/time.h"
+ #include "testing/gtest/include/gtest/gtest.h"
+ 
+@@ -149,5 +150,21 @@
+   EXPECT_FALSE(s->Resize(80, 24));
+ }
+ 
++TEST(TerminalSessionTest, ForegroundProcessName) {
++  auto s = StartSh("exec sleep 100");
++  ASSERT_TRUE(s);
++  // exec may not have happened yet: poll briefly.
++  std::string name;
++  for (int i = 0; i < 100 && name != "sleep"; ++i) {
++    name = s->ForegroundProcessName();
++    if (name != "sleep") {
++      base::PlatformThread::Sleep(base::Milliseconds(50));
++    }
++  }
++  EXPECT_EQ(name, "sleep");
++  s->Terminate(base::Milliseconds(50));
++  EXPECT_EQ(s->ForegroundProcessName(), "");
++}
++
+ }  // namespace
+ }  // namespace aerographene
+--- a/chrome/browser/ui/webui/aero_terminal/terminal_host.h
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_host.h
+@@ -56,6 +56,9 @@
+   bool Write(int32_t id, std::string bytes);
+   void Resize(int32_t id, uint16_t cols, uint16_t rows);
+   void Close(int32_t id);
++  // Foreground process name of session `id` (see TerminalSession); empty
++  // when unknown.
++  std::string Foreground(int32_t id);
+   // The page consumed `bytes` of output of session `id`.
+   void Ack(int32_t id, size_t bytes);
+ 
+--- a/chrome/browser/ui/webui/aero_terminal/terminal_host.cc
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_host.cc
+@@ -130,6 +130,13 @@
+   }
+ }
+ 
++std::string TerminalHost::Foreground(int32_t id) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  auto it = sessions_.find(id);
++  return it == sessions_.end() ? std::string()
++                               : it->second->session->ForegroundProcessName();
++}
++
+ void TerminalHost::Resize(int32_t id, uint16_t cols, uint16_t rows) {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+   auto it = sessions_.find(id);
+--- a/chrome/browser/ui/webui/aero_terminal/terminal_host_unittest.cc
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_host_unittest.cc
+@@ -124,6 +124,18 @@
+   EXPECT_FALSE(host_->Open(200, 0, 24));
+ }
+ 
++TEST_F(TerminalHostTest, ForegroundProcess) {
++  EXPECT_EQ(host_->Foreground(99), "");
++  ASSERT_TRUE(host_->Open(1, 80, 24));
++  host_->Write(1, "exec sleep 100\n");
++  std::string name;
++  for (int i = 0; i < 100 && name != "sleep"; ++i) {
++    RunFor(base::Milliseconds(50));
++    name = host_->Foreground(1);
++  }
++  EXPECT_EQ(name, "sleep");
++}
++
+ TEST_F(TerminalHostTest, DestructionKillsSessions) {
+   ASSERT_TRUE(host_->Open(1, 80, 24));
+   // The pty echoes the typed line; the quotes keep "pid=" and "done" out of
+--- a/chrome/browser/ui/webui/aero_terminal/terminal_handler.h
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_handler.h
+@@ -30,7 +30,7 @@
+ //
+ // Messages (args[0] is the callback id when a reply is expected):
+ //   open(cb, cols, rows) -> id or null; write(id, text); resize(id, c, r);
+-//   close(id); ack(id, bytes) after the page rendered `bytes` of output (at
++//   foreground(cb, id) -> process name or ""; close(id); ack(id, bytes) after the page rendered `bytes` of output (at
+ //   most one read chunk per ack). Events: "output"(id, base64 bytes),
+ //   "exit"(id, code), "writeDropped"(id) when the input queue is full.
+ class TerminalHandler : public content::WebUIMessageHandler {
+@@ -54,9 +54,11 @@
+   void HandleResize(const base::ListValue& args);
+   void HandleClose(const base::ListValue& args);
+   void HandleAck(const base::ListValue& args);
++  void HandleForeground(const base::ListValue& args);
+ 
+   void OnOpened(base::Value callback_id, int32_t id, bool ok);
+   void OnWritten(int32_t id, bool accepted);
++  void OnForeground(base::Value callback_id, std::string name);
+   void OnOutput(int32_t id, std::string bytes);
+   void OnExit(int32_t id, int code);
+ 
+--- a/chrome/browser/ui/webui/aero_terminal/terminal_handler.cc
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_handler.cc
+@@ -67,6 +67,9 @@
+       "close", base::BindRepeating(&TerminalHandler::HandleClose,
+                                    base::Unretained(this)));
+   web_ui()->RegisterMessageCallback(
++      "foreground", base::BindRepeating(&TerminalHandler::HandleForeground,
++                                        base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
+       "ack", base::BindRepeating(&TerminalHandler::HandleAck,
+                                  base::Unretained(this)));
+ }
+@@ -154,6 +157,29 @@
+       .WithArgs(*id, static_cast<size_t>(*bytes));
+ }
+ 
++void TerminalHandler::HandleForeground(const base::ListValue& args) {
++  if (args.size() != 2 || !FromTerminalPage()) {
++    return;
++  }
++  std::optional<int> id = args[1].GetIfInt();
++  AllowJavascript();
++  if (!id || !open_ids_.contains(*id)) {
++    ResolveJavascriptCallback(args[0], base::Value(std::string()));
++    return;
++  }
++  host_.AsyncCall(&TerminalHost::Foreground)
++      .WithArgs(*id)
++      .Then(base::BindOnce(&TerminalHandler::OnForeground,
++                           weak_ptr_factory_.GetWeakPtr(), args[0].Clone()));
++}
++
++void TerminalHandler::OnForeground(base::Value callback_id,
++                                   std::string name) {
++  if (IsJavascriptAllowed()) {
++    ResolveJavascriptCallback(callback_id, base::Value(std::move(name)));
++  }
++}
++
+ void TerminalHandler::HandleResize(const base::ListValue& args) {
+   if (args.size() != 3 || !FromTerminalPage()) {
+     return;
+--- a/components/omnibox/browser/BUILD.gn
++++ b/components/omnibox/browser/BUILD.gn
+@@ -226,6 +226,8 @@
+     "brave_search_suggestion_parser.h",
+     "builtin_provider.cc",
+     "builtin_provider.h",
++    "aero_terminal_command.cc",
++    "aero_terminal_command.h",
+     "calculator_provider.cc",
+     "calculator_provider.h",
+     "clipboard_provider.cc",
+@@ -914,6 +916,7 @@
+     "bookmark_scoring_signals_annotator_unittest.cc",
+     "brave_search_suggestion_parser_unittest.cc",
+     "builtin_provider_unittest.cc",
++    "aero_terminal_command_unittest.cc",
+     "calculator_provider_unittest.cc",
+     "clipboard_provider_unittest.cc",
+     "contextual_search_provider_unittest.cc",
+--- a/components/omnibox/browser/builtin_provider.cc
++++ b/components/omnibox/browser/builtin_provider.cc
+@@ -6,11 +6,14 @@
+ 
+ #include <stddef.h>
+ 
++#include <optional>
+ #include <string>
+ 
+ #include "base/strings/strcat.h"
++#include "base/strings/string_number_conversions.h"
+ #include "base/strings/string_util.h"
+ #include "base/strings/utf_string_conversions.h"
++#include "components/omnibox/browser/aero_terminal_command.h"
+ #include "components/omnibox/browser/autocomplete_input.h"
+ #include "components/omnibox/browser/autocomplete_match.h"
+ #include "components/omnibox/browser/autocomplete_match_classification.h"
+@@ -37,6 +40,23 @@
+     return;
+   }
+ 
++  // aerographene command bar: "-t" / "-t N" opens the terminal workspace.
++  // The text is a QUERY for the classifier, so it is handled before the
++  // chrome:// URL completion below.
++  if (std::optional<int> workspace =
++          aerographene::ParseTerminalCommand(input.text())) {
++    AutocompleteMatch match(this, 1300, false,
++                            AutocompleteMatchType::NAVSUGGEST);
++    match.suggest_type = omnibox::TYPE_NAVIGATION;
++    match.destination_url = GURL(aerographene::TerminalCommandUrl(*workspace));
++    match.fill_into_edit = input.text();
++    match.contents = u"t: workspace " + base::NumberToString16(*workspace);
++    match.contents_class = {{0, ACMatchClassification::URL}};
++    match.allowed_to_be_default_match = true;
++    matches_.push_back(match);
++    return;
++  }
++
+   if (input.type() != metrics::OmniboxInputType::QUERY) {
+     DoBuiltinAutocompletion(input.text());
+     UpdateRelevanceScores(input);
+--- /dev/null
++++ b/components/omnibox/browser/aero_terminal_command.h
+@@ -0,0 +1,25 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#ifndef COMPONENTS_OMNIBOX_BROWSER_AERO_TERMINAL_COMMAND_H_
++#define COMPONENTS_OMNIBOX_BROWSER_AERO_TERMINAL_COMMAND_H_
++
++#include <optional>
++#include <string>
++#include <string_view>
++
++namespace aerographene {
++
++// Command bar entry `-t` (terminal workspace). Accepts "-t" or "-t N" with N
++// in [1, kMaxTerminalWorkspace], case-insensitive, surrounded by optional
++// whitespace, and returns the workspace number (1 for a bare "-t"). Anything
++// else (including "-t0", "-tx", "-t 1 2") returns nullopt.
++inline constexpr int kMaxTerminalWorkspace = 99;
++std::optional<int> ParseTerminalCommand(std::u16string_view text);
++
++// The page the command opens: "chrome://terminal/?w=N".
++std::string TerminalCommandUrl(int workspace);
++
++}  // namespace aerographene
++
++#endif  // COMPONENTS_OMNIBOX_BROWSER_AERO_TERMINAL_COMMAND_H_
+--- /dev/null
++++ b/components/omnibox/browser/aero_terminal_command.cc
+@@ -0,0 +1,46 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "components/omnibox/browser/aero_terminal_command.h"
++
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/string_util.h"
++#include "base/strings/utf_string_conversions.h"
++
++namespace aerographene {
++
++std::optional<int> ParseTerminalCommand(std::u16string_view text) {
++  std::u16string_view t = base::TrimWhitespace(text, base::TRIM_ALL);
++  if (t.size() < 2 || t[0] != u'-' || (t[1] != u't' && t[1] != u'T')) {
++    return std::nullopt;
++  }
++  std::u16string_view rest = t.substr(2);
++  if (rest.empty()) {
++    return 1;
++  }
++  // The number must come after whitespace: "-t2" and "-tx" are rejected.
++  if (!base::IsUnicodeWhitespace(rest[0])) {
++    return std::nullopt;
++  }
++  rest = base::TrimWhitespace(rest, base::TRIM_ALL);
++  if (rest.empty() || rest.size() > 2) {
++    return std::nullopt;
++  }
++  for (char16_t c : rest) {
++    if (c < u'0' || c > u'9') {
++      return std::nullopt;
++    }
++  }
++  int n = 0;
++  if (!base::StringToInt(base::UTF16ToUTF8(rest), &n) || n < 1 ||
++      n > kMaxTerminalWorkspace) {
++    return std::nullopt;
++  }
++  return n;
++}
++
++std::string TerminalCommandUrl(int workspace) {
++  return "chrome://terminal/?w=" + base::NumberToString(workspace);
++}
++
++}  // namespace aerographene
+--- /dev/null
++++ b/components/omnibox/browser/aero_terminal_command_unittest.cc
+@@ -0,0 +1,31 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "components/omnibox/browser/aero_terminal_command.h"
++
++#include "base/strings/utf_string_conversions.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace aerographene {
++
++TEST(AeroTerminalCommandTest, Accepts) {
++  EXPECT_EQ(ParseTerminalCommand(u"-t"), 1);
++  EXPECT_EQ(ParseTerminalCommand(u"  -T  "), 1);
++  EXPECT_EQ(ParseTerminalCommand(u"-t 2"), 2);
++  EXPECT_EQ(ParseTerminalCommand(u"-t   99 "), 99);
++  EXPECT_EQ(ParseTerminalCommand(u"-t 07"), 7);
++}
++
++TEST(AeroTerminalCommandTest, Rejects) {
++  for (const char16_t* s :
++       {u"", u"-", u"t", u"-tx", u"-t2", u"-t 0", u"-t 100", u"-t -1",
++        u"-t 1 2", u"-t x", u"- t", u"--t", u"-tt", u"a -t", u"-t 1x"}) {
++    EXPECT_FALSE(ParseTerminalCommand(s)) << base::UTF16ToUTF8(s);
++  }
++}
++
++TEST(AeroTerminalCommandTest, Url) {
++  EXPECT_EQ(TerminalCommandUrl(3), "chrome://terminal/?w=3");
++}
++
++}  // namespace aerographene

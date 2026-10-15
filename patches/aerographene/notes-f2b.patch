@@ -1,0 +1,1667 @@
+aerographene: notas — layout aprovado do mockup f2b (v0.3, fatia F2B).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/notes-f2.patch (e, por ele, a cadeia notes-*).
+Só recursos da página chrome://notes (html/css/js/editor.js); sem backend novo.
+Lateral com modos arquivos/buscar/tags, ações (+ nota, + pasta desabilitado,
+ordenar, recolher), árvore com guias, contagens por pasta e item ativo; abas de
+notas abertas (cada uma com o seu editor e a marca de não salva); faixa com
+estado e salvar/renomear/apagar; breadcrumb com editar⇄ler; título grande;
+barra de status (modo, pasta, backlinks, palavras, caracteres, linha:coluna,
+codificação); seletor da vault embaixo à esquerda; estado vazio com recentes
+(localStorage). Tags e backlinks vêm de listDir/readNote/searchVault.
+Desabilitados por falta de backend: + pasta, trocar de vault, ordenar por data.
+
+diff --git a/chrome/browser/resources/aero_notes/editor.js b/chrome/browser/resources/aero_notes/editor.js
+index cab4076..59ddb62 100644
+--- a/chrome/browser/resources/aero_notes/editor.js
++++ b/chrome/browser/resources/aero_notes/editor.js
+@@ -112,6 +112,14 @@ export function createEditor(root, opts = {}) {
+   let redo = [];
+   let lastPush = 0;
+   let input = null;
++  let readOnly = false;
++
++  // Line/column (1-based) of the caret for the status bar.
++  function reportCaret() {
++    if (opts.onCaret) {
++      opts.onCaret(active + 1, input ? input.selectionStart + 1 : 1);
++    }
++  }
+ 
+   const snapshot = () => ({lines: lines.slice(), active,
+                            caret: input ? input.selectionStart : 0});
+@@ -170,6 +178,9 @@ export function createEditor(root, opts = {}) {
+       }
+     });
+     ta.addEventListener('keydown', onKeydown);
++    for (const ev of ['keyup', 'click', 'select']) {
++      ta.addEventListener(ev, reportCaret);
++    }
+     ta.addEventListener('paste', onPaste);
+     return ta;
+   }
+@@ -235,6 +246,7 @@ export function createEditor(root, opts = {}) {
+     input.setSelectionRange(pos, pos);
+     resize();
+     input.scrollIntoView({block: 'nearest'});
++    reportCaret();
+   }
+ 
+   // Moves the caret line to `index`; only the old and the new chunk are
+@@ -277,6 +289,7 @@ export function createEditor(root, opts = {}) {
+     lines[active] = input.value;
+     resize();
+     changed();
++    reportCaret();
+   }
+ 
+   function insertLines(text, col, end) {
+@@ -388,6 +401,9 @@ export function createEditor(root, opts = {}) {
+ 
+   // Click on a rendered piece: pick the line by the vertical position.
+   root.addEventListener('click', (e) => {
++    if (readOnly) {
++      return;
++    }
+     if (e.target.closest('a')) {
+       return;  // links keep working; they do not enter edit mode
+     }
+@@ -418,11 +434,25 @@ export function createEditor(root, opts = {}) {
+       renderAll();
+     },
+     getText: () => joinLines(lines, crlf),
++    isCrlf: () => crlf,
++    // Reading mode: every line rendered, no caret line, clicks do not edit.
++    setReadOnly(v) {
++      readOnly = !!v;
++      if (readOnly && active >= 0) {
++        active = -1;
++        renderAll();
++      }
++      root.classList.toggle('read', readOnly);
++    },
++    isReadOnly: () => readOnly,
+     isDirty: () => dirty,
+     markSaved() {
+       dirty = false;
+     },
+     focus() {
++      if (readOnly) {
++        return;
++      }
+       activate(active >= 0 ? active : 0, 'end');
+     },
+   };
+diff --git a/chrome/browser/resources/aero_notes/notes.css b/chrome/browser/resources/aero_notes/notes.css
+index c8b24d6..e2dafd3 100644
+--- a/chrome/browser/resources/aero_notes/notes.css
++++ b/chrome/browser/resources/aero_notes/notes.css
+@@ -1,11 +1,19 @@
+ :root {
+-  --bg: #0b0d14;
+-  --panel: #10131c;
+-  --text: #e7e4f3;
+-  --text2: #9a94b3;
+-  --line: #262a3a;
++  --bg: #13151b;
++  --panel: #171a22;
++  --text: #d8dbe6;
++  --text2: #8d93a8;
++  --line: #2a2e3d;
+   --accent: #b69cff;
+-  --vault-w: 260px;
++  --blue: #6cb4ff;
++  --dim: #5d6378;
++  --row: #b6bbcc;
++  --dir: #cdbfff;
++  --active-bg: #20233a;
++  --bar: #101319;
++  --guide: #323750;
++  --code: #1a1d27;
++  --vault-w: 264px;
+   --mono: "JetBrains Mono", "DejaVu Sans Mono", ui-monospace, monospace;
+ }
+ @media (prefers-color-scheme: light) {
+@@ -16,6 +24,14 @@
+     --text2: #5f5a78;
+     --line: #d9d5e8;
+     --accent: #7a5ce0;
++    --blue: #2b6cb0;
++    --dim: #8a86a0;
++    --row: #3a3650;
++    --dir: #5a3fc0;
++    --active-bg: #e4e0f3;
++    --bar: #e9e7f2;
++    --guide: #cfcae2;
++    --code: #ebe8f5;
+   }
+ }
+ * { box-sizing: border-box; margin: 0; }
+@@ -209,3 +225,149 @@ kbd {
+ .splitter { transition: background 0.1s; }
+ .node:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+ .node.dir { font-family: var(--mono); font-size: 12px; }
++
++/* F2B: lateral com modos, abas de notas, faixa de estado, breadcrumb, título
++   grande e barra de status (mockup theming/1/notes-f2b). */
++svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5;
++      stroke-linecap: round; stroke-linejoin: round; flex: none; }
++button { font-family: inherit; }
++.sp { flex: 1; }
++.modes { border-bottom: 1px solid var(--line); display: flex; height: 34px; }
++.mode {
++  align-items: center; background: none; border: 0; color: var(--text2);
++  display: flex; flex: 1; font: 10.5px var(--mono); gap: 6px; justify-content: center;
++  letter-spacing: 0.08em; text-transform: uppercase;
++}
++.mode:disabled { opacity: 0.4; }
++.mode.on { background: var(--bg); box-shadow: inset 0 -2px 0 var(--accent); color: var(--accent); }
++.mode:not(:disabled):not(.on):hover { color: var(--text); }
++.mode:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
++.vault-actions { align-items: center; gap: 4px; }
++.vault-actions .vault-pick {
++  align-items: center; display: flex; flex: none; gap: 5px; height: 26px;
++  justify-content: center; min-width: 26px; padding: 0 7px;
++}
++.vault-actions .vault-pick.hot { border-color: var(--text2); color: var(--text); }
++.vault-actions .vault-pick:disabled { opacity: 0.4; }
++.tree { padding: 6px 0; }
++.tree .empty { padding: 8px 12px; }
++.node {
++  align-items: center; color: var(--row); display: flex; font-family: var(--mono);
++  font-size: 12px; height: 24px; padding: 0; position: relative; white-space: nowrap;
++}
++.node.dir { color: var(--dir); }
++.node .g { flex: none; height: 14px; margin-left: 8px; position: relative; width: 14px; }
++.node .g::before {
++  border: 4px solid transparent; border-left: 6px solid var(--text2); border-right: 0;
++  content: ""; left: 4px; position: absolute; top: 3px;
++}
++.node[aria-expanded="true"] .g::before {
++  border: 4px solid transparent; border-bottom: 0; border-top: 6px solid var(--text2);
++  left: 3px; top: 5px;
++}
++.node .ind { border-left: 1px dashed var(--guide); flex: none; height: 24px; margin-left: 6px; width: 16px; }
++.node .ind + .ind, .node .ind + .g { margin-left: 0; }
++.node .nm { overflow: hidden; padding-left: 3px; text-overflow: ellipsis; }
++.node.file .nm { padding-left: 6px; }
++.node .nm i { color: var(--dim); font-style: normal; }
++.node .cnt { color: var(--dim); font-size: 10px; margin-left: auto; margin-right: 12px; padding-left: 6px; }
++.node.active { background: var(--active-bg); box-shadow: inset 2px 0 0 var(--accent); color: var(--text); }
++.node.active.file { font-weight: 400; }
++.node.muted .nm { opacity: 0.6; }
++.tagpane { flex: 1; min-height: 0; overflow: auto; padding: 6px 0; }
++.tagpane[hidden] { display: none; }
++.tag-row {
++  align-items: center; color: var(--dir); cursor: pointer; display: flex;
++  font: 12px var(--mono); gap: 6px; height: 24px; padding: 0 12px;
++}
++.tag-row:hover, .tag-row:focus-visible { background: var(--line); outline: none; }
++.tag-row .cnt { color: var(--dim); font-size: 10px; margin-left: auto; }
++.tag-note { color: var(--row); cursor: pointer; font: 12px var(--mono); height: 22px; overflow: hidden; padding: 0 12px 0 28px; text-overflow: ellipsis; white-space: nowrap; }
++.tag-note:hover, .tag-note:focus-visible { background: var(--line); outline: none; }
++.vfoot { border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 7px; padding: 8px 10px; }
++.vfoot .vault-foot { border: 0; padding: 0; flex-wrap: nowrap; gap: 4px; white-space: nowrap; font-size: 9.5px; letter-spacing: 0; }
++.vfoot kbd { font-size: 9.5px; padding: 0 3px; }
++.vsel { align-items: center; background: var(--bg); border: 1px solid var(--line); display: flex; gap: 8px; height: 28px; padding: 0 8px; }
++.vsel .lbl { font-size: 10px; }
++.vsel .vault-name { color: var(--accent); flex: 1; font-size: 12px; font-weight: 600; min-width: 0; }
++.vsel .r { align-items: center; color: var(--text2); display: flex; gap: 2px; }
++.vault-pick.icon { align-items: center; border: 0; display: flex; height: 22px; justify-content: center; padding: 0; width: 22px; }
++.vault-pick.flat { border-color: transparent; }
++/* abas */
++.tabs { background: var(--bar); border-bottom: 1px solid var(--line); display: flex; flex: none; height: 34px; }
++.tablist { display: flex; min-width: 0; overflow: hidden; }
++.nt {
++  align-items: center; background: none; border: 0; border-right: 1px solid var(--line);
++  color: var(--text2); cursor: pointer; display: flex; flex: none; font: 12px var(--mono);
++  gap: 8px; max-width: 220px; min-width: 130px; padding: 0 12px; position: relative;
++}
++.nt .lb { flex: 1; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
++.nt .dd { color: var(--accent); display: none; font-size: 9px; }
++.nt.dirty .dd { display: inline; }
++.nt .x { background: none; border: 0; color: var(--dim); cursor: pointer; font: inherit; padding: 0 2px; }
++.nt .x:hover { color: var(--text); }
++.nt.act { background: var(--bg); box-shadow: inset 0 2px 0 var(--accent); color: var(--text); }
++.nt.act::after { background: var(--bg); bottom: -1px; content: ""; height: 1px; left: 0; position: absolute; right: 0; }
++.nt:focus-visible, .nt .x:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
++.tab-plus { align-items: center; background: none; border: 0; color: var(--text2); display: flex; flex: none; padding: 0 12px; }
++.tab-plus:disabled { opacity: 0.4; }
++.tabs .note-state { align-self: center; margin: 0 10px; }
++.tabs .btns { align-items: center; display: flex; gap: 6px; padding-right: 12px; }
++.tabs .btns .vault-pick { line-height: 20px; padding: 0 8px; }
++.note-state { font-size: 11px; line-height: 18px; }
++.note-state:empty { display: none; }
++.note-state.dirty { border-color: var(--accent); }
++.crumbbar { align-items: center; border-bottom: 1px solid var(--line); display: flex; flex: none; height: 32px; padding: 0 24px; }
++.crumbbar .crumbs { color: var(--text2); flex: 1; max-width: none; min-width: 0; }
++.crumbs .vlabel { color: var(--accent); margin-right: 8px; }
++.crumbs .sep { color: var(--accent); opacity: 0.7; padding: 0 7px; }
++.crumbs .cur { color: var(--text); }
++.crumbbar .r { align-items: center; display: flex; gap: 8px; }
++.crumbbar .vault-pick { padding: 0 6px; }
++/* documento */
++.editor { padding: 36px 24px 0; }
++.editor > * { max-width: 760px; }
++.doc-head[hidden], .props[hidden] { display: none; }
++.doc-head h1 {
++  font: 700 30px/1.2 var(--mono); letter-spacing: -0.01em; margin-bottom: 6px;
++  overflow-wrap: anywhere;
++}
++.doc-head h1::before { color: var(--accent); content: "# "; opacity: 0.75; }
++.props { align-items: center; color: var(--text2); display: flex; flex-wrap: wrap; font: 11.5px var(--mono); gap: 8px; margin: 2px 0 18px; }
++.props .tag { border: 1px solid var(--line); color: var(--dir); line-height: 18px; padding: 0 7px; }
++.md h2, .md h3 { font-family: var(--mono); }
++.md.read .piece { cursor: default; }
++/* barra de status */
++.note-foot {
++  align-items: stretch; background: var(--bar); border-top: 1px solid var(--line);
++  color: var(--text2); flex-wrap: nowrap; font-size: 11px; gap: 0; height: 30px;
++  justify-content: flex-start; padding: 0; white-space: nowrap;
++}
++.note-foot > * {
++  align-items: center; border: 0; border-right: 1px solid var(--line); display: flex;
++  gap: 6px; padding: 0 14px;
++}
++.note-foot > [hidden] { display: none; }
++.note-foot > .sp { border: 0; flex: 1; padding: 0; }
++.note-foot > :last-child { border-right: 0; }
++.note-foot b { color: var(--text); font-weight: 500; }
++.sb-mode { background: var(--accent); color: #14101f; font-weight: 700; letter-spacing: 0.06em; }
++.sb-mode.ro { background: var(--line); color: var(--text2); }
++.sb-back { background: none; color: var(--blue); cursor: pointer; font: inherit; }
++.sb-back:disabled { cursor: default; opacity: 0.6; }
++.sb-path { overflow: hidden; text-overflow: ellipsis; }
++/* estado vazio */
++.editor > .empty-state { max-width: 560px; margin-top: 54px; line-height: 2; padding: 18px 22px; }
++.empty-state p { margin: 0; }
++.empty-state kbd { display: inline-block; margin-right: 12px; min-width: 64px; text-align: center; }
++.empty-state .rec { border-top: 1px dashed var(--line); color: var(--text2); font: 11px/1.9 var(--mono); margin-top: 10px; padding-top: 8px; }
++.empty-state .rec-t { text-transform: uppercase; font-size: 10px; }
++.empty-state .rec-row { align-items: center; background: none; border: 0; color: var(--text2); cursor: pointer; display: flex; font: inherit; gap: 8px; text-align: left; width: 100%; }
++.empty-state .rec-row:hover, .empty-state .rec-row:focus-visible { color: var(--text); outline: none; }
++.empty-state .rec-row span:last-child { margin-left: auto; }
++.tablist { overflow-x: auto; scrollbar-width: none; }
++.editor > .md { padding-bottom: 48px; }
++.tag-notes[hidden], .tagpane [hidden] { display: none; }
++.md h2::before { color: var(--accent); content: "## "; opacity: 0.6; }
++.md h3::before { color: var(--accent); content: "### "; opacity: 0.6; }
++.node.file > .nm:first-child { padding-left: 25px; }
+diff --git a/chrome/browser/resources/aero_notes/notes.html b/chrome/browser/resources/aero_notes/notes.html
+index 4262fe9..0478db4 100644
+--- a/chrome/browser/resources/aero_notes/notes.html
++++ b/chrome/browser/resources/aero_notes/notes.html
+@@ -10,21 +10,34 @@
+ <body>
+ <div class="app" id="app">
+   <aside class="vault" id="vault" aria-label="vault">
+-    <header class="vault-head">
+-      <span class="lbl">vault</span>
+-      <span class="vault-name" id="vaultName">vault</span>
+-      <button class="vault-pick" id="vaultPick" type="button" disabled
+-          title="escolher pasta (ainda não disponível)">escolher pasta</button>
+-    </header>
++    <div class="modes" id="modes" role="tablist" aria-label="modo da lateral">
++      <button class="mode on" id="modeFiles" data-mode="files" type="button"
++          role="tab" aria-selected="true">
++        <svg viewBox="0 0 16 16"><path d="M2 4.5h4l1.5 1.5H14v7H2z"/></svg>arquivos</button>
++      <button class="mode" id="modeSearch" data-mode="search" type="button"
++          role="tab" aria-selected="false" disabled>
++        <svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4"/><path d="M10 10l4 4"/></svg>buscar</button>
++      <button class="mode" id="modeTags" data-mode="tags" type="button"
++          role="tab" aria-selected="false" disabled>
++        <svg viewBox="0 0 16 16"><path d="M6 2L5 14M11 2l-1 12M2.5 6h11M2 10h11"/></svg>tags</button>
++    </div>
+     <div class="vault-actions" role="toolbar" aria-label="ações da vault">
+-      <button class="vault-pick" id="btnNew" type="button" disabled
+-          title="nova nota (Ctrl+N)">+ nota</button>
++      <button class="vault-pick hot" id="btnNew" type="button" disabled
++          title="nova nota (Ctrl+N)">
++        <svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>nota</button>
+       <button class="vault-pick" id="btnNewDir" type="button" disabled
+-          title="nova pasta: ainda não disponível (o backend só cria notas)">+ pasta</button>
+-      <button class="vault-pick" id="btnFind" type="button" disabled
+-          title="buscar na vault (Ctrl+K)">buscar</button>
++          title="nova pasta: ainda não disponível (o backend só cria notas)">
++        <svg viewBox="0 0 16 16"><path d="M2 4.5h4l1.5 1.5H14v7H2z"/></svg>pasta</button>
++      <span class="sp"></span>
++      <button class="vault-pick icon" id="btnSort" type="button" disabled
++          title="ordenar: nome A→Z (ordenar por data precisa de backend novo)"
++          aria-label="ordenar">
++        <svg viewBox="0 0 16 16"><path d="M5 3v10M2.5 10.5L5 13l2.5-2.5M11 13V3M8.5 5.5L11 3l2.5 2.5"/></svg></button>
++      <button class="vault-pick icon" id="btnCollapse" type="button" disabled
++          title="recolher todas as pastas" aria-label="recolher todas as pastas">
++        <svg viewBox="0 0 16 16"><path d="M4 6l4-3 4 3M4 10l4 3 4-3"/></svg></button>
+     </div>
+-    <div class="search">
++    <div class="search" id="searchBox" hidden>
+       <input id="search" type="search" disabled spellcheck="false"
+           placeholder="buscar na vault"
+           aria-label="buscar na vault">
+@@ -33,30 +46,72 @@
+     <nav class="tree" id="tree" role="tree" aria-label="arquivos da vault">
+       <p class="empty">nenhuma vault escolhida</p>
+     </nav>
+-    <footer class="vault-foot" id="vaultFoot">
+-      <span><kbd>Ctrl+S</kbd> salvar</span>
+-      <span><kbd>Ctrl+N</kbd> nova nota</span>
+-      <span><kbd>Ctrl+K</kbd> buscar</span>
+-    </footer>
++    <nav class="tagpane" id="tagPane" aria-label="tags da vault" hidden></nav>
++    <div class="vfoot">
++      <div class="vault-foot" id="vaultFoot">
++        <span><kbd>Ctrl+S</kbd> salvar</span>
++        <span><kbd>Ctrl+N</kbd> nova</span>
++        <span><kbd>Ctrl+K</kbd> buscar</span>
++      </div>
++      <div class="vsel">
++        <span class="lbl">vault</span>
++        <b class="vault-name" id="vaultName">vault</b>
++        <span class="r">
++          <button class="vault-pick icon" id="btnSwap" type="button" disabled
++              title="trocar de vault: a lista de vaults precisa de backend novo"
++              aria-label="trocar de vault">
++            <svg viewBox="0 0 16 16"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"/></svg></button>
++          <button class="vault-pick icon" id="vaultPick" type="button" disabled
++              title="escolher pasta (ainda não disponível)" aria-label="escolher pasta">
++            <svg viewBox="0 0 16 16"><path d="M2 4.5h4l1.5 1.5H14v7H2z"/></svg></button>
++        </span>
++      </div>
++    </div>
+   </aside>
+   <div class="splitter" id="splitter" role="separator"
+       aria-orientation="vertical" aria-label="redimensionar vault" tabindex="0"></div>
+   <main class="note" id="note">
+-    <header class="note-head">
+-      <span class="crumbs" id="crumbs" aria-label="caminho da nota"></span>
+-      <span class="note-title" id="noteTitle">sem nota aberta</span>
+-      <span class="note-state" id="noteState" role="status"></span>
+-      <button class="vault-pick" id="btnSave" type="button" disabled
+-          title="salvar (Ctrl+S)">salvar</button>
+-      <button class="vault-pick" id="btnRename" type="button" disabled>renomear</button>
+-      <button class="vault-pick" id="btnDelete" type="button" disabled>apagar</button>
++    <header class="tabs" id="tabsBar">
++      <div class="tablist" id="tabList" role="tablist" aria-label="notas abertas"></div>
++      <button class="tab-plus" id="btnTabNew" type="button" disabled
++          title="nova nota (Ctrl+N)" aria-label="nova nota">
++        <svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg></button>
++      <span class="sp"></span>
++      <span class="note-state" id="noteState" role="status">sem nota aberta</span>
++      <span class="btns">
++        <button class="vault-pick" id="btnSave" type="button" disabled
++            title="salvar (Ctrl+S)">salvar</button>
++        <button class="vault-pick" id="btnRename" type="button" disabled>renomear</button>
++        <button class="vault-pick" id="btnDelete" type="button" disabled>apagar</button>
++      </span>
+     </header>
++    <div class="crumbbar">
++      <span class="crumbs" id="crumbs" aria-label="caminho da nota"></span>
++      <span class="r">
++        <button class="vault-pick flat" id="btnRead" type="button" disabled
++            title="alternar entre editar e ler">editar ⇄ ler</button>
++        <button class="vault-pick flat" id="btnMore" type="button" disabled
++            title="mais ações: ainda não disponível" aria-label="mais ações">⋯</button>
++      </span>
++    </div>
+     <div class="banner" id="banner" role="alert" hidden></div>
+     <div class="editor" id="editor">
++      <header class="doc-head" id="docHead" hidden>
++        <h1 id="noteTitle">sem nota aberta</h1>
++        <div class="props" id="noteTags" hidden></div>
++      </header>
+       <p class="hint">Pick a vault folder to start.</p>
+       <button class="vault-pick empty-pick" id="emptyPick" type="button">Choose folder</button>
+     </div>
+-    <footer class="note-foot">
++    <footer class="note-foot" id="statusBar">
++      <span class="sb-mode ro" id="sbMode">VAULT</span>
++      <span class="sb-path" id="sbPath"></span>
++      <span class="sp"></span>
++      <button class="sb-back" id="sbBack" type="button" hidden></button>
++      <span id="sbWords" hidden></span>
++      <span id="sbChars" hidden></span>
++      <span id="sbPos" hidden></span>
++      <span id="sbEnc" hidden>UTF-8</span>
+       <span id="noteStats"></span>
+     </footer>
+   </main>
+diff --git a/chrome/browser/resources/aero_notes/notes.js b/chrome/browser/resources/aero_notes/notes.js
+index d4c5efb..a911553 100644
+--- a/chrome/browser/resources/aero_notes/notes.js
++++ b/chrome/browser/resources/aero_notes/notes.js
+@@ -37,7 +37,7 @@ function initSplitter() {
+     }
+     splitter.classList.remove('dragging');
+   };
+-  splitter.addEventListener('dblclick', () => setVaultWidth(260));
++  splitter.addEventListener('dblclick', () => setVaultWidth(264));
+   splitter.addEventListener('pointerup', stop);
+   splitter.addEventListener('pointercancel', stop);
+   splitter.addEventListener('keydown', (e) => {
+@@ -93,11 +93,28 @@ const noteTitle = document.getElementById('noteTitle');
+ const vaultName = document.getElementById('vaultName');
+ const vaultPick = document.getElementById('vaultPick');
+ const emptyPick = document.getElementById('emptyPick');
+-const emptyNodes = Array.from(editor.childNodes);
++const docHead = document.getElementById('docHead');
++const noteTags = document.getElementById('noteTags');
++// The "pick a vault" placeholder shown while there is no vault.
++const emptyNodes = Array.from(editor.childNodes).filter((n) => n !== docHead);
+ const noteState = document.getElementById('noteState');
+ const banner = document.getElementById('banner');
+ const btnNew = document.getElementById('btnNew');
+-const btnFind = document.getElementById('btnFind');
++const btnSort = document.getElementById('btnSort');
++const btnCollapse = document.getElementById('btnCollapse');
++const btnTabNew = document.getElementById('btnTabNew');
++const btnRead = document.getElementById('btnRead');
++const tabList = document.getElementById('tabList');
++const tagPane = document.getElementById('tagPane');
++const searchBox = document.getElementById('searchBox');
++const modeBtns = Array.from(document.querySelectorAll('.mode'));
++const sbMode = document.getElementById('sbMode');
++const sbPath = document.getElementById('sbPath');
++const sbBack = document.getElementById('sbBack');
++const sbWords = document.getElementById('sbWords');
++const sbChars = document.getElementById('sbChars');
++const sbPos = document.getElementById('sbPos');
++const sbEnc = document.getElementById('sbEnc');
+ const crumbs = document.getElementById('crumbs');
+ const noteStats = document.getElementById('noteStats');
+ const search = document.getElementById('search');
+@@ -115,6 +132,18 @@ let needCheck = false;  // external-change check postponed (saving / banner)
+ let dismissedMtime = -1;  // disk version the user already answered about
+ let goneNotified = '';
+ let conflict = false;  // a save hit a disk change and is not resolved yet
++// Open notes. Each tab keeps its own editor (and so its unsaved text); the
++// globals above (current, mtime, doc, conflict, ...) mirror the active tab.
++const tabs = [];
++let activeTab = null;
++let mode = 'files';  // side panel: files | search | tags
++let sortDesc = false;
++let caret = {line: 1, col: 1};
++const LS_RECENT = 'aero.notes.recent';
++const LS_SORT = 'aero.notes.sort';
++let vaultKey = '';
++let asking = false;  // an inline question is open: tab changes wait
++const RECENT_MAX = 8;
+ 
+ const STATUS_TEXT = {
+   conflict: 'o arquivo mudou no disco',
+@@ -140,6 +169,40 @@ function baseName(path) {
+   return path.slice(path.lastIndexOf('/') + 1);
+ }
+ 
++function span(cls, text) {
++  const e = document.createElement('span');
++  e.className = cls;
++  if (text !== undefined) {
++    e.textContent = text;
++  }
++  return e;
++}
++
++const collator = new Intl.Collator(undefined, {numeric: true, sensitivity: 'base'});
++
++// Folders first, then names (numeric aware); the button flips the order.
++function sortEntries(entries) {
++  const dir = sortDesc ? -1 : 1;
++  return entries.slice().sort((a, b) => (b.dir - a.dir) ||
++      dir * collator.compare(baseName(a.path), baseName(b.path)));
++}
++
++function setCount(row, path) {
++  let cnt = row.querySelector('.cnt');
++  const n = vaultIndex ? vaultIndex.counts.get(path) || 0 : -1;
++  if (n < 0) {
++    if (cnt) {
++      cnt.remove();
++    }
++    return;
++  }
++  if (!cnt) {
++    cnt = span('cnt');
++    row.append(cnt);
++  }
++  cnt.textContent = String(n);
++}
++
+ async function fillDir(container, path, depth) {
+   let entries;
+   try {
+@@ -152,13 +215,27 @@ async function fillDir(container, path, depth) {
+   }
+   container.replaceChildren();
+   const nested = [];
+-  for (const entry of entries) {
++  for (const entry of sortEntries(entries)) {
+     const row = document.createElement('div');
+     row.className = entry.dir ? 'node dir' : 'node file';
+     row.setAttribute('role', 'treeitem');
+     row.tabIndex = 0;
+-    row.style.paddingLeft = `${12 + depth * 14}px`;
+-    row.textContent = baseName(entry.path);
++    for (let i = 0; i < depth; i++) {
++      row.append(span('ind'));
++    }
++    const name = baseName(entry.path);
++    const isMd = !entry.dir && name.toLowerCase().endsWith('.md');
++    if (entry.dir) {
++      row.append(span('g'), span('nm', name));
++      setCount(row, entry.path);
++    } else {
++      const nm = span('nm', isMd ? name.slice(0, -3) : name);
++      if (isMd) {
++        nm.append(document.createElement('i'));
++        nm.lastChild.textContent = name.slice(-3);
++      }
++      row.append(nm);
++    }
+     row.dataset.path = entry.path;
+     if (entry.path === current) {
+       row.classList.add('active');
+@@ -187,7 +264,7 @@ async function fillDir(container, path, depth) {
+       if (expanded.has(entry.path)) {
+         nested.push(setOpen(true));
+       }
+-    } else if (entry.path.toLowerCase().endsWith('.md')) {
++    } else if (isMd) {
+       row.addEventListener('click', () => requestOpen(entry.path));
+     } else {
+       row.classList.add('muted');
+@@ -207,28 +284,125 @@ async function fillDir(container, path, depth) {
+   updateStats();
+ }
+ 
+-// Breadcrumb: the note's folders (the file name is #noteTitle).
++// Breadcrumb: "vault:" + the note's folders and file name.
+ function setCrumbs(path) {
+-  crumbs.replaceChildren();
+-  const dirs = path ? path.split('/').slice(0, -1) : [];
+-  for (const d of dirs) {
+-    const s = document.createElement('span');
+-    s.className = 'crumb';
+-    s.textContent = d;
+-    const sep = document.createElement('span');
+-    sep.className = 'sep';
+-    sep.textContent = '/';
+-    crumbs.append(s, sep);
++  crumbs.replaceChildren(span('vlabel', 'vault:'));
++  if (!path) {
++    crumbs.append(span('crumb', '(raiz)'));
++    return;
++  }
++  const parts = path.split('/');
++  parts.forEach((part, i) => {
++    const last = i === parts.length - 1;
++    crumbs.append(span(last ? 'crumb cur' : 'crumb', part));
++    if (!last) {
++      crumbs.append(span('sep', '/'));
++    }
++  });
++}
++
++function setStat(el, n, label) {
++  const b = document.createElement('b');
++  b.textContent = String(n);
++  el.replaceChildren(b, ` ${label}`);
++}
++
++// Tags of a note: front matter ("tags: a, b", "tags: [a, b]" or a "- a"
++// list) and inline #tags outside code. Pure text work, no backend.
++function parseTags(text) {
++  const tags = new Set();
++  let body = text;
++  const fm = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(text);
++  if (fm) {
++    body = text.slice(fm[0].length);
++    const lines = fm[1].split(/\r?\n/);
++    const at = lines.findIndex((l) => /^tags:/i.test(l));
++    if (at >= 0) {
++      const rest = lines[at].replace(/^tags:/i, '').trim();
++      if (rest) {
++        for (const t of rest.replace(/^\[|\]$/g, '').split(/[\s,]+/)) {
++          tags.add(t.replace(/^#|^["']|["']$/g, ''));
++        }
++      } else {
++        for (let i = at + 1; i < lines.length; i++) {
++          const m = /^\s*-\s+(.+)$/.exec(lines[i]);
++          if (!m) {
++            break;
++          }
++          tags.add(m[1].trim().replace(/^#|^["']|["']$/g, ''));
++        }
++      }
++    }
++  }
++  const plain = body.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`/g, ' ');
++  const re = /(^|\s)#([\p{L}\p{N}_/-]*[\p{L}_/-][\p{L}\p{N}_/-]*)/gu;
++  let m;
++  while ((m = re.exec(plain))) {
++    tags.add(m[2]);
++  }
++  tags.delete('');
++  return [...tags];
++}
++
++// Wiki links of a note, lower-cased and without folder, anchor or alias.
++function parseLinks(text) {
++  const out = new Set();
++  const re = /\[\[([^\]\n]+)\]\]/g;
++  let m;
++  while ((m = re.exec(text))) {
++    const name = m[1].split('|')[0].split('#')[0].trim();
++    if (name) {
++      out.add(name.slice(name.lastIndexOf('/') + 1).replace(/\.md$/i, '')
++                  .toLowerCase());
++    }
+   }
++  return out;
+ }
+ 
+-// Status bar: words/characters of the open note, else visible note count.
++let tagsShown = '';
++function renderNoteTags(text) {
++  const tags = text === null ? [] : parseTags(text);
++  const key = tags.join('\0');
++  if (key === tagsShown) {
++    return;
++  }
++  tagsShown = key;
++  noteTags.replaceChildren();
++  noteTags.hidden = !tags.length;
++  if (tags.length) {
++    noteTags.append(span('', 'tags'));
++    for (const t of tags) {
++      noteTags.append(span('tag', t));
++    }
++  }
++}
++
++// Status bar: mode, folder, backlinks, words, characters, line:column,
++// encoding. Without a note: the visible note count.
+ function updateStats() {
+-  if (current && doc) {
++  const open = !!(current && doc);
++  const ro = open && doc.isReadOnly();
++  sbMode.textContent = !open ? 'VAULT' : ro ? 'LER' : 'EDIT';
++  sbMode.classList.toggle('ro', !open || ro);
++  for (const el of [sbBack, sbWords, sbChars, sbPos, sbEnc]) {
++    el.hidden = !open;
++  }
++  noteStats.hidden = open;
++  if (open) {
+     const text = doc.getText();
+-    const words = text.split(/\s+/).filter(Boolean).length;
+-    noteStats.textContent = `${words} palavras · ${text.length} caracteres`;
+-  } else if (vaultTitle) {
++    const dir = dirOf(current).replace(/\/$/, '');
++    sbPath.textContent = dir || '(raiz)';
++    setStat(sbWords, text.split(/\s+/).filter(Boolean).length, 'palavras');
++    setStat(sbChars, text.length, 'caracteres');
++    sbPos.textContent = `L${caret.line}:C${caret.col}`;
++    sbEnc.textContent = `UTF-8 · ${doc.isCrlf() ? 'CRLF' : 'LF'}`;
++    renderBacklinks();
++    renderNoteTags(text);
++    return;
++  }
++  sbPath.textContent = '';
++  renderNoteTags(null);
++  if (vaultTitle) {
+     const n = tree.querySelectorAll('.node.file').length;
+     noteStats.textContent = `${n} notas visíveis`;
+   } else {
+@@ -236,7 +410,38 @@ function updateStats() {
+   }
+ }
+ 
+-// Empty state with the useful shortcuts (DOM only, no innerHTML).
++// --- recent notes (localStorage, per vault; never leaves the page).
++function readRecents() {
++  try {
++    const r = JSON.parse(localStorage.getItem(LS_RECENT) || 'null');
++    if (r && r.vault === vaultKey && Array.isArray(r.items)) {
++      return r.items.filter((i) => i && typeof i.path === 'string');
++    }
++  } catch (e) {
++    // corrupted or blocked storage: no recents
++  }
++  return [];
++}
++
++function writeRecents(items) {
++  try {
++    localStorage.setItem(LS_RECENT, JSON.stringify({vault: vaultKey, items}));
++  } catch (e) {
++    // storage blocked: recents are optional
++  }
++}
++
++function addRecent(path) {
++  writeRecents([{path, ts: Date.now()},
++                ...readRecents().filter((i) => i.path !== path)]
++                   .slice(0, RECENT_MAX));
++}
++
++function dropRecent(path) {
++  writeRecents(readRecents().filter((i) => i.path !== path));
++}
++
++// Empty state with the useful shortcuts and the recent notes (DOM only).
+ function emptyState(title) {
+   const box = document.createElement('div');
+   box.className = 'empty-state';
+@@ -250,15 +455,32 @@ function emptyState(title) {
+     const row = document.createElement('p');
+     const kbd = document.createElement('kbd');
+     kbd.textContent = key;
+-    row.append(kbd, ` ${text}`);
++    row.append(kbd, text);
+     box.append(row);
+   }
++  const recents = readRecents();
++  if (recents.length) {
++    const rec = span('rec');
++    rec.append(span('rec-t', 'recentes'));
++    for (const r of recents) {
++      const row = document.createElement('button');
++      row.type = 'button';
++      row.className = 'rec-row';
++      row.dataset.path = r.path;
++      const dir = dirOf(r.path).replace(/\/$/, '');
++      row.append(span('', baseName(r.path).replace(/\.md$/i, '')),
++                 span('', dir));
++      row.addEventListener('click', () => requestOpen(r.path));
++      rec.append(row);
++    }
++    box.append(rec);
++  }
+   return box;
+ }
+ 
+ function updateState() {
+   const dirty = !!doc && doc.isDirty();
+-  noteState.textContent = !current ? '' :
++  noteState.textContent = !current ? 'sem nota aberta' :
+       conflict ? '! conflito' : dirty ? '● alterado' : 'salvo';
+   noteState.classList.toggle('dirty', dirty && !conflict);
+   noteState.classList.toggle('conflict', !!current && conflict);
+@@ -266,6 +488,8 @@ function updateState() {
+   btnSave.disabled = !current || !dirty;
+   btnRename.disabled = !current;
+   btnDelete.disabled = !current;
++  btnRead.disabled = !current;
++  markTabs();
+ }
+ 
+ // Inline question: resolves with {id, value} of the button pressed, or null
+@@ -279,7 +503,9 @@ function ask(text, buttons, opts = {}) {
+     banner.append(label);
+     let field = null;
+     const ac = new AbortController();
++    asking = true;
+     const done = (v) => {
++      asking = false;
+       ac.abort();
+       banner.hidden = true;
+       banner.replaceChildren();
+@@ -334,29 +560,192 @@ function dirOf(path) {
+   return path.includes('/') ? path.slice(0, path.lastIndexOf('/') + 1) : '';
+ }
+ 
+-// Unsaved edits: save, discard or stay. Resolves true when it is safe to
+-// replace the editor content.
+-async function confirmLeave() {
+-  if (!doc || !doc.isDirty()) {
++// --- open notes (tabs). Each tab owns its editor, so unsaved text survives
++// switching. The module globals (current, mtime, doc, conflict, ...) always
++// mirror the active tab; activate() copies them in and out.
++const stemOf = (path) => baseName(path).replace(/\.md$/i, '');
++
++function stash() {
++  if (activeTab) {
++    Object.assign(activeTab, {mtime, conflict, dismissedMtime, goneNotified,
++                              caret, scroll: editor.scrollTop});
++  }
++}
++
++function activate(t) {
++  if (activeTab && activeTab !== t) {
++    stash();
++  }
++  activeTab = t;
++  current = t ? t.path : '';
++  mtime = t ? t.mtime : 0;
++  doc = t ? t.doc : null;
++  conflict = t ? t.conflict : false;
++  dismissedMtime = t ? t.dismissedMtime : -1;
++  goneNotified = t ? t.goneNotified : '';
++  caret = t ? t.caret : {line: 1, col: 1};
++}
++
++function highlightActive() {
++  for (const n of tree.querySelectorAll('.node.active')) {
++    n.classList.remove('active');
++  }
++  const row = [...tree.querySelectorAll('.node')].find(
++      (n) => n.dataset.path === current);
++  if (row) {
++    row.classList.add('active');
++  }
++}
++
++function markTabs() {
++  for (const t of tabs) {
++    if (t.el) {
++      t.el.classList.toggle('act', t === activeTab);
++      t.el.classList.toggle('dirty', !!t.doc && t.doc.isDirty());
++      t.el.setAttribute('aria-selected', String(t === activeTab));
++    }
++  }
++}
++
++function renderTabs() {
++  tabList.replaceChildren();
++  for (const t of tabs) {
++    const el = document.createElement('div');
++    el.className = 'nt';
++    el.setAttribute('role', 'tab');
++    el.tabIndex = 0;
++    el.dataset.path = t.path;
++    el.title = t.path;
++    const x = document.createElement('button');
++    x.type = 'button';
++    x.className = 'x';
++    x.textContent = '✕';
++    x.setAttribute('aria-label', `fechar ${stemOf(t.path)}`);
++    x.addEventListener('click', (e) => {
++      e.stopPropagation();
++      closeTab(t);
++    });
++    el.append(span('dd', '●'), span('lb', stemOf(t.path)), x);
++    el.addEventListener('click', () => switchTab(t));
++    el.addEventListener('auxclick', (e) => {
++      if (e.button === 1) {
++        closeTab(t);
++      }
++    });
++    el.addEventListener('keydown', (e) => {
++      if (e.target === el && (e.key === 'Enter' || e.key === ' ')) {
++        e.preventDefault();
++        switchTab(t);
++      }
++    });
++    t.el = el;
++    tabList.append(el);
++  }
++  markTabs();
++}
++
++// Puts the active tab's editor in the page.
++function attachView(t) {
++  noteTitle.textContent = stemOf(t.path);
++  docHead.hidden = false;
++  editor.replaceChildren(docHead, t.host);
++  editor.scrollTop = t.scroll || 0;
++  setCrumbs(t.path);
++  highlightActive();
++  tagsShown = '\0';
++  updateState();
++  if (t.el && t.el.scrollIntoView) {
++    t.el.scrollIntoView({block: 'nearest', inline: 'nearest'});
++  }
++  refreshBacklinks();
++}
++
++function clearView() {
++  activate(null);
++  noteTitle.textContent = 'sem nota aberta';
++  docHead.hidden = true;
++  setCrumbs('');
++  highlightActive();
++  editor.replaceChildren(emptyState('nenhuma nota aberta'));
++  updateState();
++}
++
++function switchTab(t) {
++  if (asking || t === activeTab) {
++    return;
++  }
++  activate(t);
++  attachView(t);
++  checkOpenNote();
++}
++
++// Closes a tab; unsaved text is saved or discarded first unless `force`.
++async function closeTab(t, force = false) {
++  if (asking && !force) {
++    return false;
++  }
++  if (!force && t.doc && t.doc.isDirty()) {
++    switchTab(t);
++    const r = await ask(`alterações não salvas em ${baseName(t.path)}.`,
++                        [{id: 'save', label: 'salvar'},
++                         {id: 'discard', label: 'descartar', danger: true}]);
++    if (!r || (r.id === 'save' && !(await save()))) {
++      return false;
++    }
++  }
++  const i = tabs.indexOf(t);
++  if (i < 0) {
++    return true;
++  }
++  tabs.splice(i, 1);
++  renderTabs();
++  if (t === activeTab) {
++    activeTab = null;
++    const next = tabs[i] || tabs[i - 1] || null;
++    if (next) {
++      activate(next);
++      attachView(next);
++    } else {
++      clearView();
++    }
++  }
++  return true;
++}
++
++// Before replacing the whole vault: one question for every unsaved tab.
++async function confirmLeaveAll() {
++  const dirty = tabs.filter((t) => t.doc && t.doc.isDirty());
++  if (!dirty.length) {
+     return true;
+   }
+-  const r = await ask(
+-      `alterações não salvas em ${baseName(current)}.`,
+-      [{id: 'save', label: 'salvar'},
+-       {id: 'discard', label: 'descartar', danger: true}]);
++  const r = await ask(`alterações não salvas em ${dirty.length} nota(s).`,
++                      [{id: 'save', label: 'salvar tudo'},
++                       {id: 'discard', label: 'descartar', danger: true}]);
+   if (!r) {
+     return false;
+   }
+-  return r.id === 'discard' ? true : save();
++  if (r.id === 'discard') {
++    return true;
++  }
++  for (const t of dirty) {
++    switchTab(t);
++    if (!(await save())) {
++      return false;
++    }
++  }
++  return true;
+ }
+ 
+ async function requestOpen(path) {
+-  if (path === current && doc && !doc.isDirty()) {
++  if (asking) {
+     return;
+   }
+-  if (await confirmLeave()) {
+-    await loadNote(path);
++  const t = tabs.find((x) => x.path === path);
++  if (t) {
++    switchTab(t);
++    return;
+   }
++  await loadNote(path);
+ }
+ 
+ async function loadNote(path) {
+@@ -364,55 +753,64 @@ async function loadNote(path) {
+   try {
+     note = await send('readNote', path);
+   } catch (e) {
+-    noteTitle.textContent = e === 'unsupported' ?
+-        `${baseName(path)} (leitura ainda não disponível neste sistema)` :
+-        `${baseName(path)} (não foi possível ler)`;
++    if (e === 'notFound') {
++      dropRecent(path);
++    }
++    notice(e === 'unsupported' ?
++        `${baseName(path)}: leitura ainda não disponível neste sistema` :
++        `${baseName(path)}: não foi possível ler`);
+     return;
+   }
+   showNote(path, note.text, note.mtime);
+ }
+ 
++// Opens `path` in its tab (a new one, or the existing one reloaded).
+ function showNote(path, text, fileMtime) {
+-  current = path;
+-  mtime = fileMtime;
+-  goneNotified = '';
+-  dismissedMtime = -1;
+-  conflict = false;
+-  noteTitle.textContent = baseName(path);
+-  setCrumbs(path);
+-  for (const n of tree.querySelectorAll('.node.active')) {
+-    n.classList.remove('active');
+-  }
+-  const row = [...tree.querySelectorAll('.node')].find(
+-      (n) => n.dataset.path === path);
+-  if (row) {
+-    row.classList.add('active');
+-  }
+-  const host = document.createElement('article');
+-  host.className = 'md live';
+-  editor.replaceChildren(host);
+-  doc = createEditor(host, {
+-    onChange: updateState,
++  let t = tabs.find((x) => x.path === path);
++  const fresh = !t;
++  if (fresh) {
++    t = {path, readOnly: false};
++    tabs.push(t);
++    addRecent(path);
++  }
++  Object.assign(t, {mtime: fileMtime, conflict: false, dismissedMtime: -1,
++                    goneNotified: '', caret: {line: 1, col: 1}, scroll: 0,
++                    backlinks: null});
++  t.host = document.createElement('article');
++  t.host.className = 'md live';
++  activate(t);
++  t.doc = doc = createEditor(t.host, {
++    onChange: () => {
++      if (t === activeTab) {
++        updateState();
++      } else {
++        markTabs();
++      }
++    },
+     onSave: () => save(),
+     onWikilink: openWikilink,
+     loadImage,
++    onCaret: (line, col) => {
++      if (t === activeTab) {
++        caret = {line: Math.max(1, line), col};
++        sbPos.textContent = `L${caret.line}:C${caret.col}`;
++      }
++    },
+   });
++  doc.setReadOnly(t.readOnly);
+   doc.load(text);
+-  editor.scrollTop = 0;
+-  updateState();
++  if (fresh) {
++    renderTabs();
++  }
++  attachView(t);
+ }
+ 
+ function clearNote() {
+-  current = '';
+-  doc = null;
+-  conflict = false;
+-  noteTitle.textContent = 'sem nota aberta';
+-  setCrumbs('');
+-  for (const n of tree.querySelectorAll('.node.active')) {
+-    n.classList.remove('active');
++  if (activeTab) {
++    closeTab(activeTab, true);
++  } else {
++    clearView();
+   }
+-  editor.replaceChildren(emptyState('nenhuma nota aberta'));
+-  updateState();
+ }
+ 
+ // Atomic save with the mtime read when the note was opened. A conflict never
+@@ -433,6 +831,8 @@ async function saveNow(overwrite) {
+     return false;
+   }
+   saving = true;
++  const t = activeTab;
++  const d = doc;
+   const text = doc.getText();
+   const path = current;
+   let r;
+@@ -445,17 +845,19 @@ async function saveNow(overwrite) {
+   }
+   saving = false;
+   if (r.status === 'ok') {
+-    if (path === current) {
+-      mtime = r.mtime;
+-      if (doc.getText() === text) {
+-        doc.markSaved();
+-      }
++    // The user may have switched tabs while the write was in flight.
++    t.mtime = r.mtime;
++    t.conflict = false;
++    if (d.getText() === text) {
++      d.markSaved();
+     }
+-    banner.hidden = true;
+-    if (path === current) {
++    if (t === activeTab) {
++      mtime = r.mtime;
+       conflict = false;
+     }
++    banner.hidden = true;
+     updateState();
++    scanStale = true;
+     return true;
+   }
+   if (r.status === 'conflict') {
+@@ -469,6 +871,7 @@ async function saveNow(overwrite) {
+       const c = await send('createNote', path, text);
+       if (c.status === 'ok') {
+         mtime = c.mtime;
++        activeTab.mtime = c.mtime;
+         doc.markSaved();
+         updateState();
+         refreshTree();
+@@ -520,6 +923,11 @@ async function resolveConflict(path, text) {
+     return false;
+   }
+   await refreshTree();
++  // The text now lives in the copy: the conflicted tab is closed.
++  const old = tabs.find((x) => x.path === path);
++  if (old) {
++    await closeTab(old, true);
++  }
+   showNote(copy, text, c.mtime);
+   return true;
+ }
+@@ -536,7 +944,7 @@ async function refreshTree() {
+ }
+ 
+ async function newNote() {
+-  if (!(await confirmLeave())) {
++  if (asking) {
+     return;
+   }
+   const a = await ask('nome da nova nota (pasta/nome.md):',
+@@ -594,11 +1002,20 @@ async function renameNote() {
+   }
+   // The file keeps its mtime across a rename, so `mtime` stays valid and
+   // unsaved text stays in the editor.
++  const from = current;
+   current = to;
+-  noteTitle.textContent = baseName(to);
++  activeTab.path = to;
++  activeTab.backlinks = null;
++  dropRecent(from);
++  addRecent(to);
++  renderTabs();
++  noteTitle.textContent = stemOf(to);
+   setCrumbs(to);
+   await refreshTree();
++  highlightActive();
+   updateState();
++  scheduleIndex();
++  refreshBacklinks();
+ }
+ 
+ async function deleteNote() {
+@@ -622,12 +1039,36 @@ async function deleteNote() {
+     notice(`não foi possível apagar: ${statusText(r.status)}`);
+     return;
+   }
++  dropRecent(current);
+   clearNote();
+   refreshTree();
++  scheduleIndex();
+ }
+ 
+ btnNew.addEventListener('click', newNote);
+-btnFind.addEventListener('click', focusSearch);
++btnTabNew.addEventListener('click', newNote);
++btnRead.addEventListener('click', () => {
++  if (activeTab && doc) {
++    activeTab.readOnly = !doc.isReadOnly();
++    doc.setReadOnly(activeTab.readOnly);
++    btnRead.setAttribute('aria-pressed', String(activeTab.readOnly));
++    updateStats();
++  }
++});
++btnSort.addEventListener('click', () => {
++  sortDesc = !sortDesc;
++  try {
++    localStorage.setItem(LS_SORT, sortDesc ? 'desc' : 'asc');
++  } catch (e) {
++    // storage blocked: the order only lasts for this page
++  }
++  syncSortButton();
++  refreshTree();
++});
++btnCollapse.addEventListener('click', () => {
++  expanded.clear();
++  refreshTree();
++});
+ btnSave.addEventListener('click', () => save());
+ btnRename.addEventListener('click', renameNote);
+ btnDelete.addEventListener('click', deleteNote);
+@@ -638,7 +1079,7 @@ window.addEventListener('keydown', (e) => {
+   }
+ });
+ window.addEventListener('beforeunload', (e) => {
+-  if (doc && doc.isDirty()) {
++  if (tabs.some((t) => t.doc && t.doc.isDirty())) {
+     e.preventDefault();
+   }
+ });
+@@ -760,13 +1201,13 @@ async function runSearch() {
+   clearTimeout(searchTimer);
+   const q = search.value.trim();
+   const seq = ++searchSeq;
++  if (q.length >= 2 && mode !== 'search') {
++    setMode('search', false);
++  }
+   if (q.length < 2) {
+-    results.hidden = true;
+-    tree.hidden = false;
++    message(results, 'digite ao menos 2 caracteres');
+     return;
+   }
+-  tree.hidden = true;
+-  results.hidden = false;
+   let r;
+   try {
+     r = await send('searchVault', q);
+@@ -818,9 +1259,15 @@ async function syncExternal() {
+   try {
+     clearImageCache();
+     await refreshTree();
+-    if (search.value.trim().length >= 2) {
++    if (mode === 'search' && search.value.trim().length >= 2) {
+       runSearch();
+     }
++    scheduleIndex();
++    scanStale = true;
++    if (mode === 'tags') {
++      renderTagPane();
++    }
++    refreshBacklinks();
+     await checkOpenNote();
+   } finally {
+     syncing = false;
+@@ -911,13 +1358,300 @@ async function startWatch() {
+   vaultName.classList.toggle('nowatch', !ok);
+ }
+ 
++// --- F2B: side panel modes (arquivos / buscar / tags).
++function applyMode() {
++  searchBox.hidden = mode !== 'search';
++  tree.hidden = mode !== 'files';
++  results.hidden = mode !== 'search';
++  tagPane.hidden = mode !== 'tags';
++  for (const b of modeBtns) {
++    const on = b.dataset.mode === mode;
++    b.classList.toggle('on', on);
++    b.setAttribute('aria-selected', String(on));
++  }
++}
++
++function setMode(m, focus = true) {
++  if (mode === m && m !== 'tags') {
++    return;
++  }
++  mode = m;
++  applyMode();
++  if (m === 'search') {
++    if (!results.childElementCount) {
++      message(results, 'digite ao menos 2 caracteres');
++    }
++    if (focus) {
++      search.focus();
++      search.select();
++    }
++  } else if (m === 'tags') {
++    renderTagPane();
++  }
++}
++
++for (const b of modeBtns) {
++  b.addEventListener('click', () => setMode(b.dataset.mode));
++}
++
+ function focusSearch() {
+   if (!search.disabled) {
+-    search.focus();
+-    search.select();
++    mode = '';  // force the switch even when already in search mode
++    setMode('search');
++  }
++}
++
++// --- F2B: vault index (note counts per folder) built from listDir, bounded.
++const MAX_DIRS = 3000;
++const MAX_NOTES = 20000;
++const SCAN_MAX = 500;
++let vaultIndex = null;  // {counts: Map(dir -> notes below it), notes, partial}
++let indexSeq = 0;
++let indexTimer = 0;
++
++async function buildIndex() {
++  const seq = ++indexSeq;
++  const notes = [];
++  let partial = false;
++  let dirs = 0;
++  let level = [''];
++  while (level.length) {
++    const next = [];
++    for (let i = 0; i < level.length && !partial; i += 6) {
++      if (dirs >= MAX_DIRS) {
++        partial = true;
++        break;
++      }
++      const chunk = level.slice(i, i + 6);
++      dirs += chunk.length;
++      const lists = await Promise.all(
++          chunk.map((d) => send('listDir', d).catch(() => [])));
++      if (seq !== indexSeq) {
++        return;
++      }
++      for (const list of lists) {
++        for (const e of list) {
++          if (e.dir) {
++            next.push(e.path);
++          } else if (e.path.toLowerCase().endsWith('.md')) {
++            notes.push(e.path);
++          }
++        }
++      }
++      if (notes.length > MAX_NOTES) {
++        partial = true;
++      }
++    }
++    level = partial ? [] : next;
++  }
++  const counts = new Map();
++  for (const n of notes) {
++    for (let at = n.indexOf('/'); at >= 0; at = n.indexOf('/', at + 1)) {
++      const d = n.slice(0, at);
++      counts.set(d, (counts.get(d) || 0) + 1);
++    }
++  }
++  vaultIndex = {counts, notes, partial};
++  scanStale = true;
++  for (const row of tree.querySelectorAll('.node.dir')) {
++    setCount(row, row.dataset.path);
++  }
++  if (mode === 'tags') {
++    renderTagPane();
++  }
++}
++
++function scheduleIndex(delay = 1500) {
++  clearTimeout(indexTimer);
++  indexTimer = setTimeout(buildIndex, delay);
++}
++
++// --- F2B: tags of the vault, read from the notes themselves (readNote, at
++// most SCAN_MAX notes, six at a time). Rebuilt only after a change.
++let scanStale = true;
++let scan = new Map();  // path -> tags
++let scanPartial = false;
++let tagSeq = 0;
++const openTags = new Set();
++
++async function scanNotes(seq) {
++  const paths = vaultIndex.notes.slice().sort().slice(0, SCAN_MAX);
++  scanPartial = vaultIndex.partial || vaultIndex.notes.length > SCAN_MAX;
++  const fresh = new Map();
++  for (let i = 0; i < paths.length; i += 6) {
++    const part = await Promise.all(paths.slice(i, i + 6).map(
++        (p) => send('readNote', p).then((n) => [p, parseTags(n.text)],
++                                        () => null)));
++    if (seq !== tagSeq || mode !== 'tags') {
++      return false;
++    }
++    for (const x of part) {
++      if (x && x[1].length) {
++        fresh.set(x[0], x[1]);
++      }
++    }
+   }
++  scan = fresh;
++  scanStale = false;
++  return true;
+ }
+ 
++async function renderTagPane() {
++  const seq = ++tagSeq;
++  if (!vaultIndex) {
++    message(tagPane, 'lendo a vault…');
++    await new Promise((r) => {
++      const t = setInterval(() => {
++        if (vaultIndex || seq !== tagSeq) {
++          clearInterval(t);
++          r();
++        }
++      }, 100);
++    });
++    if (seq !== tagSeq) {
++      return;
++    }
++  }
++  if (scanStale) {
++    message(tagPane, 'lendo as notas…');
++    if (!(await scanNotes(seq))) {
++      return;
++    }
++  }
++  const by = new Map();
++  for (const [path, tags] of scan) {
++    for (const t of tags) {
++      by.set(t, [...(by.get(t) || []), path]);
++    }
++  }
++  tagPane.replaceChildren();
++  if (!by.size) {
++    message(tagPane, 'nenhuma tag nas notas');
++  }
++  const names = [...by.keys()].sort(
++      (a, b) => by.get(b).length - by.get(a).length || collator.compare(a, b));
++  for (const t of names) {
++    const row = document.createElement('div');
++    row.className = 'tag-row';
++    row.setAttribute('role', 'button');
++    row.tabIndex = 0;
++    row.dataset.tag = t;
++    row.append(span('', `#${t}`), span('cnt', String(by.get(t).length)));
++    const list = document.createElement('div');
++    list.hidden = !openTags.has(t);
++    const fill = () => {
++      list.replaceChildren();
++      for (const p of by.get(t).sort()) {
++        const n = span('tag-note', stemOf(p));
++        n.dataset.path = p;
++        n.title = p;
++        n.tabIndex = 0;
++        n.addEventListener('click', () => requestOpen(p));
++        n.addEventListener('keydown', (e) => {
++          if (e.key === 'Enter') {
++            requestOpen(p);
++          }
++        });
++        list.append(n);
++      }
++    };
++    if (!list.hidden) {
++      fill();
++    }
++    row.addEventListener('click', () => {
++      list.hidden = !list.hidden;
++      if (list.hidden) {
++        openTags.delete(t);
++      } else {
++        openTags.add(t);
++        fill();
++      }
++    });
++    row.addEventListener('keydown', (e) => {
++      if (e.key === 'Enter' || e.key === ' ') {
++        e.preventDefault();
++        row.click();
++      }
++    });
++    tagPane.append(row, list);
++  }
++  if (scanPartial) {
++    message(tagPane, `parcial: só as primeiras ${SCAN_MAX} notas foram lidas`);
++  }
++}
++
++// --- F2B: backlinks of the open note. searchVault narrows the candidates
++// ("[[name"), readNote confirms a real [[link]] (at most 60 notes).
++function renderBacklinks() {
++  const n = activeTab && activeTab.backlinks;
++  sbBack.textContent = `← ${n ? n.length : 0} backlinks`;
++  sbBack.disabled = !n || !n.length;
++}
++
++let backSeq = 0;
++async function refreshBacklinks() {
++  const t = activeTab;
++  if (!t) {
++    return;
++  }
++  const seq = ++backSeq;
++  const stem = stemOf(t.path).toLowerCase();
++  let r;
++  try {
++    r = await send('searchVault', `[[${stemOf(t.path)}`);
++  } catch (e) {
++    return;
++  }
++  const found = [];
++  for (const hit of r.hits.slice(0, 60)) {
++    if (hit.path === t.path || !hit.path.toLowerCase().endsWith('.md')) {
++      continue;
++    }
++    let ok = parseLinks(hit.snippet || '').has(stem);
++    if (!ok) {
++      try {
++        ok = parseLinks((await send('readNote', hit.path)).text).has(stem);
++      } catch (e) {
++        ok = false;
++      }
++    }
++    if (seq !== backSeq || t !== activeTab) {
++      return;
++    }
++    if (ok) {
++      found.push(hit.path);
++    }
++  }
++  if (seq === backSeq && t === activeTab) {
++    t.backlinks = found;
++    renderBacklinks();
++  }
++}
++
++sbBack.addEventListener('click', () => {
++  if (!activeTab || !activeTab.backlinks || !activeTab.backlinks.length) {
++    return;
++  }
++  focusSearch();
++  search.value = '';
++  searchSeq++;
++  renderHits(results, {hits: activeTab.backlinks.map((path) => ({path})),
++                       truncated: false});
++  const h = span('hint', `backlinks de ${stemOf(activeTab.path)}`);
++  results.prepend(h);
++});
++
++function syncSortButton() {
++  btnSort.title = `ordenar: nome ${sortDesc ? 'Z→A' : 'A→Z'} ` +
++      '(ordenar por data precisa de backend novo)';
++}
++try {
++  sortDesc = localStorage.getItem(LS_SORT) === 'desc';
++} catch (e) {
++  sortDesc = false;
++}
++syncSortButton();
++
+ // Ctrl+K / Ctrl+Shift+F: search. Ctrl+N: new note (the browser may reserve
+ // it for a new window; the button works either way).
+ window.addEventListener('keydown', (e) => {
+@@ -934,51 +1668,66 @@ window.addEventListener('keydown', (e) => {
+   }
+ });
+ 
++function setVaultControls(on) {
++  for (const b of [btnNew, btnSort, btnCollapse, btnTabNew, ...modeBtns]) {
++    b.disabled = !on;
++  }
++  search.disabled = !on;
++}
++
+ function showVault(info) {
+   if (!info || !info.path) {
+     vaultName.textContent = 'vault';
+-    btnNew.disabled = true;
+-    btnFind.disabled = true;
++    setVaultControls(false);
+     vaultTitle = '';
++    vaultKey = '';
++    vaultIndex = null;
++    mode = 'files';
++    applyMode();
+     updateStats();
+     document.title = 'o: notas';
+-    search.disabled = true;
+     message(tree, 'nenhuma vault escolhida');
+     editor.replaceChildren(...emptyNodes);
++    setCrumbs('');
+     return;
+   }
+-  if (!current) {
+-    editor.replaceChildren(emptyState('nenhuma nota aberta'));
+-  }
++  vaultKey = info.path;
++  vaultIndex = null;
+   vaultName.textContent = info.name || info.path;
+   vaultName.title = info.path;
+   // Tab title: always the vault, never the open file.
+   vaultTitle = info.name || info.path;
+   document.title = `o: ${vaultTitle}`;
+-  updateStats();
+-  btnNew.disabled = false;
+-  btnFind.disabled = false;
+-  search.disabled = false;
++  setVaultControls(true);
+   search.value = '';
+-  results.hidden = true;
+-  tree.hidden = false;
++  results.replaceChildren();
++  mode = 'files';
++  applyMode();
++  if (!current) {
++    docHead.hidden = true;
++    setCrumbs('');
++    editor.replaceChildren(emptyState('nenhuma nota aberta'));
++  }
++  updateState();
+   clearImageCache();
+   fillDir(tree, '', 0);
++  buildIndex();
+   startWatch();
+ }
+ 
+ vaultPick.disabled = false;
+ vaultPick.title = 'escolher a pasta da vault';
+ async function pickVault() {
+-  if (!(await confirmLeave())) {
++  if (!(await confirmLeaveAll())) {
+     return;
+   }
+   const info = await send('pickVault');
+   if (info) {
+-    current = '';
+-    doc = null;
++    tabs.length = 0;
++    activeTab = null;
++    activate(null);
++    renderTabs();
+     expanded.clear();
+-    updateState();
+     showVault(info);
+   }
+ }

@@ -1,0 +1,784 @@
+aerographene: terminal — t: colado/solto não roda sozinho; canal preso à navegação (v0.3, correção do review da C6).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/terminal-c6.patch e aerographene/terminal-c6-page.patch.
+Propósito: (1) o comando de "t: <comando>" só é enviado com Enter quando o
+texto foi digitado na command bar. aerographene::TypedInputTracker
+(aero_terminal_command.h), alimentado pelo OmniboxEditModel, marca como não
+digitado o que veio por colagem (PasteState), inserção de vários caracteres
+numa edição (clique do meio, IME), SetUserText (arrastar e soltar,
+restauração, ações); "colar e acessar" chega com pasted_text. OpenMatch marca
+o match (additional_info "aero_terminal_typed"); ChromeOmniboxClient passa
+run ao canal; a página manda "\r" só com run === true. (2) O comando pendente
+fica preso ao id da navegação que abre chrome://terminal/?new=1
+(terminal_launch_watcher: WebContentsObserver) e cai se ela falhar, for
+cancelada ou a aba navegar para outro lugar; só é entregue depois que ela
+confirmou, e TerminalHandler::HandleStart só o pega com a página em ?new=1.
+Testes: AeroTerminalCommandTest.*, TerminalLaunchTest.*.
+
+--- a/components/omnibox/browser/aero_terminal_command.h
++++ b/components/omnibox/browser/aero_terminal_command.h
+@@ -26,6 +26,39 @@
+ // with or without a command.
+ std::string TerminalCommandUrl();
+ 
++// Fatia C6b: "t: <command>" only runs by itself (Enter included) when the
++// command bar text was typed key by key. Text that arrived by paste (Ctrl+V,
++// menu, middle click), drag and drop, paste-and-go, or was set by the
++// browser (SetUserText, tab switch) is only written at the prompt and the
++// user confirms with Enter. OmniboxEditModel feeds this tracker; it errs on
++// the side of "not typed" (an IME commit of several characters counts as not
++// typed, which only costs one extra Enter).
++class TypedInputTracker {
++ public:
++  // An edit of the command bar text. `pasted`: the edit was a paste the
++  // model knows about. More than one unit added in one edit is also treated
++  // as an insertion that was not typed. Emptying the text starts over.
++  void OnTextChanged(std::u16string_view old_text,
++                     std::u16string_view new_text,
++                     bool pasted);
++  // Text set at once (drop, restore, actions): not typed unless empty.
++  void OnTextSet(std::u16string_view text);
++  // Command bar reverted to the page URL.
++  void Reset();
++  bool typed() const { return !untyped_; }
++
++ private:
++  bool untyped_ = false;
++};
++
++// AutocompleteMatch::additional_info key OmniboxEditModel::OpenMatch sets to
++// "1" when the text was typed and not paste-and-go; ChromeOmniboxClient only
++// lets the command run by itself when it finds it.
++inline constexpr char kTerminalTypedInfoKey[] = "aero_terminal_typed";
++bool TerminalInputWasTyped(std::u16string_view pasted_text,
++                           bool model_says_pasted,
++                           const TypedInputTracker& tracker);
++
+ }  // namespace aerographene
+ 
+ #endif  // COMPONENTS_OMNIBOX_BROWSER_AERO_TERMINAL_COMMAND_H_
+--- a/components/omnibox/browser/aero_terminal_command.cc
++++ b/components/omnibox/browser/aero_terminal_command.cc
+@@ -31,4 +31,28 @@
+   return "chrome://terminal/?new=1";
+ }
+ 
++void TypedInputTracker::OnTextChanged(std::u16string_view old_text,
++                                      std::u16string_view new_text,
++                                      bool pasted) {
++  if (new_text.empty()) {
++    untyped_ = false;
++  } else if (pasted || new_text.size() > old_text.size() + 1) {
++    untyped_ = true;
++  }
++}
++
++void TypedInputTracker::OnTextSet(std::u16string_view text) {
++  untyped_ = !text.empty();
++}
++
++void TypedInputTracker::Reset() {
++  untyped_ = false;
++}
++
++bool TerminalInputWasTyped(std::u16string_view pasted_text,
++                           bool model_says_pasted,
++                           const TypedInputTracker& tracker) {
++  return pasted_text.empty() && !model_says_pasted && tracker.typed();
++}
++
+ }  // namespace aerographene
+--- a/components/omnibox/browser/aero_terminal_command_unittest.cc
++++ b/components/omnibox/browser/aero_terminal_command_unittest.cc
+@@ -37,4 +37,52 @@
+   EXPECT_EQ(TerminalCommandUrl(), "chrome://terminal/?new=1");
+ }
+ 
++TEST(AeroTerminalCommandTest, TypedKeyByKey) {
++  TypedInputTracker t;
++  std::u16string text;
++  for (char16_t c : std::u16string(u"t: ls")) {
++    const std::u16string old = text;
++    text += c;
++    t.OnTextChanged(old, text, false);
++  }
++  EXPECT_TRUE(t.typed());
++  EXPECT_TRUE(TerminalInputWasTyped(u"", false, t));
++}
++
++TEST(AeroTerminalCommandTest, PastedIsNotTyped) {
++  TypedInputTracker t;
++  t.OnTextChanged(u"", u"t: rm x", true);  // Ctrl+V
++  EXPECT_FALSE(t.typed());
++  // Typing more after the paste does not make it typed.
++  t.OnTextChanged(u"t: rm x", u"t: rm xy", false);
++  EXPECT_FALSE(TerminalInputWasTyped(u"", false, t));
++  // Clearing the text starts over.
++  t.OnTextChanged(u"t: rm xy", u"", false);
++  t.OnTextChanged(u"", u"t", false);
++  EXPECT_TRUE(t.typed());
++}
++
++TEST(AeroTerminalCommandTest, UnflaggedMultiCharInsertIsNotTyped) {
++  TypedInputTracker t;  // middle click paste, IME commit
++  t.OnTextChanged(u"t", u"t: ls", false);
++  EXPECT_FALSE(t.typed());
++}
++
++TEST(AeroTerminalCommandTest, DropAndSetTextAreNotTyped) {
++  TypedInputTracker t;
++  t.OnTextSet(u"t: ls");  // OmniboxViewViews::PerformDrop -> SetUserText
++  EXPECT_FALSE(TerminalInputWasTyped(u"", false, t));
++  t.Reset();
++  EXPECT_TRUE(t.typed());
++  t.OnTextSet(u"");
++  EXPECT_TRUE(t.typed());
++}
++
++TEST(AeroTerminalCommandTest, PasteAndGoAndModelPasteAreNotTyped) {
++  TypedInputTracker t;
++  EXPECT_FALSE(TerminalInputWasTyped(u"t: ls", false, t));  // paste-and-go
++  EXPECT_FALSE(TerminalInputWasTyped(u"", true, t));  // PasteState::kPasted
++  EXPECT_TRUE(TerminalInputWasTyped(u"", false, t));
++}
++
+ }  // namespace aerographene
+--- a/chrome/browser/ui/omnibox/omnibox_edit_model.h
++++ b/chrome/browser/ui/omnibox/omnibox_edit_model.h
+@@ -21,6 +21,7 @@
+ #include "base/time/time.h"
+ #include "chrome/browser/ui/omnibox/omnibox_view.h"
+ #include "components/contextual_tasks/public/query_contextualizer.h"
++#include "components/omnibox/browser/aero_terminal_command.h"
+ #include "components/omnibox/browser/autocomplete_controller.h"
+ #include "components/omnibox/browser/autocomplete_enums.h"
+ #include "components/omnibox/browser/autocomplete_input.h"
+@@ -891,6 +892,10 @@
+   // one, and in either case inline autocomplete would get in the way).
+   PasteState paste_state_ = PasteState::kNone;
+ 
++  // aerographene (C6b): whether the text was typed key by key, so that only
++  // a typed "t: <command>" runs by itself (aero_terminal_command.h).
++  aerographene::TypedInputTracker aero_typed_;
++
+   // Whether the control key is depressed.  We track this to avoid calling
+   // UpdatePopup() repeatedly if the user holds down the key, and to know
+   // whether to trigger "ctrl-enter" behavior.
+--- a/chrome/browser/ui/omnibox/omnibox_edit_model.cc
++++ b/chrome/browser/ui/omnibox/omnibox_edit_model.cc
+@@ -371,6 +371,7 @@
+     // restore the |user_text| to the model and the view. It's likely unelided
+     // text that the user has not made any modifications to.
+     InternalSetUserText(state->user_text);
++    aero_typed_.OnTextSet(state->user_text);
+ 
+     // We let the View manage restoring the cursor position afterwards.
+     if (view_) {
+@@ -435,6 +436,8 @@
+   InternalSetUserText(text);
+   GetInfoForCurrentText(&current_match_, nullptr);
+   paste_state_ = PasteState::kNone;
++  // Drop (OmniboxViewViews::PerformDrop), tab restore, actions: not typed.
++  aero_typed_.OnTextSet(text);
+   has_temporary_text_ = false;
+ }
+ 
+@@ -659,6 +662,7 @@
+   SetInputInProgress(false);
+   input_.Clear();
+   paste_state_ = PasteState::kNone;
++  aero_typed_.Reset();
+   InternalSetUserText(std::u16string());
+   SetKeywordInfo(KeywordState::kNone, u"", u"", OmniboxEventProto::INVALID);
+   if (view_) {
+@@ -1638,6 +1642,11 @@
+   // Update the paste state as appropriate: if we're just finishing a paste
+   // that replaced all the text, preserve that information; otherwise, if we've
+   // made some other edit, clear paste tracking.
++  if (state_changes.text_differs || paste_state_ == PasteState::kPasting) {
++    aero_typed_.OnTextChanged(*state_changes.old_text,
++                              *state_changes.new_text,
++                              paste_state_ == PasteState::kPasting);
++  }
+   if (paste_state_ == PasteState::kPasting) {
+     paste_state_ = PasteState::kPasted;
+     GURL url = GURL(*state_changes.new_text);
+@@ -2740,6 +2749,13 @@
+ 
+   omnibox::RecordActionShownForAllActions(autocomplete_controller()->result(),
+                                           selection);
++
++  // aerographene (C6b): read before RevertAll below resets the tracker.
++  if (aerographene::TerminalInputWasTyped(
++          pasted_text, paste_state_ != PasteState::kNone, aero_typed_)) {
++    match.RecordAdditionalInfo(aerographene::kTerminalTypedInfoKey,
++                               std::string("1"));
++  }
+   HistoryFuzzyProvider::RecordOpenMatchMetrics(
+       autocomplete_controller()->result(), match);
+ 
+--- a/chrome/browser/ui/omnibox/BUILD.gn
++++ b/chrome/browser/ui/omnibox/BUILD.gn
+@@ -214,7 +214,10 @@
+     ]
+     if (is_linux) {
+       # aerographene: "t: <command>" one-shot channel (fatia C6).
+-      deps += [ "//chrome/browser/ui/webui/aero_terminal:launch" ]
++      deps += [
++        "//chrome/browser/ui/webui/aero_terminal:launch",
++        "//chrome/browser/ui/webui/aero_terminal:launch_watcher",
++      ]
+     }
+   }
+ }
+--- a/chrome/browser/ui/omnibox/chrome_omnibox_client.cc
++++ b/chrome/browser/ui/omnibox/chrome_omnibox_client.cc
+@@ -134,7 +134,7 @@
+ #include "url/gurl.h"
+ 
+ #if BUILDFLAG(IS_LINUX)
+-#include "chrome/browser/ui/webui/aero_terminal/terminal_launch.h"
++#include "chrome/browser/ui/webui/aero_terminal/terminal_launch_watcher.h"
+ #endif
+ 
+ #if BUILDFLAG(ENABLE_EXTENSIONS)
+@@ -1003,13 +1003,16 @@
+   if (browser_) {
+     auto navigation = chrome::OpenCurrentURL(browser_);
+ #if BUILDFLAG(IS_LINUX)
+-    // Bound to the tab that is loading chrome://terminal; its
+-    // TerminalHandler takes it once (terminal_launch.h).
++    // Bound to the navigation loading chrome://terminal/?new=1; its
++    // TerminalHandler takes it once (terminal_launch.h). C6b: it only runs
++    // by itself (Enter) when OmniboxEditModel saw it typed; pasted, dropped
++    // or paste-and-go text is just written at the prompt.
+     if (navigation && aero_terminal_command &&
+         !aero_terminal_command->empty()) {
+-      aerographene::SetPendingTerminalCommand(
+-          navigation->GetWebContents(),
+-          base::UTF16ToUTF8(*aero_terminal_command));
++      aerographene::SetPendingTerminalCommandForNavigation(
++          *navigation, base::UTF16ToUTF8(*aero_terminal_command),
++          match.GetAdditionalInfoForDebugging(
++              aerographene::kTerminalTypedInfoKey) == "1");
+     }
+ #endif
+     if (navigation) {
+--- a/chrome/browser/ui/webui/aero_terminal/BUILD.gn
++++ b/chrome/browser/ui/webui/aero_terminal/BUILD.gn
+@@ -53,6 +53,19 @@
+   public_deps = [ "//base" ]
+ }
+ 
++# Navigation watcher of the channel (fatia C6b), used by ChromeOmniboxClient.
++source_set("launch_watcher") {
++  sources = [
++    "terminal_launch_watcher.cc",
++    "terminal_launch_watcher.h",
++  ]
++  deps = [
++    ":launch",
++    "//base",
++    "//content/public/browser",
++  ]
++}
++
+ # pty session (fatia C2), used by TerminalHost (C3).
+ source_set("session") {
+   sources = [
+--- a/chrome/browser/ui/webui/aero_terminal/terminal_launch.h
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_launch.h
+@@ -4,10 +4,12 @@
+ #ifndef CHROME_BROWSER_UI_WEBUI_AERO_TERMINAL_TERMINAL_LAUNCH_H_
+ #define CHROME_BROWSER_UI_WEBUI_AERO_TERMINAL_TERMINAL_LAUNCH_H_
+ 
++#include <cstdint>
+ #include <map>
+ #include <optional>
+ #include <set>
+ #include <string>
++#include <string_view>
+ 
+ #include "base/time/time.h"
+ 
+@@ -30,16 +32,41 @@
+ // only within kLaunchCommandLifetime of being set (a tab that navigated
+ // elsewhere and came back later must not run a stale command); taking always
+ // clears it.
++//
++// C6b: `run` says whether the page may send the Enter itself (only for text
++// typed in the command bar; pasted or dropped text is just written at the
++// prompt). The command is bound to the navigation `navigation_id` that opens
++// chrome://terminal/?new=1: if that navigation fails or is cancelled, or the
++// tab starts another main frame navigation, the command is dropped
++// (OnTerminalTabNavigation*, fed by terminal_launch_watcher.h).
+ inline constexpr size_t kMaxLaunchCommandBytes = 4096;
+ inline constexpr base::TimeDelta kLaunchCommandLifetime = base::Seconds(60);
+ 
++struct PendingTerminalCommand {
++  std::string command;
++  bool run = false;
++};
++
+ bool SetPendingTerminalCommand(base::SupportsUserData* tab,
+                                std::string command,
++                               bool run,
++                               int64_t navigation_id,
+                                base::TimeTicks now = base::TimeTicks::Now());
+-std::optional<std::string> TakePendingTerminalCommand(
++std::optional<PendingTerminalCommand> TakePendingTerminalCommand(
+     base::SupportsUserData* tab,
+     base::TimeTicks now = base::TimeTicks::Now());
+ 
++// Main frame (cross-document) navigations of the tab.
++void OnTerminalTabNavigationStarted(base::SupportsUserData* tab,
++                                    int64_t navigation_id);
++void OnTerminalTabNavigationFinished(base::SupportsUserData* tab,
++                                     int64_t navigation_id,
++                                     bool committed_without_error);
++
++// TerminalHandler only takes the command when its page was loaded as
++// "chrome://terminal/?new=1" (the URL the command bar opens).
++bool IsNewTerminalPageUrl(std::string_view spec);
++
+ // Workspace numbers in use, per profile (key: any stable per-profile
+ // pointer). Claim(key, n) with n in [1, kMaxWorkspace] registers that
+ // workspace (several tabs may show the same one); Claim(key, 0) picks the
+--- a/chrome/browser/ui/webui/aero_terminal/terminal_launch.cc
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_launch.cc
+@@ -16,26 +16,64 @@
+ const char kPendingCommandKey[] = "aero_terminal_pending_command";
+ 
+ struct PendingCommand : public base::SupportsUserData::Data {
+-  PendingCommand(std::string c, base::TimeTicks t)
+-      : command(std::move(c)), set_at(t) {}
++  PendingCommand(std::string c, bool r, int64_t id, base::TimeTicks t)
++      : command(std::move(c)), run(r), navigation_id(id), set_at(t) {}
+   std::string command;
++  bool run;
++  int64_t navigation_id;
++  bool committed = false;
+   base::TimeTicks set_at;
+ };
+ 
++PendingCommand* GetPending(base::SupportsUserData* tab) {
++  return tab ? static_cast<PendingCommand*>(tab->GetUserData(kPendingCommandKey))
++             : nullptr;
++}
++
+ }  // namespace
+ 
+ bool SetPendingTerminalCommand(base::SupportsUserData* tab,
+                                std::string command,
++                               bool run,
++                               int64_t navigation_id,
+                                base::TimeTicks now) {
+   if (!tab || command.empty() || command.size() > kMaxLaunchCommandBytes) {
+     return false;
+   }
+   tab->SetUserData(kPendingCommandKey,
+-                   std::make_unique<PendingCommand>(std::move(command), now));
++                   std::make_unique<PendingCommand>(std::move(command), run,
++                                                    navigation_id, now));
+   return true;
+ }
+ 
+-std::optional<std::string> TakePendingTerminalCommand(
++void OnTerminalTabNavigationStarted(base::SupportsUserData* tab,
++                                    int64_t navigation_id) {
++  PendingCommand* pending = GetPending(tab);
++  if (pending && navigation_id != pending->navigation_id) {
++    tab->RemoveUserData(kPendingCommandKey);
++  }
++}
++
++void OnTerminalTabNavigationFinished(base::SupportsUserData* tab,
++                                     int64_t navigation_id,
++                                     bool committed_without_error) {
++  PendingCommand* pending = GetPending(tab);
++  if (!pending) {
++    return;
++  }
++  if (navigation_id == pending->navigation_id && committed_without_error) {
++    pending->committed = true;
++    return;
++  }
++  // Its own navigation failed or was cancelled, or another one finished.
++  tab->RemoveUserData(kPendingCommandKey);
++}
++
++bool IsNewTerminalPageUrl(std::string_view spec) {
++  return spec == "chrome://terminal/?new=1";
++}
++
++std::optional<PendingTerminalCommand> TakePendingTerminalCommand(
+     base::SupportsUserData* tab,
+     base::TimeTicks now) {
+   if (!tab) {
+@@ -47,10 +85,11 @@
+     return std::nullopt;
+   }
+   auto* pending = static_cast<PendingCommand*>(data.get());
+-  if (now < pending->set_at || now - pending->set_at > kLaunchCommandLifetime) {
++  if (!pending->committed || now < pending->set_at ||
++      now - pending->set_at > kLaunchCommandLifetime) {
+     return std::nullopt;
+   }
+-  return std::move(pending->command);
++  return PendingTerminalCommand{std::move(pending->command), pending->run};
+ }
+ 
+ WorkspaceRegistry::WorkspaceRegistry() = default;
+--- a/chrome/browser/ui/webui/aero_terminal/terminal_launch_unittest.cc
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_launch_unittest.cc
+@@ -15,57 +15,137 @@
+ // Stands in for the WebContents of a tab (a base::SupportsUserData too).
+ class FakeTab : public base::SupportsUserData {};
+ 
++constexpr int64_t kNav = 42;
++
++// Sets a command for navigation kNav and lets that navigation commit.
++bool SetCommitted(FakeTab* tab,
++                  std::string command,
++                  bool run = true,
++                  base::TimeTicks now = base::TimeTicks::Now()) {
++  if (!SetPendingTerminalCommand(tab, std::move(command), run, kNav, now)) {
++    return false;
++  }
++  OnTerminalTabNavigationFinished(tab, kNav, true);
++  return true;
++}
++
++std::optional<std::string> TakeCommand(FakeTab* tab) {
++  std::optional<PendingTerminalCommand> p = TakePendingTerminalCommand(tab);
++  return p ? std::optional<std::string>(p->command) : std::nullopt;
++}
++
+ }  // namespace
+ 
+ TEST(TerminalLaunchTest, RefusesWithoutTab) {
+-  EXPECT_FALSE(SetPendingTerminalCommand(nullptr, "ls"));
++  EXPECT_FALSE(SetPendingTerminalCommand(nullptr, "ls", true, kNav));
+   EXPECT_FALSE(TakePendingTerminalCommand(nullptr));
++  OnTerminalTabNavigationStarted(nullptr, kNav);  // no crash
++  OnTerminalTabNavigationFinished(nullptr, kNav, false);
+ }
+ 
+ TEST(TerminalLaunchTest, RefusesEmptyOrHuge) {
+   FakeTab tab;
+-  EXPECT_FALSE(SetPendingTerminalCommand(&tab, ""));
+-  EXPECT_FALSE(SetPendingTerminalCommand(
+-      &tab, std::string(kMaxLaunchCommandBytes + 1, 'x')));
++  EXPECT_FALSE(SetCommitted(&tab, ""));
++  EXPECT_FALSE(
++      SetCommitted(&tab, std::string(kMaxLaunchCommandBytes + 1, 'x')));
+   EXPECT_FALSE(TakePendingTerminalCommand(&tab));
+-  EXPECT_TRUE(SetPendingTerminalCommand(
+-      &tab, std::string(kMaxLaunchCommandBytes, 'x')));
++  EXPECT_TRUE(SetCommitted(&tab, std::string(kMaxLaunchCommandBytes, 'x')));
+ }
+ 
+ TEST(TerminalLaunchTest, OneShot) {
+   FakeTab tab;
+-  ASSERT_TRUE(SetPendingTerminalCommand(&tab, "htop"));
+-  EXPECT_EQ(TakePendingTerminalCommand(&tab), "htop");
++  ASSERT_TRUE(SetCommitted(&tab, "htop"));
++  EXPECT_EQ(TakeCommand(&tab), "htop");
+   EXPECT_FALSE(TakePendingTerminalCommand(&tab));
+ }
+ 
++TEST(TerminalLaunchTest, TypedRunsPastedDoesNot) {
++  FakeTab tab;
++  ASSERT_TRUE(SetCommitted(&tab, "ls", /*run=*/true));
++  std::optional<PendingTerminalCommand> typed = TakePendingTerminalCommand(&tab);
++  ASSERT_TRUE(typed);
++  EXPECT_TRUE(typed->run);
++  ASSERT_TRUE(SetCommitted(&tab, "ls", /*run=*/false));
++  std::optional<PendingTerminalCommand> pasted =
++      TakePendingTerminalCommand(&tab);
++  ASSERT_TRUE(pasted);
++  EXPECT_EQ(pasted->command, "ls");
++  EXPECT_FALSE(pasted->run);
++}
++
+ TEST(TerminalLaunchTest, BoundToItsTab) {
+   FakeTab opened;
+   FakeTab other;
+-  ASSERT_TRUE(SetPendingTerminalCommand(&opened, "ls"));
++  ASSERT_TRUE(SetCommitted(&opened, "ls"));
+   EXPECT_FALSE(TakePendingTerminalCommand(&other));
+-  EXPECT_EQ(TakePendingTerminalCommand(&opened), "ls");
++  EXPECT_EQ(TakeCommand(&opened), "ls");
+ }
+ 
+ TEST(TerminalLaunchTest, NewerReplacesOlder) {
+   FakeTab tab;
+-  ASSERT_TRUE(SetPendingTerminalCommand(&tab, "a"));
+-  ASSERT_TRUE(SetPendingTerminalCommand(&tab, "b"));
+-  EXPECT_EQ(TakePendingTerminalCommand(&tab), "b");
++  ASSERT_TRUE(SetCommitted(&tab, "a"));
++  ASSERT_TRUE(SetCommitted(&tab, "b"));
++  EXPECT_EQ(TakeCommand(&tab), "b");
+   EXPECT_FALSE(TakePendingTerminalCommand(&tab));
+ }
+ 
+ TEST(TerminalLaunchTest, ExpiresAndIsClearedAnyway) {
+   FakeTab tab;
+   const base::TimeTicks t0 = base::TimeTicks() + base::Seconds(100);
+-  ASSERT_TRUE(SetPendingTerminalCommand(&tab, "ls", t0));
++  ASSERT_TRUE(SetCommitted(&tab, "ls", true, t0));
+   EXPECT_FALSE(TakePendingTerminalCommand(
+       &tab, t0 + kLaunchCommandLifetime + base::Seconds(1)));
+   // Expired take still consumed it.
+   EXPECT_FALSE(TakePendingTerminalCommand(&tab, t0));
+-  ASSERT_TRUE(SetPendingTerminalCommand(&tab, "ls", t0));
+-  EXPECT_EQ(TakePendingTerminalCommand(&tab, t0 + kLaunchCommandLifetime),
+-            "ls");
++  ASSERT_TRUE(SetCommitted(&tab, "ls", true, t0));
++  std::optional<PendingTerminalCommand> p =
++      TakePendingTerminalCommand(&tab, t0 + kLaunchCommandLifetime);
++  ASSERT_TRUE(p);
++  EXPECT_EQ(p->command, "ls");
++}
++
++TEST(TerminalLaunchTest, NotBeforeItsNavigationCommits) {
++  FakeTab tab;
++  ASSERT_TRUE(SetPendingTerminalCommand(&tab, "ls", true, kNav));
++  OnTerminalTabNavigationStarted(&tab, kNav);  // its own: kept
++  EXPECT_FALSE(TakePendingTerminalCommand(&tab));  // not committed: consumed
++  ASSERT_TRUE(SetPendingTerminalCommand(&tab, "ls", true, kNav));
++  OnTerminalTabNavigationFinished(&tab, kNav, true);
++  EXPECT_EQ(TakeCommand(&tab), "ls");
++}
++
++TEST(TerminalLaunchTest, DroppedWhenItsNavigationFails) {
++  FakeTab tab;
++  ASSERT_TRUE(SetPendingTerminalCommand(&tab, "ls", true, kNav));
++  OnTerminalTabNavigationFinished(&tab, kNav, false);  // failed / cancelled
++  OnTerminalTabNavigationFinished(&tab, kNav, true);   // too late
++  EXPECT_FALSE(TakePendingTerminalCommand(&tab));
++}
++
++TEST(TerminalLaunchTest, DroppedWhenTheTabNavigatesElsewhere) {
++  FakeTab tab;
++  ASSERT_TRUE(SetPendingTerminalCommand(&tab, "ls", true, kNav));
++  OnTerminalTabNavigationStarted(&tab, kNav + 1);
++  OnTerminalTabNavigationFinished(&tab, kNav, true);
++  EXPECT_FALSE(TakePendingTerminalCommand(&tab));
++  // Also after its own navigation committed.
++  ASSERT_TRUE(SetCommitted(&tab, "ls"));
++  OnTerminalTabNavigationStarted(&tab, kNav + 2);
++  EXPECT_FALSE(TakePendingTerminalCommand(&tab));
++  // Another navigation finishing (e.g. one that never reported its start).
++  ASSERT_TRUE(SetCommitted(&tab, "ls"));
++  OnTerminalTabNavigationFinished(&tab, kNav + 3, false);
++  EXPECT_FALSE(TakePendingTerminalCommand(&tab));
++}
++
++TEST(TerminalLaunchTest, OnlyTheNewPageTakesIt) {
++  EXPECT_TRUE(IsNewTerminalPageUrl("chrome://terminal/?new=1"));
++  for (const char* s :
++       {"chrome://terminal/", "chrome://terminal/?w=3", "chrome://terminal/?new=1#x",
++        "chrome://terminal/?new=1&w=2", "chrome://terminal/?new=0",
++        "chrome://notes/?new=1", ""}) {
++    EXPECT_FALSE(IsNewTerminalPageUrl(s)) << s;
++  }
+ }
+ 
+ TEST(TerminalLaunchTest, WorkspaceRegistry) {
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_launch_watcher.h
+@@ -0,0 +1,26 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_AERO_TERMINAL_TERMINAL_LAUNCH_WATCHER_H_
++#define CHROME_BROWSER_UI_WEBUI_AERO_TERMINAL_TERMINAL_LAUNCH_WATCHER_H_
++
++#include <string>
++
++namespace content {
++class NavigationHandle;
++}
++
++namespace aerographene {
++
++// Fatia C6b: binds the "t: <command>" of the command bar to `navigation`
++// (the one opening chrome://terminal/?new=1) and watches the main frame
++// navigations of its tab, so the command is dropped if that navigation
++// fails or is cancelled or the tab goes elsewhere (terminal_launch.h).
++// `run`: the text was typed (the page may send the Enter).
++void SetPendingTerminalCommandForNavigation(content::NavigationHandle& navigation,
++                                            std::string command,
++                                            bool run);
++
++}  // namespace aerographene
++
++#endif  // CHROME_BROWSER_UI_WEBUI_AERO_TERMINAL_TERMINAL_LAUNCH_WATCHER_H_
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_launch_watcher.cc
+@@ -0,0 +1,65 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "chrome/browser/ui/webui/aero_terminal/terminal_launch_watcher.h"
++
++#include <memory>
++#include <utility>
++
++#include "base/supports_user_data.h"
++#include "chrome/browser/ui/webui/aero_terminal/terminal_launch.h"
++#include "content/public/browser/navigation_handle.h"
++#include "content/public/browser/web_contents.h"
++#include "content/public/browser/web_contents_observer.h"
++
++namespace aerographene {
++
++namespace {
++
++const char kWatcherKey[] = "aero_terminal_launch_watcher";
++
++// Lives as user data of the WebContents it observes; with no pending command
++// its callbacks do nothing.
++class Watcher : public content::WebContentsObserver,
++                public base::SupportsUserData::Data {
++ public:
++  explicit Watcher(content::WebContents* contents)
++      : content::WebContentsObserver(contents) {}
++
++  void DidStartNavigation(content::NavigationHandle* handle) override {
++    if (Relevant(handle)) {
++      OnTerminalTabNavigationStarted(web_contents(), handle->GetNavigationId());
++    }
++  }
++
++  void DidFinishNavigation(content::NavigationHandle* handle) override {
++    if (Relevant(handle)) {
++      OnTerminalTabNavigationFinished(
++          web_contents(), handle->GetNavigationId(),
++          handle->HasCommitted() && !handle->IsErrorPage());
++    }
++  }
++
++ private:
++  static bool Relevant(content::NavigationHandle* handle) {
++    return handle->IsInPrimaryMainFrame() && !handle->IsSameDocument();
++  }
++};
++
++}  // namespace
++
++void SetPendingTerminalCommandForNavigation(content::NavigationHandle& navigation,
++                                            std::string command,
++                                            bool run) {
++  content::WebContents* contents = navigation.GetWebContents();
++  if (!contents ||
++      !SetPendingTerminalCommand(contents, std::move(command), run,
++                                 navigation.GetNavigationId())) {
++    return;
++  }
++  if (!contents->GetUserData(kWatcherKey)) {
++    contents->SetUserData(kWatcherKey, std::make_unique<Watcher>(contents));
++  }
++}
++
++}  // namespace aerographene
+--- a/chrome/browser/ui/webui/aero_terminal/terminal_handler.h
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_handler.h
+@@ -33,7 +33,8 @@
+ //   foreground(cb, id) -> process name or ""; close(id);
+ //   start(cb, wanted) -> {workspace, command, info} (C6): claims workspace
+ //   `wanted` (1..99) or the smallest free one (0), takes the one-shot
+-//   "t: <command>" of this tab (string or null) and returns the system
++//   "t: <command>" of this tab (string or null; C6b: plus run, true only
++//   when it was typed in the command bar) and returns the system
+ //   summary printed at the top of every terminal; ack(id, bytes) after the page rendered `bytes` of output (at
+ //   most one read chunk per ack). Events: "output"(id, base64 bytes),
+ //   "exit"(id, code), "writeDropped"(id) when the input queue is full.
+@@ -65,7 +66,7 @@
+   void OnOpened(base::Value callback_id, int32_t id, bool ok);
+   void OnWritten(int32_t id, bool accepted);
+   void OnForeground(base::Value callback_id, std::string name);
+-  void OnStart(base::Value callback_id, base::Value command,
++  void OnStart(base::Value callback_id, base::Value command, bool run,
+                base::DictValue info);
+   void OnOutput(int32_t id, std::string bytes);
+   void OnExit(int32_t id, int code);
+--- a/chrome/browser/ui/webui/aero_terminal/terminal_handler.cc
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_handler.cc
+@@ -250,9 +250,16 @@
+     }
+   }
+   // One-shot: only the tab ChromeOmniboxClient opened for "t: <command>"
+-  // has one, and only the first start() of that tab gets it.
+-  std::optional<std::string> command =
+-      TakePendingTerminalCommand(web_ui()->GetWebContents());
++  // has one, and only the first start() of that tab gets it, and only when
++  // the page was loaded as chrome://terminal/?new=1 (C6b).
++  std::optional<PendingTerminalCommand> pending;
++  if (IsNewTerminalPageUrl(
++          web_ui()->GetRenderFrameHost()->GetLastCommittedURL().spec())) {
++    pending = TakePendingTerminalCommand(web_ui()->GetWebContents());
++  }
++  base::Value command =
++      pending ? base::Value(std::move(pending->command)) : base::Value();
++  const bool run = pending && pending->run;
+   // GPU info lives on the UI thread; the rest may block (disks).
+   const gpu::GPUInfo gpu_info =
+       content::GpuDataManager::GetInstance()->GetGPUInfo();
+@@ -271,12 +278,12 @@
+           std::move(gpu))
+           .Then(base::BindOnce(
+               &TerminalHandler::OnStart, weak_ptr_factory_.GetWeakPtr(),
+-              args[0].Clone(),
+-              command ? base::Value(std::move(*command)) : base::Value())));
++              args[0].Clone(), std::move(command), run)));
+ }
+ 
+ void TerminalHandler::OnStart(base::Value callback_id,
+                               base::Value command,
++                              bool run,
+                               base::DictValue info) {
+   if (!IsJavascriptAllowed()) {
+     return;
+@@ -284,6 +291,7 @@
+   base::DictValue reply;
+   reply.Set("workspace", workspace_);
+   reply.Set("command", std::move(command));
++  reply.Set("run", run);
+   reply.Set("info", std::move(info));
+   ResolveJavascriptCallback(callback_id, reply);
+ }
+--- a/chrome/browser/resources/aero_terminal/terminal.js
++++ b/chrome/browser/resources/aero_terminal/terminal.js
+@@ -530,7 +530,9 @@
+ // The one-shot "t: <command>": typed into the first terminal once the page
+ // has loaded and at least COMMAND_DELAY_MS after navigation start, like the
+ // user typing it plus Enter (the parser refused control characters).
+-async function typeCommand(command, opened) {
++// C6b: `run` is true only when the command was typed in the command bar;
++// pasted or dropped text is just written and the user confirms with Enter.
++async function typeCommand(command, run, opened) {
+   if (typeof command !== 'string' || !command) {
+     return;
+   }
+@@ -543,7 +545,7 @@
+   }
+   const sid = await opened;
+   if (typeof sid === 'number' && sessions.has(sid)) {
+-    chrome.send('write', [sid, `${command}\r`]);
++    chrome.send('write', [sid, run === true ? `${command}\r` : command]);
+   }
+ }
+ 
+@@ -583,7 +585,8 @@
+     first = addWindow();
+   }
+   scheduleSave();
+-  await typeCommand(reply ? reply.command : null, first);
++  await typeCommand(reply ? reply.command : null, reply ? reply.run : false,
++                    first);
+ }
+ 
+ boot();

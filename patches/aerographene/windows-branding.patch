@@ -1,0 +1,476 @@
+aerographene: branding Windows (D3d): install_static, aerographene.exe, VERSIONINFO, glifos da barra de título, JetBrains Mono embarcada.
+
+Origem: aerographene (original). Licença: GPL-3.0. A fonte JetBrains Mono embarcada (branding/fonts/jetbrains-mono) é SIL OFL 1.1 (OFL.txt junto).
+Depende de: aerographene/branding.patch (BRANDING: nome, empresa, copyright usados por VERSIONINFO), theme-font.patch, theme-icons-window.patch e theme-scheme.patch.
+Propósito: (1) install_static (chromium_install_modes.h): kProductPathName = aerographene, e os dados do usuário em %LOCALAPPDATA%\aerographene\User Data e chave Software\aerographene; base_app_id = aerographene, de onde sai o AppUserModelID (ShellUtil::GetBrowserModelId/GetAppUserModelIdImpl); ProgIDs AerographeneHTM/AerographenePDF, descrições, esquema de lançamento direto e GUIDs de Active Setup e de ativador de toast próprios (não colidem com um Chromium instalado; CLSID/IID do elevation service e do tracing ficam, presos ao IDL). (2) executável aerographene.exe: output_name e reorder_imports em chrome/BUILD.gn, reorder-imports.py, kBrowserProcessExecutableName/Path e kHelper... (chrome_constants.cc), installer::kChromeExe, chrome_proxy, lista de binários críticos do safe browsing, chrome_launcher_support, mini_installer (BUILD.gn e chrome.release), dados de teste; chrome.dll e chrome_elf.dll mantêm o nome. VERSIONINFO: ORIGINAL_FILENAME=aerographene.exe em chrome_exe.ver; CompanyName, FileDescription, ProductName e LegalCopyright vêm do BRANDING. (3) ícones .ico: os .ico do tema chromium/win são trocados por build/win/apply_assets.sh a partir de branding/win (binário, fora do patch). (4) botões da barra de título: AerographeneIconPainter (windows_icon_painter) desenha os glifos do tema ativo (views::kChromeMinimize/Maximize/RestoreIcon e kWindowControlCloseOldIcon, com os overrides de aerographene_theme_icons) igual no Windows 10 e no 11; WindowsCaptionButton passa a usar esse painter; sem overrides saem os ícones Chrome padrão. (5) JetBrains Mono: RegisterBundledFonts (theme_helper_win) chama AddFontResourceExW(FR_PRIVATE) para <exe>\fonts\JetBrainsMono-{Regular,Bold}.ttf antes de ApplyAerographeneThemeFont; copy("aerographene_fonts") em chrome/BUILD.gn leva os arquivos para <out>/fonts. Sem os arquivos, a fonte reserva segue Consolas. theme-scheme no Windows: nenhum ThemeServiceWin existe; ThemeService::GetBrowserColorScheme (base) já devolve o esquema do tema, valendo no Windows sem mudança.
+
+--- a/build/win/reorder-imports.py
++++ b/build/win/reorder-imports.py
+@@ -27,8 +27,8 @@
+     # correct executable in the first place, so that this script
+     # only needs to verify that and not write a whole new exe.
+ 
+-    input_image = os.path.join(input_dir, 'chrome.exe')
+-    output_image = os.path.join(output_dir, 'chrome.exe')
++    input_image = os.path.join(input_dir, 'aerographene.exe')
++    output_image = os.path.join(output_dir, 'aerographene.exe')
+ 
+     # pefile mmap()s the whole executable, and then parses parts of
+     # it into python data structures for ease of processing.
+@@ -90,7 +90,7 @@
+ 
+     pe.write(filename=output_image)
+ 
+-    for fname in glob.iglob(os.path.join(input_dir, 'chrome.exe.*')):
++    for fname in glob.iglob(os.path.join(input_dir, 'aerographene.exe.*')):
+         shutil.copy(fname, os.path.join(output_dir, os.path.basename(fname)))
+     return 0
+ 
+--- a/chrome/BUILD.gn
++++ b/chrome/BUILD.gn
+@@ -87,12 +87,12 @@
+     # initialexe/ is used so that the we can reorder imports and write back to
+     # the final destination at $root_out_dir/.
+     inputs = [
+-      "$root_out_dir/initialexe/chrome.exe",
+-      "$root_out_dir/initialexe/chrome.exe.pdb",
++      "$root_out_dir/initialexe/aerographene.exe",
++      "$root_out_dir/initialexe/aerographene.exe.pdb",
+     ]
+     outputs = [
+-      "$root_out_dir/chrome.exe",
+-      "$root_out_dir/chrome.exe.pdb",
++      "$root_out_dir/aerographene.exe",
++      "$root_out_dir/aerographene.exe.pdb",
+     ]
+     args = [
+       "-i",
+@@ -150,7 +150,7 @@
+   }
+ 
+   if (is_win) {
+-    _chrome_output_name = "initialexe/chrome"
++    _chrome_output_name = "initialexe/aerographene"
+   } else {
+     _chrome_output_name = "chrome"
+   }
+@@ -201,6 +201,7 @@
+       deps += [
+         ":chrome_dll",
+         ":chrome_exe_version",
++        ":aerographene_fonts",
+         ":copy_first_run",
+         ":visual_elements_resources",
+         "//base",
+@@ -477,6 +478,19 @@
+     sources = [ "app/FirstRun" ]
+     outputs = [ "$root_out_dir/First Run" ]
+   }
++
++  # aerographene: bundled JetBrains Mono (SIL OFL 1.1) next to the executable,
++  # copied into the tree by build/win/apply_assets.sh.
++  if (is_win) {
++    copy("aerographene_fonts") {
++      sources = [
++        "app/theme/aerographene/fonts/JetBrainsMono-Bold.ttf",
++        "app/theme/aerographene/fonts/JetBrainsMono-Regular.ttf",
++        "app/theme/aerographene/fonts/OFL.txt",
++      ]
++      outputs = [ "$root_out_dir/fonts/{{source_file_part}}" ]
++    }
++  }
+ } else if (is_mac) {
+   chrome_helper_name = chrome_product_full_name + " Helper"
+   chrome_framework_name = chrome_product_full_name + " Framework"
+--- a/chrome/app/chrome_exe.ver
++++ b/chrome/app/chrome_exe.ver
+@@ -1,2 +1,2 @@
+ INTERNAL_NAME=chrome_exe
+-ORIGINAL_FILENAME=chrome.exe
++ORIGINAL_FILENAME=aerographene.exe
+--- a/chrome/browser/safe_browsing/incident_reporting/binary_integrity_analyzer_win.cc
++++ b/chrome/browser/safe_browsing/incident_reporting/binary_integrity_analyzer_win.cc
+@@ -24,7 +24,7 @@
+ 
+ std::vector<base::FilePath> GetCriticalBinariesPath() {
+   static constexpr auto kUnversionedFiles = std::to_array({
+-      FILE_PATH_LITERAL("chrome.exe"),
++      FILE_PATH_LITERAL("aerographene.exe"),
+   });
+   static constexpr auto kVersionedFiles = std::to_array({
+       FILE_PATH_LITERAL("chrome.dll"),
+--- a/chrome/browser/themes/theme_helper_win.cc
++++ b/chrome/browser/themes/theme_helper_win.cc
+@@ -4,10 +4,38 @@
+ 
+ #include "chrome/browser/themes/theme_helper_win.h"
+ 
++#include <windows.h>
++
++#include "base/base_paths.h"
++#include "base/files/file_path.h"
++#include "base/path_service.h"
+ #include "chrome/browser/themes/custom_theme_supplier.h"
+ #include "chrome/browser/themes/theme_properties.h"
+ #include "chrome/grit/theme_resources.h"
+ 
++namespace aerographene {
++
++void RegisterBundledFonts() {
++  static bool registered = false;
++  if (registered) {
++    return;
++  }
++  registered = true;
++  base::FilePath exe_dir;
++  if (!base::PathService::Get(base::DIR_EXE, &exe_dir)) {
++    return;
++  }
++  const base::FilePath fonts_dir = exe_dir.Append(FILE_PATH_LITERAL("fonts"));
++  for (const wchar_t* name :
++       {L"JetBrainsMono-Regular.ttf", L"JetBrainsMono-Bold.ttf"}) {
++    // FR_PRIVATE: visible only to this process, removed when it exits.
++    ::AddFontResourceExW(fonts_dir.Append(name).value().c_str(), FR_PRIVATE,
++                         nullptr);
++  }
++}
++
++}  // namespace aerographene
++
+ bool ThemeHelperWin::ShouldUseNativeFrame(
+     const CustomThemeSupplier* theme_supplier) const {
+   return true;
+--- a/chrome/browser/themes/theme_helper_win.h
++++ b/chrome/browser/themes/theme_helper_win.h
+@@ -7,6 +7,16 @@
+ 
+ #include "chrome/browser/themes/theme_helper.h"
+ 
++namespace aerographene {
++
++// Registers the bundled JetBrains Mono (SIL OFL 1.1, <exe dir>\fonts) as a
++// private font of the browser process, so the pixelized theme font does not
++// depend on a system install. Missing files are ignored (the theme falls
++// back to Consolas).
++void RegisterBundledFonts();
++
++}  // namespace aerographene
++
+ class ThemeHelperWin : public ThemeHelper {
+  public:
+   ThemeHelperWin() = default;
+--- a/chrome/browser/themes/theme_service.cc
++++ b/chrome/browser/themes/theme_service.cc
+@@ -94,6 +94,10 @@
+ #include "extensions/browser/extension_registry_observer.h"
+ #endif
+ 
++#if BUILDFLAG(IS_WIN)
++#include "chrome/browser/themes/theme_helper_win.h"
++#endif
++
+ #if BUILDFLAG(IS_LINUX)
+ #include "base/time/time.h"
+ #include "ui/linux/linux_ui.h"
+@@ -380,6 +384,9 @@
+ // installed. Only called for themes with a font, so the default theme loads
+ // no extra font and keeps the system UI font.
+ void ApplyAerographeneThemeFont(const std::string& family, int size_px) {
++#if BUILDFLAG(IS_WIN)
++  aerographene::RegisterBundledFonts();
++#endif
+   const bool installed = base::EqualsCaseInsensitiveASCII(
+       gfx::Font(family, size_px).GetActualFontName(), family);
+   // ReloadFonts() calls InitDefaultFontList(), which resets the default font
+--- a/chrome/browser/ui/views/frame/BUILD.gn
++++ b/chrome/browser/ui/views/frame/BUILD.gn
+@@ -186,6 +186,7 @@
+     "//chrome/browser/ui/color:color_headers",
+     "//skia",
+     "//ui/gfx/geometry",
++    "//ui/views/window/vector_icons",
+   ]
+ }
+ 
+--- a/chrome/browser/ui/views/frame/windows_caption_button.cc
++++ b/chrome/browser/ui/views/frame/windows_caption_button.cc
+@@ -46,10 +46,9 @@
+ 
+ std::unique_ptr<Windows10IconPainter>
+ WindowsCaptionButton::CreateIconPainter() {
+-  if (base::win::GetVersion() >= base::win::Version::WIN11) {
+-    return std::make_unique<Windows11IconPainter>();
+-  }
+-  return std::make_unique<Windows10IconPainter>();
++  // aerographene: theme glyphs on every Windows version (the Windows 11
++  // rounded painter stays for builds without the theme icon overrides).
++  return std::make_unique<AerographeneIconPainter>();
+ }
+ 
+ gfx::Size WindowsCaptionButton::CalculatePreferredSize(
+--- a/chrome/browser/ui/views/frame/windows_icon_painter.cc
++++ b/chrome/browser/ui/views/frame/windows_icon_painter.cc
+@@ -12,7 +12,9 @@
+ #include "ui/gfx/geometry/rect_conversions.h"
+ #include "ui/gfx/geometry/rrect_f.h"
+ #include "ui/gfx/geometry/skia_conversions.h"
++#include "ui/gfx/paint_vector_icon.h"
+ #include "ui/gfx/scoped_canvas.h"
++#include "ui/views/window/vector_icons/vector_icons.h"
+ 
+ namespace {
+ 
+@@ -32,6 +34,21 @@
+   canvas->DrawRect(rect_f, flags);
+ }
+ 
++// The theme glyphs are drawn on a 16-unit grid; the caption symbol box is 10
++// units, so the glyph is scaled by 1.6 and centered on it. |canvas| is in
++// device pixels here (the caller undid the device scale factor).
++void PaintThemeGlyph(gfx::Canvas* canvas,
++                     const gfx::VectorIcon& icon,
++                     const gfx::Rect& symbol_rect,
++                     const cc::PaintFlags& flags) {
++  const int size = base::ClampRound(symbol_rect.width() * 1.6f);
++  const gfx::Point origin(symbol_rect.CenterPoint().x() - size / 2,
++                          symbol_rect.CenterPoint().y() - size / 2);
++  gfx::ScopedCanvas scoped_canvas(canvas);
++  canvas->Translate(origin.OffsetFromOrigin());
++  gfx::PaintVectorIcon(canvas, icon, size, flags.getColor());
++}
++
+ }  // namespace
+ 
+ Windows10IconPainter::Windows10IconPainter() = default;
+@@ -101,6 +118,34 @@
+   canvas->DrawPath(path, flags);
+ }
+ 
++AerographeneIconPainter::AerographeneIconPainter() = default;
++AerographeneIconPainter::~AerographeneIconPainter() = default;
++
++void AerographeneIconPainter::PaintMinimizeIcon(gfx::Canvas* canvas,
++                                                gfx::Rect& symbol_rect,
++                                                cc::PaintFlags& flags) {
++  PaintThemeGlyph(canvas, views::kChromeMinimizeIcon, symbol_rect, flags);
++}
++
++void AerographeneIconPainter::PaintMaximizeIcon(gfx::Canvas* canvas,
++                                                gfx::Rect& symbol_rect,
++                                                cc::PaintFlags& flags) {
++  PaintThemeGlyph(canvas, views::kChromeMaximizeIcon, symbol_rect, flags);
++}
++
++void AerographeneIconPainter::PaintRestoreIcon(gfx::Canvas* canvas,
++                                               gfx::Rect& symbol_rect,
++                                               cc::PaintFlags& flags) {
++  PaintThemeGlyph(canvas, views::kChromeRestoreIcon, symbol_rect, flags);
++}
++
++void AerographeneIconPainter::PaintCloseIcon(gfx::Canvas* canvas,
++                                             gfx::Rect& symbol_rect,
++                                             cc::PaintFlags& flags) {
++  PaintThemeGlyph(canvas, views::kWindowControlCloseOldIcon, symbol_rect,
++                  flags);
++}
++
+ Windows11IconPainter::Windows11IconPainter() = default;
+ Windows11IconPainter::~Windows11IconPainter() = default;
+ 
+--- a/chrome/browser/ui/views/frame/windows_icon_painter.h
++++ b/chrome/browser/ui/views/frame/windows_icon_painter.h
+@@ -43,6 +43,32 @@
+                                   cc::PaintFlags& flags);
+ };
+ 
++// aerographene: caption glyphs come from the active theme (the vector icon
++// overrides of aerographene_theme_icons for the window control icons), the
++// same on Windows 10 and 11. Without overrides these are the stock Chrome
++// window control icons. Tab search keeps the Windows 10 chevron.
++class AerographeneIconPainter : public Windows10IconPainter {
++ public:
++  AerographeneIconPainter();
++  ~AerographeneIconPainter() override;
++
++  AerographeneIconPainter(const AerographeneIconPainter&) = delete;
++  AerographeneIconPainter& operator=(const AerographeneIconPainter&) = delete;
++
++  void PaintMinimizeIcon(gfx::Canvas* canvas,
++                         gfx::Rect& symbol_rect,
++                         cc::PaintFlags& flags) override;
++  void PaintMaximizeIcon(gfx::Canvas* canvas,
++                         gfx::Rect& symbol_rect,
++                         cc::PaintFlags& flags) override;
++  void PaintRestoreIcon(gfx::Canvas* canvas,
++                        gfx::Rect& symbol_rect,
++                        cc::PaintFlags& flags) override;
++  void PaintCloseIcon(gfx::Canvas* canvas,
++                      gfx::Rect& symbol_rect,
++                      cc::PaintFlags& flags) override;
++};
++
+ class Windows11IconPainter : public Windows10IconPainter {
+  public:
+   Windows11IconPainter();
+--- a/chrome/chrome_proxy/chrome_proxy_main_win.cc
++++ b/chrome/chrome_proxy/chrome_proxy_main_win.cc
+@@ -15,7 +15,7 @@
+ namespace {
+ 
+ constexpr base::FilePath::CharType kChromeExecutable[] =
+-    FILE_PATH_LITERAL("chrome.exe");
++    FILE_PATH_LITERAL("aerographene.exe");
+ 
+ constexpr base::FilePath::CharType kChromeProxyExecutable[] =
+     FILE_PATH_LITERAL("chrome_proxy.exe");
+--- a/chrome/common/chrome_constants.cc
++++ b/chrome/common/chrome_constants.cc
+@@ -31,10 +31,12 @@
+ // do so.
+ 
+ #if BUILDFLAG(IS_WIN)
++// aerographene: the Windows executable is aerographene.exe (chrome.dll and
++// chrome_elf.dll keep their names).
+ const base::FilePath::CharType kBrowserProcessExecutableName[] =
+-    FPL("chrome.exe");
++    FPL("aerographene.exe");
+ const base::FilePath::CharType kHelperProcessExecutableName[] =
+-    FPL("chrome.exe");
++    FPL("aerographene.exe");
+ #elif BUILDFLAG(IS_MAC)
+ const base::FilePath::CharType kBrowserProcessExecutableName[] =
+     FPL(PRODUCT_FULLNAME_STRING);
+@@ -54,9 +56,9 @@
+ 
+ #if BUILDFLAG(IS_WIN)
+ const base::FilePath::CharType kBrowserProcessExecutablePath[] =
+-    FPL("chrome.exe");
++    FPL("aerographene.exe");
+ const base::FilePath::CharType kHelperProcessExecutablePath[] =
+-    FPL("chrome.exe");
++    FPL("aerographene.exe");
+ #elif BUILDFLAG(IS_MAC)
+ const base::FilePath::CharType kBrowserProcessExecutablePath[] =
+     FPL(PRODUCT_FULLNAME_STRING ".app/Contents/MacOS/" PRODUCT_FULLNAME_STRING);
+--- a/chrome/install_static/chromium_install_modes.h
++++ b/chrome/install_static/chromium_install_modes.h
+@@ -21,7 +21,9 @@
+ 
+ // The brand-specific product name to be included as a component of the install
+ // and user data directory paths.
+-inline constexpr wchar_t kProductPathName[] = L"Chromium";
++// aerographene: user data in %LOCALAPPDATA%\aerographene\User Data, registry
++// under Software\aerographene.
++inline constexpr wchar_t kProductPathName[] = L"aerographene";
+ 
+ // The brand-specific safe browsing client name.
+ inline constexpr char kSafeBrowsingName[] = "chromium";
+@@ -54,23 +56,26 @@
+         .logo_suffix = L"",  // No logo suffix for the primary install mode.
+         .app_guid =
+             L"",  // Empty app_guid since no integration with Google Update.
+-        .base_app_name = L"Chromium",              // A distinct base_app_name.
+-        .base_app_id = L"Chromium",                // A distinct base_app_id.
+-        .browser_prog_id_prefix = L"ChromiumHTM",  // Browser ProgID prefix.
++        // aerographene: own names and ids (AppUserModelID is derived from
++        // base_app_id), so it never shares ProgIDs, Active Setup or the toast
++        // activator with a Chromium install.
++        .base_app_name = L"aerographene",              // A distinct base_app_name.
++        .base_app_id = L"aerographene",                // A distinct base_app_id.
++        .browser_prog_id_prefix = L"AerographeneHTM",  // Browser ProgID prefix.
+         .browser_prog_id_description =
+-            L"Chromium HTML Document",  // Browser ProgID description.
+-        .direct_launch_url_scheme = "chromium",
+-        .pdf_prog_id_prefix = L"ChromiumPDF",  // PDF ProgID prefix.
++            L"aerographene HTML Document",  // Browser ProgID description.
++        .direct_launch_url_scheme = "aerographene",
++        .pdf_prog_id_prefix = L"AerographenePDF",  // PDF ProgID prefix.
+         .pdf_prog_id_description =
+-            L"Chromium PDF Document",  // PDF ProgID description.
++            L"aerographene PDF Document",  // PDF ProgID description.
+         .active_setup_guid =
+-            L"{7D2B3E1D-D096-4594-9D8F-A6667F12E0AC}",  // Active Setup
++            L"{5C1A7E92-3B64-4D0F-A8E5-7F2C91B4D6A3}",  // Active Setup
+                                                         // GUID.
+-        .toast_activator_clsid = {0x635EFA6F,
+-                                  0x08D6,
+-                                  0x4EC9,
+-                                  {0xBD, 0x14, 0x8A, 0x0F, 0xDE, 0x97, 0x51,
+-                                   0x59}},  // Toast Activator CLSID.
++        .toast_activator_clsid = {0x9E4B21C7,
++                                  0x5A3D,
++                                  0x4F18,
++                                  {0x8C, 0x02, 0xB6, 0x7D, 0x41, 0xE9, 0xA3,
++                                   0x5F}},  // Toast Activator CLSID.
+         .elevator_clsid = {0xD133B120,
+                            0x6DB4,
+                            0x4D6B,
+--- a/chrome/installer/launcher_support/chrome_launcher_support.cc
++++ b/chrome/installer/launcher_support/chrome_launcher_support.cc
+@@ -28,11 +28,11 @@
+ const wchar_t kBrowserAppGuid[] = L"{8A69D345-D564-463c-AFF1-A69D9E530F96}";
+ const wchar_t kSxSBrowserAppGuid[] = L"{4ea16ac7-fd5a-47c3-875b-dbf4a2008c20}";
+ #else
+-const wchar_t kInstallationRegKey[] = L"Software\\Chromium";
++const wchar_t kInstallationRegKey[] = L"Software\\aerographene";
+ #endif
+ 
+ // Copied from util_constants.cc.
+-const wchar_t kChromeExe[] = L"chrome.exe";
++const wchar_t kChromeExe[] = L"aerographene.exe";
+ const wchar_t kUninstallStringField[] = L"UninstallString";
+ const wchar_t kVersionStringField[] = L"pv";
+ 
+--- a/chrome/installer/mini_installer/BUILD.gn
++++ b/chrome/installer/mini_installer/BUILD.gn
+@@ -151,7 +151,7 @@
+   inputs = [
+     "$root_out_dir/chrome.dll",
+     "$root_out_dir/chrome_elf.dll",
+-    "$root_out_dir/chrome.exe",
++    "$root_out_dir/aerographene.exe",
+     "$root_out_dir/locales/en-US.pak",
+     "$root_out_dir/setup.exe",
+     "//chrome/tools/build/win/makecab.py",
+--- a/chrome/installer/mini_installer/chrome.release
++++ b/chrome/installer/mini_installer/chrome.release
+@@ -7,6 +7,7 @@
+ # Chrome Application dir entries, sorted alphabetically.
+ #
+-chrome.exe: %(ChromeDir)s\
++aerographene.exe: %(ChromeDir)s\
+ chrome_proxy.exe: %(ChromeDir)s\
++fonts\: %(ChromeDir)s\
+ #
+ # Chrome version dir assembly manifest.
+--- a/chrome/installer/util/util_constants.h
++++ b/chrome/installer/util/util_constants.h
+@@ -348,7 +348,7 @@
+ // Active Setup.
+ inline constexpr wchar_t kActiveSetupExe[] = L"chrmstp.exe";
+ inline constexpr wchar_t kChromeDll[] = L"chrome.dll";
+-inline constexpr wchar_t kChromeExe[] = L"chrome.exe";
++inline constexpr wchar_t kChromeExe[] = L"aerographene.exe";
+ inline constexpr wchar_t kChromeNewExe[] = L"new_chrome.exe";
+ inline constexpr wchar_t kChromeOldExe[] = L"old_chrome.exe";
+ inline constexpr wchar_t kChromeProxyExe[] = L"chrome_proxy.exe";
+--- a/chrome/test/BUILD.gn
++++ b/chrome/test/BUILD.gn
+@@ -5999,7 +5999,7 @@
+       "../common/win/delay_load_notify_hook_unittest.cc",
+     ]
+ 
+-    data += [ "$root_out_dir/chrome.exe" ]
++    data += [ "$root_out_dir/aerographene.exe" ]
+ 
+     data_deps += [
+       "//chrome",
+@@ -9981,7 +9981,7 @@
+     # the //chrome target to bundle up both initial/chrome.exe and chrome.exe.
+     # As a workaround, explicitly include a data dep on just chrome.exe, and
+     # add //chrome to deps above to make sure it's been built.
+-    data = [ "$root_out_dir/chrome.exe" ]
++    data = [ "$root_out_dir/aerographene.exe" ]
+ 
+     # Don't want the test-specific dependencies to affect load tests.
+     # In particular, a few system DLLs cause user32 to be loaded, which is bad.

@@ -1,0 +1,471 @@
+aerographene: command bar centralizada com o campo de busca dentro do painel (v0.3, F3b).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/commandbar-f3.patch (o bloco de 640 px dele é
+substituído aqui), menus-command-bar.patch e terminal-c6-look.patch.
+Propósito: (1) o popup da omnibox com o tema aerographene vira um painel
+flutuante de 800 px (limitado à janela - 16), centrado na janela a um quarto da
+altura, em todos os modos (Ctrl+T, Ctrl+L, clique na URL). No topo do painel
+fica uma linha de busca de 56 px (lupa, texto da omnibox espelhado, ou
+"Search..." quando vazio, linha de 1 px) e as sugestões abaixo; a omnibox da
+barra continua com o foco e a edição, o painel só espelha o texto.
+(2) cor de "t:"/"o:": o prefixo usava kColorOmniboxResultsUrl, derivada de
+ui::kColorSysPrimary por um mixer anterior ao do tema (o token "accent" não a
+alcança) e ficava no azul Material; passa a usar ui::kColorSysPrimary (accent
+do tema) e o restante do texto recebe kColorOmniboxText mesmo quando o texto é
+lido como URL e vinha esmaecido.
+(3) ícone do chip de páginas internas (aerographene://...): omnibox::kChromeProductIcon
+e kProductChromeRefreshOldIcon (components/omnibox/browser/vector_icons) passam
+a desenhar o símbolo do aerographene (branding/aerographene-mark.svg, três
+facetas) em vez do logo do Chromium.
+
+--- a/chrome/browser/ui/views/omnibox/omnibox_popup_view_views.cc
++++ b/chrome/browser/ui/views/omnibox/omnibox_popup_view_views.cc
+@@ -4,9 +4,11 @@
+ 
+ #include "chrome/browser/ui/views/omnibox/omnibox_popup_view_views.h"
+ 
++#include <algorithm>
+ #include <memory>
+ #include <numeric>
+ #include <optional>
++#include <string>
+ #include <string_view>
+ #include <utility>
+ 
+@@ -14,6 +16,7 @@
+ #include "base/containers/span.h"
+ #include "base/feature_list.h"
+ #include "base/functional/bind.h"
++#include "base/memory/raw_ptr.h"
+ #include "base/memory/weak_ptr.h"
+ #include "base/metrics/histogram_functions.h"
+ #include "build/build_config.h"
+@@ -138,9 +141,17 @@
+         contents, contents->location_bar_view_, /*forward_mouse_events=*/true);
+     // aerographene: the panel floats below the bar (no cutout over it).
+     frame->SetCutoutVisibility(false);
++    aero_frame_ = frame.get();
+     SetContentsView(std::move(frame));
+   }
+ 
++  // aerographene: mirrors the omnibox text in the panel's search row.
++  void SetAeroHeaderText(const std::u16string& text) {
++    if (aero_frame_) {
++      aero_frame_->SetAeroHeaderText(text);
++    }
++  }
++
+   void SetTargetBounds(const gfx::Rect& bounds) {
+     base::AutoReset<bool> reset(&is_setting_popup_bounds_, true);
+     SetBounds(bounds);
+@@ -230,6 +241,9 @@
+     return settings;
+   }
+ 
++  // The frame set by SetPopupContentsView(); owned by the widget's root view.
++  raw_ptr<RoundedOmniboxResultsFrame> aero_frame_ = nullptr;
++
+   // True if the popup is in the process of closing via animation.
+   bool is_animating_closed_ = false;
+ 
+@@ -471,6 +485,7 @@
+ 
+   UpdateContextualSuggestionsGroup(grouped_matches_start_index);
+   widget_->SetTargetBounds(GetTargetBounds());
++  widget_->SetAeroHeaderText(omnibox_view_->GetText());
+ 
+   if (!was_open) {
+     widget_->ShowAnimated();
+@@ -754,41 +769,29 @@
+     popup_height += extra_bottom_padding;
+   }
+ 
+-  // aerographene: command bar. The suggestions form a 600px panel (mockup
+-  // .pal) centered on the location bar and floating below it, instead of a
+-  // dropdown that wraps the bar. 8px of padding (1px stroke + 7px) around the
+-  // rows; the widget grows by the shadow insets, which keep it clear of the
+-  // bar.
++  // aerographene: command bar. A floating panel (Helium palette): 800px,
++  // centered in the window a quarter down, with the search row on top
++  // (RoundedOmniboxResultsFrame header, mirrors the omnibox text) and the
++  // suggestions below it. 8px of padding (1px stroke + 7px) around the
++  // content; the widget grows by the shadow insets. The panel stays open
++  // (header only) while the Ctrl+T command bar has no results.
+   if (views::LayoutProvider::GetAerographeneControlRadius() >= 0) {
+-    constexpr int kAeroPanelWidth = 600;
++    constexpr int kAeroPanelWidth = 800;
+     constexpr int kAeroPanelPadding = 8;
+     const gfx::Insets shadow_insets =
+         RoundedOmniboxResultsFrame::GetShadowInsets();
+     const gfx::Rect bar_bounds = location_bar_view_->GetBoundsInScreen();
+-    const int window_width =
+-        location_bar_view_->GetWidget()->GetWindowBoundsInScreen().width();
+-    const int panel_width = window_width - 16 < kAeroPanelWidth
+-                                ? window_width - 16
+-                                : kAeroPanelWidth;
++    const gfx::Rect window =
++        location_bar_view_->GetWidget()->GetWindowBoundsInScreen();
++    const int panel_width =
++        std::min(kAeroPanelWidth, window.width() - 16);
+     const int gap = shadow_insets.top() > 8 ? shadow_insets.top() : 8;
+     gfx::Rect panel(
+-        bar_bounds.CenterPoint().x() - panel_width / 2, bar_bounds.bottom() + gap,
+-        panel_width, rows_height ? rows_height + 2 * kAeroPanelPadding : 0);
+-    // aerographene (F3): Ctrl+T command bar, 640px, centered in the window
+-    // a quarter down; stays open (one empty row tall) while nothing matches.
+-    if (location_bar_view_->aero_command_bar()) {
+-      constexpr int kAeroCenteredWidth = 640;
+-      constexpr int kAeroEmptyRowsHeight = 32;
+-      const gfx::Rect window =
+-          location_bar_view_->GetWidget()->GetWindowBoundsInScreen();
+-      const int width = std::min(kAeroCenteredWidth, window.width() - 16);
+-      panel = gfx::Rect(
+-          window.CenterPoint().x() - width / 2,
+-          std::max(bar_bounds.bottom() + gap, window.y() + window.height() / 4),
+-          width,
+-          (rows_height ? rows_height : kAeroEmptyRowsHeight) +
+-              2 * kAeroPanelPadding);
+-    }
++        window.CenterPoint().x() - panel_width / 2,
++        std::max(bar_bounds.bottom() + gap, window.y() + window.height() / 4),
++        panel_width,
++        RoundedOmniboxResultsFrame::kAeroHeaderHeight + rows_height +
++            2 * kAeroPanelPadding);
+     panel.Inset(-shadow_insets);
+     return panel;
+   }
+--- a/chrome/browser/ui/views/omnibox/rounded_omnibox_results_frame.cc
++++ b/chrome/browser/ui/views/omnibox/rounded_omnibox_results_frame.cc
+@@ -5,10 +5,13 @@
+ #include "chrome/browser/ui/views/omnibox/rounded_omnibox_results_frame.h"
+ 
+ #include <memory>
++#include <string>
++#include <string_view>
+ #include <utility>
+ 
+ #include "base/functional/bind.h"
+ #include "base/memory/raw_ptr.h"
++#include "base/strings/string_util.h"
+ #include "build/build_config.h"
+ #include "chrome/browser/themes/theme_service.h"
+ #include "chrome/browser/ui/color/chrome_color_id.h"
+@@ -20,6 +23,9 @@
+ #include "chrome/browser/ui/views/omnibox/omnibox_popup_presenter_base.h"
+ #include "chrome/browser/ui/views/omnibox/omnibox_popup_webui_base_content.h"
+ #include "components/omnibox/common/omnibox_features.h"
++#include "components/vector_icons/vector_icons.h"
++#include "ui/base/models/image_model.h"
++#include "ui/color/color_id.h"
+ #include "ui/base/cursor/cursor.h"
+ #include "ui/base/metadata/metadata_header_macros.h"
+ #include "ui/base/metadata/metadata_impl_macros.h"
+@@ -28,8 +34,13 @@
+ #include "ui/gfx/geometry/rounded_corners_f.h"
+ #include "ui/views/border.h"
+ #include "ui/views/bubble/bubble_border.h"
++#include "ui/views/controls/image_view.h"
++#include "ui/views/controls/label.h"
++#include "ui/views/layout/box_layout.h"
+ #include "ui/views/layout/layout_provider.h"
+ #include "ui/views/metadata/view_factory.h"
++#include "ui/views/style/typography.h"
++#include "ui/views/view_class_properties.h"
+ #include "ui/views/view_utils.h"
+ 
+ #if defined(USE_AURA)
+@@ -279,6 +290,37 @@
+         gfx::Insets(7)));
+   }
+ 
++  // aerographene: search row on top of the panel (Helium palette): magnifier,
++  // then the omnibox text mirrored by SetAeroHeaderText() ("Search..." while
++  // empty), with a 1px line below. The omnibox keeps the focus and the editing.
++  if (aero) {
++    auto header = std::make_unique<views::View>();
++    header->SetBorder(views::CreateSolidSidedBorder(gfx::Insets::TLBR(0, 0, 1, 0),
++                                                    kColorToolbarSeparator));
++    auto* box = header->SetLayoutManager(std::make_unique<views::BoxLayout>(
++        views::BoxLayout::Orientation::kHorizontal, gfx::Insets::VH(0, 16), 0));
++    box->set_cross_axis_alignment(
++        views::BoxLayout::CrossAxisAlignment::kCenter);
++    auto* icon = header->AddChildView(std::make_unique<views::ImageView>());
++    icon->SetImage(ui::ImageModel::FromVectorIcon(
++        vector_icons::kSearchIcon, kColorOmniboxTextDimmed, 20));
++    icon->SetProperty(views::kMarginsKey, gfx::Insets::TLBR(0, 0, 0, 12));
++    auto prefix = std::make_unique<views::Label>(
++        std::u16string(), views::style::CONTEXT_TEXTFIELD);
++    prefix->SetEnabledColor(ui::kColorSysPrimary);
++    prefix->SetFontList(prefix->font_list().DeriveWithSizeDelta(2));
++    prefix->SetVisible(false);
++    aero_prefix_label_ = header->AddChildView(std::move(prefix));
++    auto text = std::make_unique<views::Label>(
++        u"Search...", views::style::CONTEXT_TEXTFIELD);
++    text->SetEnabledColor(kColorOmniboxTextDimmed);
++    text->SetFontList(text->font_list().DeriveWithSizeDelta(2));
++    text->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++    aero_text_label_ = header->AddChildView(std::move(text));
++    box->SetFlexForView(aero_text_label_, 1);
++    aero_header_ = contents_host->AddChildView(std::move(header));
++  }
++
+   // Initialize the shadow.
+   SetElevation(views::LayoutProvider::GetAerographeneControlRadius() == 0
+                    ? 0
+@@ -382,6 +424,32 @@
+   top_background_->SetVisible(visible);
+ }
+ 
++void RoundedOmniboxResultsFrame::SetAeroHeaderText(const std::u16string& text) {
++  if (!aero_header_) {
++    return;
++  }
++  // Same prefix rule as OmniboxViewViews::AeroApplyCommandLook: optional
++  // leading spaces, then "t:" or "o:".
++  const std::u16string_view trimmed =
++      base::TrimWhitespace(std::u16string_view(text), base::TRIM_LEADING);
++  const size_t lead = text.size() - trimmed.size();
++  size_t prefix_len = 0;
++  if (trimmed.size() >= 2 && trimmed[1] == u':' &&
++      (trimmed[0] == u't' || trimmed[0] == u'T' || trimmed[0] == u'o' ||
++       trimmed[0] == u'O')) {
++    prefix_len = lead + 2;
++  }
++  aero_prefix_label_->SetText(text.substr(0, prefix_len));
++  aero_prefix_label_->SetVisible(prefix_len != 0);
++  if (text.empty()) {
++    aero_text_label_->SetText(u"Search...");
++    aero_text_label_->SetEnabledColor(kColorOmniboxTextDimmed);
++  } else {
++    aero_text_label_->SetText(text.substr(prefix_len));
++    aero_text_label_->SetEnabledColor(kColorOmniboxText);
++  }
++}
++
+ void RoundedOmniboxResultsFrame::SetElevation(int elevation) {
+   const int corner_radius = views::LayoutProvider::Get()->GetCornerRadiusMetric(
+       views::ShapeContextTokens::kOmniboxExpandedRadius);
+@@ -418,6 +486,13 @@
+   results_bounds.set_x(contents_host_->GetContentsBounds().x());
+   results_bounds.set_width(contents_host_->GetContentsBounds().width());
+ 
++  // aerographene: the search row takes the top of the panel.
++  if (aero_header_) {
++    aero_header_->SetBounds(results_bounds.x(), results_bounds.y(),
++                            results_bounds.width(), kAeroHeaderHeight);
++    results_bounds.Inset(gfx::Insets::TLBR(kAeroHeaderHeight, 0, 0, 0));
++  }
++
+   auto* webui_content = GetOmniboxPopupWebUIBaseContent();
+   if (webui_content && webui_content->ShouldSizeWebViewToPreferredHeight()) {
+     const int preferred_height = webui_content->GetPreferredSize().height();
+--- a/chrome/browser/ui/views/omnibox/rounded_omnibox_results_frame.h
++++ b/chrome/browser/ui/views/omnibox/rounded_omnibox_results_frame.h
+@@ -6,10 +6,12 @@
+ #define CHROME_BROWSER_UI_VIEWS_OMNIBOX_ROUNDED_OMNIBOX_RESULTS_FRAME_H_
+ 
+ #include <memory>
++#include <string>
+ 
+ #include "base/memory/raw_ptr.h"
+ #include "ui/base/metadata/metadata_header_macros.h"
+ #include "ui/gfx/geometry/insets.h"
++#include "ui/views/controls/label.h"
+ #include "ui/views/view.h"
+ #include "ui/views/widget/widget.h"
+ 
+@@ -54,6 +56,15 @@
+ 
+   void SetCutoutVisibility(bool visible);
+ 
++  // aerographene: height of the search row (icon + typed text) that tops the
++  // panel, separator included. Only shown with the aerographene theme.
++  static constexpr int kAeroHeaderHeight = 56;
++
++  // aerographene: shows `text` (the omnibox text) in the search row; empty
++  // text shows the "Search..." placeholder. The "t:"/"o:" prefix takes the
++  // theme accent.
++  void SetAeroHeaderText(const std::u16string& text);
++
+   static constexpr int kDefaultElevation = 16;
+ 
+   // Updates whether mouse events should be forwarded to the underlying
+@@ -81,6 +92,11 @@
+   raw_ptr<views::View> contents_host_ = nullptr;
+   raw_ptr<views::View> contents_;
+ 
++  // aerographene: search row on top of the panel (null outside the theme).
++  raw_ptr<views::View> aero_header_ = nullptr;
++  raw_ptr<views::Label> aero_prefix_label_ = nullptr;
++  raw_ptr<views::Label> aero_text_label_ = nullptr;
++
+   // Only used on platforms that support Aura (non-Mac).
+   [[maybe_unused]] bool forward_mouse_events_;
+ };
+--- a/chrome/browser/ui/views/omnibox/omnibox_view_views.cc
++++ b/chrome/browser/ui/views/omnibox/omnibox_view_views.cc
+@@ -121,6 +121,8 @@
+ #include "ui/base/metadata/metadata_impl_macros.h"
+ #include "ui/base/models/image_model.h"
+ #include "ui/base/ui_base_features.h"
++#include "ui/color/color_id.h"
++#include "ui/color/color_provider.h"
+ #include "ui/compositor/layer.h"
+ #include "ui/display/screen.h"
+ #include "ui/events/event.h"
+@@ -513,8 +515,17 @@
+   }
+   SetStyle(gfx::TEXT_STYLE_ITALIC, mode == 2);
+   if (mode != 0 && GetColorProvider()) {
+-    ApplyColor(GetColorProvider()->GetColor(kColorOmniboxResultsUrl),
++    // The prefix takes the theme accent (ui::kColorSysPrimary: the theme
++    // tokens override it directly; kColorOmniboxResultsUrl is derived from it
++    // by an earlier mixer and keeps the Material blue) and the rest the plain
++    // text color, even when the text parses as a URL and was dimmed.
++    const ui::ColorProvider* color_provider = GetColorProvider();
++    ApplyColor(color_provider->GetColor(ui::kColorSysPrimary),
+                gfx::Range(lead, lead + 2));
++    if (text.size() > lead + 2) {
++      ApplyColor(color_provider->GetColor(kColorOmniboxText),
++                 gfx::Range(lead + 2, text.size()));
++    }
+   }
+ }
+ 
+--- a/components/omnibox/browser/vector_icons/chrome_product.icon
++++ b/components/omnibox/browser/vector_icons/chrome_product.icon
+@@ -1,48 +1,20 @@
+-// Copyright 2026 The Chromium Authors
+-// Use of this source code is governed by a BSD-style license that can be
+-// found in the LICENSE file.
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++//
++// aerographene mark (branding/aerographene-mark.svg, three wing facets) for
++// the omnibox chip of internal pages; replaces the Chromium logo.
+ 
+-CANVAS_DIMENSIONS, 24,
++CANVAS_DIMENSIONS, 16,
+ FILL_RULE_NONZERO,
+-MOVE_TO, 9.18f, 14.9f,
+-R_CUBIC_TO, 0.78f, 0.79f, 1.72f, 1.18f, 2.82f, 1.18f,
+-R_CUBIC_TO, 1.1f, 0, 2.04f, -0.39f, 2.82f, -1.18f,
+-R_CUBIC_TO, 0.79f, -0.78f, 1.18f, -1.72f, 1.18f, -2.82f,
+-R_CUBIC_TO, 0, -1.1f, -0.39f, -2.04f, -1.18f, -2.82f,
+-R_CUBIC_TO, -0.78f, -0.78f, -1.72f, -1.18f, -2.82f, -1.18f,
+-R_CUBIC_TO, -1.1f, 0, -2.04f, 0.39f, -2.82f, 1.18f,
+-CUBIC_TO, 8.39f, 10.04f, 8, 10.98f, 8, 12.07f,
+-R_CUBIC_TO, 0, 1.1f, 0.39f, 2.04f, 1.18f, 2.82f,
++MOVE_TO, 3.29f, 14.58f,
++LINE_TO, 9.14f, 1.00f,
++LINE_TO, 10.39f, 6.11f,
+ CLOSE,
+-MOVE_TO, 12, 18.07f,
+-R_CUBIC_TO, 0.22f, 0, 0.43f, -0.01f, 0.63f, -0.02f,
+-R_CUBIC_TO, 0.2f, -0.02f, 0.4f, -0.05f, 0.6f, -0.1f,
+-LINE_TO, 10.88f, 22,
+-R_CUBIC_TO, -2.52f, -0.28f, -4.62f, -1.36f, -6.32f, -3.24f,
+-CUBIC_TO, 2.85f, 16.89f, 2, 14.66f, 2, 12.07f,
+-R_CUBIC_TO, 0, -0.7f, 0.07f, -1.38f, 0.2f, -2.03f,
+-R_CUBIC_TO, 0.13f, -0.66f, 0.34f, -1.29f, 0.6f, -1.89f,
+-R_LINE_TO, 4, 6.93f,
+-R_ARC_TO, 5.97f, 5.97f, 0, 0, 0, 2.15f, 2.18f,
+-R_CUBIC_TO, 0.92f, 0.55f, 1.93f, 0.82f, 3.05f, 0.82f,
++MOVE_TO, 3.50f, 14.79f,
++LINE_TO, 12.33f, 6.05f,
++LINE_TO, 11.69f, 10.43f,
+ CLOSE,
+-R_MOVE_TO, 0, -12,
+-R_CUBIC_TO, -1.33f, 0, -2.52f, 0.39f, -3.55f, 1.16f,
+-CUBIC_TO, 7.42f, 8.01f, 6.7f, 9, 6.3f, 10.2f,
+-LINE_TO, 3.95f, 6.15f,
+-R_ARC_TO, 10.3f, 10.3f, 0, 0, 1, 3.46f, -2.96f,
+-R_CUBIC_TO, 1.39f, -0.74f, 2.92f, -1.11f, 4.59f, -1.11f,
+-R_CUBIC_TO, 1.65f, 0, 3.17f, 0.36f, 4.55f, 1.09f,
+-ARC_TO, 10.17f, 10.17f, 0, 0, 1, 20, 6.07f,
+-CLOSE,
+-R_MOVE_TO, 9.15f, 2,
+-R_CUBIC_TO, 0.29f, 0.62f, 0.5f, 1.26f, 0.64f, 1.93f,
+-R_CUBIC_TO, 0.14f, 0.67f, 0.21f, 1.36f, 0.21f, 2.07f,
+-R_CUBIC_TO, 0, 2.59f, -0.85f, 4.81f, -2.54f, 6.68f,
+-R_CUBIC_TO, -1.69f, 1.87f, -3.78f, 2.95f, -6.26f, 3.25f,
+-R_LINE_TO, 4, -6.93f,
+-R_CUBIC_TO, 0.25f, -0.43f, 0.45f, -0.9f, 0.59f, -1.41f,
+-R_CUBIC_TO, 0.14f, -0.51f, 0.21f, -1.04f, 0.21f, -1.59f,
+-R_CUBIC_TO, 0, -0.78f, -0.14f, -1.51f, -0.41f, -2.19f,
+-R_ARC_TO, 6.07f, 6.07f, 0, 0, 0, -1.14f, -1.81f,
++MOVE_TO, 3.71f, 15.00f,
++LINE_TO, 12.71f, 11.24f,
++LINE_TO, 10.96f, 14.24f,
+ CLOSE
+--- a/components/omnibox/browser/vector_icons/product_chrome_refresh_old.icon
++++ b/components/omnibox/browser/vector_icons/product_chrome_refresh_old.icon
+@@ -1,51 +1,20 @@
+-// Copyright 2023 The Chromium Authors
+-// Use of this source code is governed by a BSD-style license that can be
+-// found in the LICENSE file.
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++//
++// aerographene mark (branding/aerographene-mark.svg, three wing facets) for
++// the omnibox chip of internal pages; replaces the Chromium logo.
+ 
+-CANVAS_DIMENSIONS, 15,
+-MOVE_TO, 4.92, 7.5,
+-R_CUBIC_TO, 0, 0.71, 0.25, 1.31, 0.76, 1.82,
+-R_CUBIC_TO, 0.51, 0.51, 1.12, 0.76, 1.82, 0.76,
+-R_CUBIC_TO, 0.7, 0, 1.31, -0.25, 1.82, -0.76,
+-R_CUBIC_TO, 0.51, -0.51, 0.76, -1.12, 0.76, -1.82,
+-R_CUBIC_TO, 0, -0.7, -0.25, -1.31, -0.76, -1.82,
+-R_ARC_TO, 2.49, 2.49, 0, 0, 0, -1.82, -0.76,
+-R_CUBIC_TO, -0.7, 0, -1.31, 0.25, -1.82, 0.76,
+-R_ARC_TO, 2.49, 2.49, 0, 0, 0, -0.76, 1.82,
++CANVAS_DIMENSIONS, 16,
++FILL_RULE_NONZERO,
++MOVE_TO, 3.29f, 14.58f,
++LINE_TO, 9.14f, 1.00f,
++LINE_TO, 10.39f, 6.11f,
+ CLOSE,
+-MOVE_TO, 7.5, 11.48,
+-R_CUBIC_TO, 0.14, 0, 0.28, 0, 0.41, -0.02,
+-R_CUBIC_TO, 0.13, -0.01, 0.26, -0.04, 0.39, -0.07,
+-LINE_TO, 6.77, 14.06,
+-R_CUBIC_TO, -1.65, -0.19, -3.04, -0.89, -4.15, -2.12,
+-CUBIC_TO, 1.5, 10.71, 0.94, 9.24, 0.94, 7.55,
+-R_CUBIC_TO, 0, -0.46, 0.05, -0.9, 0.13, -1.33,
+-R_CUBIC_TO, 0.08, -0.44, 0.22, -0.85, 0.39, -1.25,
+-R_LINE_TO, 2.63, 4.55,
+-R_CUBIC_TO, 0.34, 0.59, 0.81, 1.07, 1.41, 1.43,
+-R_CUBIC_TO, 0.6, 0.36, 1.26, 0.54, 2.01, 0.54,
++MOVE_TO, 3.50f, 14.79f,
++LINE_TO, 12.33f, 6.05f,
++LINE_TO, 11.69f, 10.43f,
+ CLOSE,
+-R_MOVE_TO, 0, -7.87,
+-R_CUBIC_TO, -0.87, 0, -1.65, 0.25, -2.33, 0.77,
+-R_ARC_TO, 3.95, 3.95, 0, 0, 0, -1.42, 1.94,
+-LINE_TO, 2.21, 3.66,
+-R_ARC_TO, 6.79, 6.79, 0, 0, 1, 2.27, -1.94,
+-CUBIC_TO, 5.4, 1.22, 6.4, 0.98, 7.5, 0.98,
+-R_CUBIC_TO, 1.1, 0, 2.08, 0.24, 2.99, 0.72,
+-ARC_TO, 6.66, 6.66, 0, 0, 1, 12.76, 3.6,
+-H_LINE_TO, 7.51,
+-R_LINE_TO, -0.01, 0.01,
+-CLOSE,
+-R_MOVE_TO, 6.01, 1.31,
+-R_CUBIC_TO, 0.19, 0.4, 0.32, 0.83, 0.41, 1.27,
+-R_CUBIC_TO, 0.09, 0.44, 0.15, 0.89, 0.15, 1.36,
+-R_CUBIC_TO, 0, 1.7, -0.55, 3.16, -1.68, 4.38,
+-R_CUBIC_TO, -1.11, 1.23, -2.47, 1.93, -4.1, 2.13,
+-R_LINE_TO, 2.63, -4.55,
+-R_CUBIC_TO, 0.17, -0.28, 0.29, -0.59, 0.38, -0.92,
+-R_CUBIC_TO, 0.09, -0.34, 0.15, -0.69, 0.15, -1.05,
+-R_CUBIC_TO, 0, -0.52, -0.09, -0.99, -0.28, -1.42,
+-R_ARC_TO, 3.96, 3.96, 0, 0, 0, -0.74, -1.2,
+-R_H_LINE_TO, 3.08,
+-R_V_LINE_TO, 0.01,
++MOVE_TO, 3.71f, 15.00f,
++LINE_TO, 12.71f, 11.24f,
++LINE_TO, 10.96f, 14.24f,
+ CLOSE

@@ -1,0 +1,122 @@
+aerographene: configurações — visual quadrado e semi-futurista (v0.3, fatia F5).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/webui-theme-shape.patch (--aero-radius, contorno do card).
+Só recursos de chrome://settings (CSS e o <style> do menu); sem TS, strings nem
+função removida. Rótulos de seção (títulos de card e h2) em mono caixa alta de
+11px; menu lateral compacto, sem pílula, item ativo marcado por barra de 2px na
+borda inicial; densidade menor via variáveis --cr-section-* em settings_vars.css
+(40px de linha, 16px de padding). Raio, contorno de 1px dos cards, botões e
+toggles quadrados vêm do --aero-radius do tema ativo (0 no pixelized). Cores só
+dos tokens/variáveis do tema (--cr-*, --color-*), nenhuma cor fixa nova.
+
+diff --git a/chrome/browser/resources/settings/settings_menu/settings_menu.html b/chrome/browser/resources/settings/settings_menu/settings_menu.html
+--- a/chrome/browser/resources/settings/settings_menu/settings_menu.html
++++ b/chrome/browser/resources/settings/settings_menu/settings_menu.html
+@@ -30,6 +30,42 @@
+         margin-top: 8px;
+       }
+ 
++      /* aerographene (settings-f5): square, compact items; the selected one
++         is marked by a bar at the start edge, not a filled pill. */
++      .cr-nav-menu-item {
++        border-inline-start: 2px solid transparent;
++        border-radius: var(--aero-radius, 0);
++        font-family: var(--aero-mono, inherit);
++        font-size: 12px;
++        margin-inline: 0;
++        min-height: 32px;
++        padding-block: 6px;
++        padding-inline-start: 14px;
++      }
++
++      .cr-nav-menu-item cr-icon {
++        margin-inline-end: 12px;
++      }
++
++      .cr-nav-menu-item:hover,
++      .cr-nav-menu-item[selected] {
++        background: var(--color-nav-menu-item-background-hover,
++            var(--cr-hover-background-color));
++        color: var(--cr-primary-text-color);
++      }
++
++      .cr-nav-menu-item[selected] {
++        border-inline-start-color: var(--color-nav-menu-item-selected,
++            var(--cr-link-color));
++        --iron-icon-fill-color: var(--color-nav-menu-item-selected,
++            var(--cr-link-color));
++      }
++
++      .cr-nav-menu-item:focus-visible {
++        outline: 1px solid var(--cr-focus-outline-color);
++        outline-offset: -1px;
++      }
++
+       @media (prefers-color-scheme: dark) {
+         #menu {
+           color: var(--cr-primary-text-color);
+diff --git a/chrome/browser/resources/settings/settings_page/settings_section.css b/chrome/browser/resources/settings/settings_page/settings_section.css
+--- a/chrome/browser/resources/settings/settings_page/settings_section.css
++++ b/chrome/browser/resources/settings/settings_page/settings_section.css
+@@ -21,14 +21,16 @@
+ 
+ #header .title {
+   color: var(--cr-primary-text-color);
+-  font-size: 108%;
+-  font-weight: 400;
+-  letter-spacing: .25px;
+-  margin-bottom: 12px;
++  font-family: var(--aero-mono, inherit);
++  font-size: 11px;
++  font-weight: 500;
++  letter-spacing: .08em;
++  margin-bottom: 8px;
+   margin-top: var(--cr-section-vertical-margin);
+   outline: none;
+-  padding-bottom: 4px;
+-  padding-top: 8px;
++  padding-bottom: 2px;
++  padding-top: 4px;
++  text-transform: uppercase;
+ }
+ 
+ #feedback {
+diff --git a/chrome/browser/resources/settings/settings_shared_lit.css b/chrome/browser/resources/settings/settings_shared_lit.css
+--- a/chrome/browser/resources/settings/settings_shared_lit.css
++++ b/chrome/browser/resources/settings/settings_shared_lit.css
+@@ -24,11 +24,14 @@
+   align-items: center;
+   color: var(--cr-secondary-text-color);
+   display: flex;
+-  font-size: inherit;
++  font-family: var(--aero-mono, inherit);
++  font-size: 11px;
+   font-weight: 500;
++  letter-spacing: .06em;
+   margin: 0;
+   padding-bottom: 0;
+-  padding-top: 12px;
++  padding-top: 10px;
++  text-transform: uppercase;
+ }
+ 
+ cr-icon,
+diff --git a/chrome/browser/resources/settings/settings_vars.css b/chrome/browser/resources/settings/settings_vars.css
+--- a/chrome/browser/resources/settings/settings_vars.css
++++ b/chrome/browser/resources/settings/settings_vars.css
+@@ -22,6 +22,14 @@
+   --iron-icon-width: var(--cr-icon-size);
+ 
+   --cr-radio-group-item-padding: 0;
++
++  /* aerographene: compact density and mono labels (settings-f5). */
++  --aero-mono: 'JetBrains Mono', 'DejaVu Sans Mono', ui-monospace, monospace;
++  --cr-section-min-height: 40px;
++  --cr-section-two-line-min-height: 54px;
++  --cr-section-padding: 16px;
++  --cr-section-vertical-padding: 8px;
++  --cr-section-vertical-margin: 14px;
+ }
+ 
+ @media (prefers-color-scheme: dark) {

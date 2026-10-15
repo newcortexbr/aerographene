@@ -5,7 +5,7 @@ Propósito: em profiles::SwitchToProfile (menu do avatar, profile picker),
 sem always_create, a janela do space de destino recebe os bounds restaurados
 e o estado maximizado da janela ativa de outro space; a janela de origem é
 minimizada (não fechada). Sem janela extra: o fluxo upstream já reutiliza a
-janela existente do destino. Só Linux.
+janela existente do destino. Linux e Windows (D3b).
 
 --- a/chrome/browser/profiles/profile_window.cc
 +++ b/chrome/browser/profiles/profile_window.cc
@@ -41,7 +41,7 @@ janela existente do destino. Só Linux.
 +          to->Maximize();
 +        }
 +      } else if (!to->IsMaximized()) {
-+        // Position is only honored on X11/Xwayland; on Wayland the compositor
++        // Position is honored on Windows and X11; on Wayland the compositor
 +        // places the window and only the size applies. A maximized target
 +        // keeps its state (SetBounds would unmaximize it).
 +        to->SetBounds(from->GetRestoredBounds());
@@ -61,7 +61,7 @@ janela existente do destino. Só Linux.
                       bool always_create,
                       base::OnceCallback<void(BrowserWindowInterface*)> callback,
                       bool open_command_line_urls) {
-+#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
 +  if (!always_create) {
 +    BrowserWindowInterface* source =
 +        GlobalBrowserCollection::GetInstance()->GetLastActiveBrowser();
@@ -71,7 +71,7 @@ janela existente do destino. Só Linux.
 +                                source->GetWeakPtr(), std::move(callback));
 +    }
 +  }
-+#endif  // BUILDFLAG(IS_LINUX)
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
    base::OnceCallback<void(Profile*)> open_browser_callback =
        base::BindOnce(&profiles::OpenBrowserWindowForProfile,
                       std::move(callback), always_create,

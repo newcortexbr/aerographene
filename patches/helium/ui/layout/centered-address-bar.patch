@@ -1,4 +1,4 @@
-# aerographene: patch portado sem alteração do conteúdo do diff.
+# aerographene: contexto de settings rebaseado (sem shift-right-click-context-menu).
 # Origem: https://github.com/imputnet/helium (tag 0.18.3, Chromium 154.0.8037.97)
 # Commit: 57a40ad82583d21787cff0500150539ce54c5960
 # Caminho original: patches/helium/ui/layout/centered-address-bar.patch
@@ -6,7 +6,7 @@
 #
 --- a/chrome/common/pref_names.h
 +++ b/chrome/common/pref_names.h
-@@ -624,6 +624,11 @@ inline constexpr char kHeliumLayout[] =
+@@ -610,6 +610,11 @@ inline constexpr char kHeliumLayout[] = "helium.browser.layout";
  inline constexpr char kHeliumVerticalRightAligned[] =
      "helium.browser.vertical_right_aligned";
  
@@ -20,7 +20,7 @@
  inline constexpr char kShowHomeButton[] = "browser.show_home_button";
 --- a/chrome/browser/ui/browser_ui_prefs.cc
 +++ b/chrome/browser/ui/browser_ui_prefs.cc
-@@ -133,6 +133,8 @@ void RegisterBrowserUserPrefs(user_prefs
+@@ -124,6 +124,8 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
  
    registry->RegisterBooleanPref(prefs::kHeliumRoundedFrame, true);
  
@@ -31,7 +31,7 @@
    registry->RegisterBooleanPref(prefs::kShowHomeButton, false,
 --- a/chrome/browser/ui/views/toolbar/toolbar_view.h
 +++ b/chrome/browser/ui/views/toolbar/toolbar_view.h
-@@ -275,6 +275,9 @@ class ToolbarView : public views::Access
+@@ -270,6 +270,9 @@ class ToolbarView : public views::AccessiblePaneView,
    // Updates glic button parenting after hiding glic actor task icon.
    void FinalizeHideGlicActorTaskIcon();
  
@@ -41,7 +41,7 @@
   protected:
    // This controls Toolbar, LocationBar and CustomTabBar visibility.
    // If we don't set all three, tab navigation from the app menu breaks
-@@ -356,6 +359,11 @@ class ToolbarView : public views::Access
+@@ -351,6 +354,11 @@ class ToolbarView : public views::AccessiblePaneView,
  
    void OnShowMediaButtonChanged();
  
@@ -53,7 +53,7 @@
    void OnTouchUiChanged();
  
    void InitGlicContainer();
-@@ -477,6 +485,8 @@ class ToolbarView : public views::Access
+@@ -471,6 +479,8 @@ class ToolbarView : public views::AccessiblePaneView,
  
    BooleanPrefMember show_media_button_;
  
@@ -72,7 +72,7 @@
  #include "base/i18n/number_formatting.h"
  #include "base/i18n/rtl.h"
  #include "base/metrics/histogram_functions.h"
-@@ -222,6 +223,61 @@ void SetRefreshMargins(views::View* butt
+@@ -254,6 +255,61 @@ void SetRefreshMargins(views::View* button, bool expanded) {
                                    : kBrowserAppMenuRefreshCollapsedMargin));
  }
  
@@ -134,7 +134,7 @@
  }  // namespace
  
  ////////////////////////////////////////////////////////////////////////////////
-@@ -691,6 +747,11 @@ void ToolbarView::Init() {
+@@ -730,6 +786,11 @@ void ToolbarView::Init() {
      OnShowMediaButtonChanged();
    }
  
@@ -146,7 +146,7 @@
    InitLayout();
  
    for (auto* button : std::array<views::Button*, 5>{back_, forward_, reload_,
-@@ -1620,7 +1681,11 @@ void ToolbarView::InitLayout() {
+@@ -1616,7 +1677,11 @@ void ToolbarView::InitLayout() {
                                 views::MaximumFlexSizeRule::kUnbounded)
            .WithOrder(location_bar_flex_order);
  
@@ -159,7 +159,7 @@
  
    layout_manager_->SetOrientation(views::LayoutOrientation::kHorizontal)
        .SetCrossAxisAlignment(views::LayoutAlignment::kCenter)
-@@ -2058,6 +2123,62 @@ void ToolbarView::OnShowMediaButtonChang
+@@ -2079,6 +2144,62 @@ void ToolbarView::OnShowMediaButtonChanged() {
    InvalidateLayout();
  }
  
@@ -224,7 +224,7 @@
      // Update the internal margins for touch layout.
 --- a/chrome/app/settings_strings.grdp
 +++ b/chrome/app/settings_strings.grdp
-@@ -289,6 +289,9 @@
+@@ -280,6 +280,9 @@
      <message name="IDS_SETTINGS_TAB_STRIP_RIGHT_ALIGN" desc="Label for the toggle that displays vertical tabs on the right side of the browser window.">
        Show vertical tabs on right side
      </message>
@@ -236,17 +236,17 @@
      </message>
 --- a/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
 +++ b/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
-@@ -603,6 +603,7 @@ void AddAppearanceStrings(content::WebUI
+@@ -599,6 +599,7 @@ void AddAppearanceStrings(content::WebUIDataSource* html_source,
        {"browserLayoutCompact", IDS_SETTINGS_BROWSER_LAYOUT_COMPACT},
        {"browserLayoutVertical", IDS_SETTINGS_BROWSER_LAYOUT_VERTICAL},
        {"tabStripRightAlign", IDS_SETTINGS_TAB_STRIP_RIGHT_ALIGN},
 +      {"centeredLocationBar", IDS_SETTINGS_CENTERED_LOCATION_BAR},
        {"verticalCollapseShortcut", IDS_SETTINGS_VERTICAL_COLLAPSE_SHORTCUT},
-       {"shiftRightClickContextMenu",
-        IDS_SETTINGS_SHIFT_RIGHT_CLICK_CONTEXT_MENU},
+       {"showHomeButton", IDS_SETTINGS_SHOW_HOME_BUTTON},
+       {"showBookmarksBar", IDS_SETTINGS_SHOW_BOOKMARKS_BAR},
 --- a/chrome/browser/extensions/api/settings_private/prefs_util.cc
 +++ b/chrome/browser/extensions/api/settings_private/prefs_util.cc
-@@ -224,6 +224,8 @@ const PrefsUtil::TypedPrefMap& PrefsUtil
+@@ -223,6 +223,8 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetAllowlistedKeys() {
    (*s_allowlist)[::prefs::kHeliumLayout] = settings_api::PrefType::kNumber;
    (*s_allowlist)[::prefs::kHeliumVerticalRightAligned] =
        settings_api::PrefType::kBoolean;
@@ -257,7 +257,7 @@
    (*s_allowlist)[::embedder_support::kAlternateErrorPagesEnabled] =
 --- a/chrome/browser/resources/settings/appearance_page/appearance_page.ts
 +++ b/chrome/browser/resources/settings/appearance_page/appearance_page.ts
-@@ -715,6 +715,10 @@ export class SettingsAppearancePageEleme
+@@ -715,6 +715,10 @@ export class SettingsAppearancePageElement extends
      return this.browserLayoutPref_?.value === BrowserLayout.VERTICAL;
    }
  
@@ -270,7 +270,7 @@
      this.showManagedThemeDialog_ = false;
 --- a/chrome/browser/resources/settings/appearance_page/appearance_page.html.ts
 +++ b/chrome/browser/resources/settings/appearance_page/appearance_page.html.ts
-@@ -79,6 +79,11 @@ export function getHtml(this: SettingsAp
+@@ -78,6 +78,11 @@ export function getHtml(this: SettingsAppearancePageElement) {
            pref-key="helium.browser.vertical_right_aligned"
            label="$i18n{tabStripRightAlign}">
        </settings-toggle-button>
@@ -295,7 +295,7 @@
  
  #if BUILDFLAG(IS_MAC)
  #include "chrome/browser/ui/views/frame/glass_frame_service.h"
-@@ -267,6 +269,12 @@ void BrowserViewLayoutImpl::Layout(views
+@@ -267,6 +269,12 @@ void BrowserViewLayoutImpl::Layout(views::View* host) {
      SetViewVisibility(view, visible);
    });
  

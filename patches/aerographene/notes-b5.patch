@@ -1,0 +1,1587 @@
+aerographene: notas — watcher, busca e imagens da vault (v0.3, fatia B5).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/notes-webui.patch, aerographene/notes-vault-reader.patch,
+aerographene/notes-render.patch, aerographene/notes-editor.patch.
+Propósito: (1) watcher: VaultWatcher (base::FilePathWatcher recursivo, inotify
+no Linux) vive numa sequência MayBlock dona do NotesHandler; a mensagem
+watchVault o (re)inicia e responde se está ativo; mudanças fora de caminhos
+ocultos (.git, .obsidian, .aero-N.tmp do próprio salvar) viram o evento
+"vaultChanged" (sem caminho), agrupado em janelas de 200 ms. Ele morre com o
+handler (aba fechada) ou ao recarregar a página (OnJavascriptDisallowed). A
+página refaz a árvore (troca atômica, sem piscar), compara o mtime da nota
+aberta e: nota limpa recarrega do disco; nota alterada entra no fluxo de
+conflito do B4 (copiar, sobrescrever ou recarregar, sem perder o texto);
+nota apagada fora avisa. (2) busca: SearchVault (nome e conteúdo, ASCII sem
+distinção de caixa, só .md no conteúdo, mesmos filtros do ListVaultDir, limites:
+100 resultados, 20000 arquivos, 128 MiB lidos, 16 níveis) e mensagem
+searchVault; campo de busca na barra lateral. (3) imagens: ReadVaultImage
+(png/jpg/gif/webp até 10 MiB, SVG não, mesma abertura O_NOFOLLOW das notas) e
+FindVaultFileByName (embed Obsidian só com o nome); mensagem readImage devolve
+{mime, data base64}; markdown.js só cria <img> para caminhos relativos da
+vault (![alt](x.png), ![[x.png|300]]), via opts.loadImage; remotas, absolutas
+e com esquema continuam texto. CSP da página: img-src 'self' data:. Listagem
+passa a ignorar nomes que não são UTF-8 (base::Value exige UTF-8).
+
+--- a/chrome/browser/resources/aero_notes/editor.js
++++ b/chrome/browser/resources/aero_notes/editor.js
+@@ -142,7 +142,8 @@
+     div.dataset.s = String(start);
+     div.dataset.n = String(end - start);
+     div.append(renderMarkdown(lines.slice(start, end).join('\n'),
+-                              {onWikilink: opts.onWikilink}));
++                              {onWikilink: opts.onWikilink,
++                               loadImage: opts.loadImage}));
+     return div;
+   }
+ 
+--- a/chrome/browser/resources/aero_notes/markdown.js
++++ b/chrome/browser/resources/aero_notes/markdown.js
+@@ -7,8 +7,9 @@
+ // text. No Trusted Types sink (innerHTML, insertAdjacentHTML, srcdoc...) is
+ // used. Links: http(s) and mailto only; anything else (javascript:, data:,
+ // chrome:) stays plain text. [[wikilinks]] call opts.onWikilink(target).
+-// Images are not loaded yet (no remote fetch; vault images come later):
+-// ![alt](src) renders as "[imagem: alt]".
++// Images: only vault images are loaded, through opts.loadImage(path, img),
++// for ![alt](relative.png) and Obsidian ![[name.png|300]]; remote, absolute
++// and "scheme:" sources never become an <img> and render as "[imagem: alt]".
+ // Subset: ATX headings, paragraphs, blank-line separation, fenced code
+ // (```), blockquote (>), unordered (-, *, +) and ordered (1.) lists, one
+ // level, horizontal rule, **bold**, *em*/_em_, `code`, ~~strike~~, links,
+@@ -29,7 +30,8 @@
+ const INLINE = [
+   {re: /`([^`]+)`/, make: (m) => el('code', m[1])},
+   {re: /\[\[([^\]\n|]+)(?:\|([^\]\n]+))?\]\]/, make: (m, o) => wikilink(m, o)},
+-  {re: /!\[([^\]\n]*)\]\(([^)\s]*)\)/, make: (m) => el('span', `[imagem: ${m[1] || m[2]}]`)},
++  {re: /!\[\[([^\]\n|]+)(?:\|([^\]\n]+))?\]\]/, make: (m, o) => embed(m, o)},
++  {re: /!\[([^\]\n]*)\]\(([^)\s]*)\)/, make: (m, o) => image(m[2], m[1], o)},
+   {re: /\[([^\]\n]+)\]\(([^)\s]+)\)/, make: (m, o) => link(m, o)},
+   {re: /\*\*([^*\n]+)\*\*/, make: (m, o) => wrap('strong', m[1], o)},
+   {re: /~~([^~\n]+)~~/, make: (m, o) => wrap('s', m[1], o)},
+@@ -38,6 +40,54 @@
+   {re: /<?(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])>?/, make: (m) => anchor(m[1], m[1])},
+ ];
+ 
++const IMAGE_EXT = /\.(png|jpe?g|gif|webp)$/i;
++
++// Path of a vault image from a Markdown source, or '' when it is not one
++// (URL with a scheme, absolute, protocol-relative, not an image extension).
++function vaultImagePath(src) {
++  if (/^([a-z][a-z0-9+.-]*:|\/|\\)/i.test(src)) {
++    return '';
++  }
++  let p = src.split(/[?#]/)[0];
++  try {
++    p = decodeURIComponent(p);
++  } catch (e) {
++    return '';
++  }
++  p = p.replace(/^(\.\/)+/, '');
++  return IMAGE_EXT.test(p) && !p.includes('\0') ? p : '';
++}
++
++function placeholder(alt) {
++  const s = el('span', `[imagem: ${alt}]`);
++  s.className = 'img-missing';
++  return s;
++}
++
++function image(src, alt, opts, width) {
++  const path = vaultImagePath(src);
++  if (!path || !opts || !opts.loadImage) {
++    return placeholder(alt || src);
++  }
++  const img = document.createElement('img');
++  img.alt = alt || path;
++  img.className = 'vault-img';
++  if (width) {
++    img.style.width = `${width}px`;
++  }
++  opts.loadImage(path, img, () => img.replaceWith(placeholder(alt || path)));
++  return img;
++}
++
++function embed(m, opts) {
++  const target = m[1].trim();
++  if (!vaultImagePath(target)) {
++    return el('span', `[nota embutida: ${target}]`);
++  }
++  const w = /^\d{1,4}$/.test((m[2] || '').trim()) ? Number(m[2]) : 0;
++  return image(target, target, opts, Math.min(w, 4000));
++}
++
+ function wrap(tag, text, opts) {
+   const e = el(tag);
+   appendInline(e, text, opts);
+--- a/chrome/browser/resources/aero_notes/notes.css
++++ b/chrome/browser/resources/aero_notes/notes.css
+@@ -135,3 +135,24 @@
+ .node.dir { color: var(--accent); }
+ .node.muted { cursor: default; opacity: 0.5; }
+ .node:hover { background: var(--line); }
++
++/* B5: busca na vault, imagens embutidas, aviso de watcher */
++.search { padding: 6px 8px; }
++.search input {
++  width: 100%; box-sizing: border-box; font: inherit; padding: 4px 8px;
++  border: 1px solid var(--border, #8884); border-radius: 6px;
++  background: transparent; color: inherit;
++}
++.results { overflow: auto; flex: 1; }
++.results[hidden], .tree[hidden] { display: none; }
++.hit { padding: 4px 12px; cursor: pointer; }
++.hit:hover, .hit:focus-visible { background: #8882; outline: none; }
++.hit .hit-name { display: block; }
++.hit .hit-dir, .hit .hit-snippet {
++  display: block; font-size: 0.85em; opacity: 0.7;
++  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
++}
++.hit.muted { opacity: 0.5; cursor: default; }
++.md img.vault-img { max-width: 100%; height: auto; }
++.img-missing { opacity: 0.6; font-style: italic; }
++.vault-name.nowatch::after { content: " (sem observar arquivos)"; opacity: 0.6; font-size: 0.8em; }
+--- a/chrome/browser/resources/aero_notes/notes.html
++++ b/chrome/browser/resources/aero_notes/notes.html
+@@ -17,6 +17,12 @@
+       <button class="vault-pick" id="btnNew" type="button" disabled
+           title="nova nota">+ nota</button>
+     </header>
++    <div class="search">
++      <input id="search" type="search" disabled spellcheck="false"
++          placeholder="buscar na vault (nome e conteúdo)"
++          aria-label="buscar na vault">
++    </div>
++    <nav class="results" id="results" aria-label="resultados da busca" hidden></nav>
+     <nav class="tree" id="tree" role="tree" aria-label="arquivos da vault">
+       <p class="empty">nenhuma vault escolhida</p>
+     </nav>
+--- a/chrome/browser/resources/aero_notes/notes.js
++++ b/chrome/browser/resources/aero_notes/notes.js
+@@ -70,6 +70,14 @@
+     (ok ? p.resolve : p.reject)(value);
+   }
+ };
++// Events pushed by the browser (FireWebUIListener).
++const listeners = new Map();
++window.cr.webUIListenerCallback = (name, ...args) => {
++  const f = listeners.get(name);
++  if (f) {
++    f(...args);
++  }
++};
+ function send(name, ...args) {
+   const id = `notes${nextId++}`;
+   return new Promise((resolve, reject) => {
+@@ -88,6 +96,8 @@
+ const noteState = document.getElementById('noteState');
+ const banner = document.getElementById('banner');
+ const btnNew = document.getElementById('btnNew');
++const search = document.getElementById('search');
++const results = document.getElementById('results');
+ const btnSave = document.getElementById('btnSave');
+ const btnRename = document.getElementById('btnRename');
+ const btnDelete = document.getElementById('btnDelete');
+@@ -97,6 +107,9 @@
+ let doc = null;
+ let saving = false;
+ let vaultTitle = '';
++let needCheck = false;  // external-change check postponed (saving / banner)
++let dismissedMtime = -1;  // disk version the user already answered about
++let goneNotified = '';
+ 
+ const STATUS_TEXT = {
+   conflict: 'o arquivo mudou no disco',
+@@ -133,6 +146,7 @@
+     return;
+   }
+   container.replaceChildren();
++  const nested = [];
+   for (const entry of entries) {
+     const row = document.createElement('div');
+     row.className = entry.dir ? 'node dir' : 'node file';
+@@ -160,12 +174,13 @@
+           expanded.delete(entry.path);
+         }
+         if (open && !kids.childElementCount) {
+-          fillDir(kids, entry.path, depth + 1);
++          return fillDir(kids, entry.path, depth + 1);
+         }
++        return undefined;
+       };
+       row.addEventListener('click', () => setOpen(kids.hidden));
+       if (expanded.has(entry.path)) {
+-        setOpen(true);
++        nested.push(setOpen(true));
+       }
+     } else if (entry.path.toLowerCase().endsWith('.md')) {
+       row.addEventListener('click', () => requestOpen(entry.path));
+@@ -182,6 +197,7 @@
+   if (!entries.length) {
+     message(container, 'vazio');
+   }
++  await Promise.all(nested);
+ }
+ 
+ function updateState() {
+@@ -300,6 +316,8 @@
+ function showNote(path, text, fileMtime) {
+   current = path;
+   mtime = fileMtime;
++  goneNotified = '';
++  dismissedMtime = -1;
+   noteTitle.textContent = baseName(path);
+   for (const n of tree.querySelectorAll('.node.active')) {
+     n.classList.remove('active');
+@@ -316,6 +334,7 @@
+     onChange: updateState,
+     onSave: () => save(),
+     onWikilink: openWikilink,
++    loadImage,
+   });
+   doc.load(text);
+   editor.scrollTop = 0;
+@@ -336,6 +355,17 @@
+ // Atomic save with the mtime read when the note was opened. A conflict never
+ // drops the text: it stays in the editor and the user chooses.
+ async function save(overwrite = false) {
++  try {
++    return await saveNow(overwrite);
++  } finally {
++    if (needCheck && !saving) {
++      needCheck = false;
++      checkOpenNote();
++    }
++  }
++}
++
++async function saveNow(overwrite) {
+   if (!current || !doc || saving) {
+     return false;
+   }
+@@ -424,8 +454,14 @@
+   return true;
+ }
+ 
+-function refreshTree() {
+-  return fillDir(tree, '', 0);
++// Rebuilds the tree off-screen (expanded folders included) and swaps it in,
++// so a refresh does not flicker or reset the scroll position.
++async function refreshTree() {
++  const fresh = document.createElement('div');
++  await fillDir(fresh, '', 0);
++  const top = tree.scrollTop;
++  tree.replaceChildren(...fresh.childNodes);
++  tree.scrollTop = top;
+ }
+ 
+ async function newNote() {
+@@ -553,11 +589,265 @@
+       .then(() => requestOpen(dir + name), () => requestOpen(name));
+ }
+ 
++
++// --- B5: images embedded from the vault. The browser reads the file with the
++// same confinement as notes and answers {mime, data (base64)}; it becomes a
++// data: URL (img-src allows data: only). Cached per note folder + source.
++const imageCache = new Map();
++let imageCacheChars = 0;
++const IMAGE_CACHE_CHARS = 48 * 1024 * 1024;
++
++function loadImage(path, img, onFail) {
++  const dir = dirOf(current);
++  const key = `${dir}\0${path}`;
++  let entry = imageCache.get(key);
++  if (!entry) {
++    entry = {size: 0};
++    entry.url = send('readImage', path, dir).then(
++        (r) => `data:${r.mime};base64,${r.data}`, () => null);
++    imageCache.set(key, entry);
++    entry.url.then((u) => {
++      if (u && imageCache.get(key) === entry) {
++        entry.size = u.length;
++        imageCacheChars += u.length;
++        while (imageCacheChars > IMAGE_CACHE_CHARS && imageCache.size > 1) {
++          const [oldKey, old] = imageCache.entries().next().value;
++          imageCache.delete(oldKey);
++          imageCacheChars -= old.size;
++        }
++      }
++    });
++  }
++  entry.url.then((u) => {
++    if (u) {
++      img.src = u;
++    } else {
++      onFail();
++    }
++  });
++}
++
++function clearImageCache() {
++  imageCache.clear();
++  imageCacheChars = 0;
++}
++
++// --- B5: search by name and content (done in the browser, bounded there).
++let searchSeq = 0;
++let searchTimer = 0;
++
++async function runSearch() {
++  clearTimeout(searchTimer);
++  const q = search.value.trim();
++  const seq = ++searchSeq;
++  if (q.length < 2) {
++    results.hidden = true;
++    tree.hidden = false;
++    return;
++  }
++  tree.hidden = true;
++  results.hidden = false;
++  let r;
++  try {
++    r = await send('searchVault', q);
++  } catch (e) {
++    if (seq === searchSeq) {
++      message(results, 'busca indisponível');
++    }
++    return;
++  }
++  if (seq !== searchSeq) {
++    return;
++  }
++  results.replaceChildren();
++  for (const hit of r.hits) {
++    const row = document.createElement('div');
++    row.className = 'hit';
++    row.setAttribute('role', 'link');
++    row.tabIndex = 0;
++    const name = document.createElement('span');
++    name.className = 'hit-name';
++    name.textContent = baseName(hit.path);
++    row.append(name);
++    if (hit.path.includes('/')) {
++      const d = document.createElement('span');
++      d.className = 'hit-dir';
++      d.textContent = hit.path.slice(0, hit.path.lastIndexOf('/'));
++      row.append(d);
++    }
++    if (hit.snippet) {
++      const s = document.createElement('span');
++      s.className = 'hit-snippet';
++      s.textContent = hit.snippet;
++      row.append(s);
++    }
++    if (hit.path.toLowerCase().endsWith('.md')) {
++      row.addEventListener('click', () => requestOpen(hit.path));
++      row.addEventListener('keydown', (e) => {
++        if (e.key === 'Enter') {
++          e.preventDefault();
++          requestOpen(hit.path);
++        }
++      });
++    } else {
++      row.classList.add('muted');
++    }
++    results.append(row);
++  }
++  if (!r.hits.length) {
++    message(results, 'nada encontrado');
++  } else if (r.truncated) {
++    const p = document.createElement('p');
++    p.className = 'empty';
++    p.textContent = 'resultado parcial: a busca tem limite de itens e de tamanho';
++    results.append(p);
++  }
++}
++
++search.addEventListener('input', () => {
++  clearTimeout(searchTimer);
++  searchTimer = setTimeout(runSearch, 300);
++});
++search.addEventListener('keydown', (e) => {
++  if (e.key === 'Enter') {
++    runSearch();
++  } else if (e.key === 'Escape') {
++    search.value = '';
++    runSearch();
++  }
++});
++
++// --- B5: the browser watches the vault while this page exists and sends
++// "vaultChanged" (no path). The page re-lists the tree and compares the open
++// note's mtime with the one it opened; a clean note is reloaded, a dirty one
++// goes through the same conflict flow as saving (nothing is lost).
++let changeTimer = 0;
++let syncing = false;
++let resync = false;
++
++function onVaultChanged() {
++  clearTimeout(changeTimer);
++  changeTimer = setTimeout(syncExternal, 100);
++}
++listeners.set('vaultChanged', onVaultChanged);
++
++async function syncExternal() {
++  if (syncing) {
++    resync = true;
++    return;
++  }
++  syncing = true;
++  try {
++    clearImageCache();
++    await refreshTree();
++    if (search.value.trim().length >= 2) {
++      runSearch();
++    }
++    await checkOpenNote();
++  } finally {
++    syncing = false;
++    if (resync) {
++      resync = false;
++      onVaultChanged();
++    }
++  }
++}
++
++async function checkOpenNote() {
++  if (!current || !doc) {
++    return;
++  }
++  if (saving || !banner.hidden) {
++    needCheck = true;  // retried when the save ends / the banner closes
++    return;
++  }
++  const path = current;
++  let note;
++  try {
++    note = await send('readNote', path);
++  } catch (e) {
++    if (path === current && e === 'notFound') {
++      noteGone(path);
++    }
++    return;
++  }
++  if (path !== current || !doc || saving || !banner.hidden) {
++    needCheck = true;
++    return;
++  }
++  if (note.mtime === mtime || note.mtime === dismissedMtime) {
++    return;
++  }
++  goneNotified = '';
++  const dirty = doc.isDirty();
++  if (note.text === doc.getText()) {
++    // Same content on disk (touched, or saved elsewhere): just take the mtime.
++    mtime = note.mtime;
++    if (dirty) {
++      doc.markSaved();
++    }
++    updateState();
++    return;
++  }
++  if (!dirty) {
++    const top = editor.scrollTop;
++    showNote(path, note.text, note.mtime);
++    editor.scrollTop = top;
++    noteState.textContent = 'atualizado do disco';
++    return;
++  }
++  const kept = await resolveConflict(path, doc.getText());
++  if (!kept && current === path && doc && doc.isDirty()) {
++    dismissedMtime = note.mtime;  // do not ask again for this disk version
++  }
++}
++
++function noteGone(path) {
++  if (goneNotified === path) {
++    return;
++  }
++  goneNotified = path;
++  if (doc && doc.isDirty()) {
++    notice(`${baseName(path)} foi apagada ou renomeada no disco. ` +
++           'O texto continua aqui; salvar recria a nota.');
++  } else {
++    clearNote();
++    notice(`${baseName(path)} foi apagada ou renomeada no disco.`);
++  }
++}
++
++new MutationObserver(() => {
++  if (banner.hidden && needCheck) {
++    needCheck = false;
++    checkOpenNote();
++  }
++}).observe(banner, {attributes: true, attributeFilter: ['hidden']});
++
++async function startWatch() {
++  let ok = false;
++  try {
++    ok = await send('watchVault');
++  } catch (e) {
++    ok = false;
++  }
++  vaultName.classList.toggle('nowatch', !ok);
++}
++
++window.addEventListener('keydown', (e) => {
++  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'f' &&
++      !search.disabled) {
++    e.preventDefault();
++    search.focus();
++    search.select();
++  }
++});
++
+ function showVault(info) {
+   if (!info || !info.path) {
+     vaultName.textContent = 'vault';
+     btnNew.disabled = true;
+     document.title = 'o: notas';
++    search.disabled = true;
+     message(tree, 'nenhuma vault escolhida');
+     editor.replaceChildren(...emptyNodes);
+     return;
+@@ -574,7 +864,13 @@
+   vaultTitle = info.name || info.path;
+   document.title = `o: ${vaultTitle}`;
+   btnNew.disabled = false;
++  search.disabled = false;
++  search.value = '';
++  results.hidden = true;
++  tree.hidden = false;
++  clearImageCache();
+   fillDir(tree, '', 0);
++  startWatch();
+ }
+ 
+ vaultPick.disabled = false;
+--- a/chrome/browser/ui/webui/aero_notes/aero_notes_ui.cc
++++ b/chrome/browser/ui/webui/aero_notes/aero_notes_ui.cc
+@@ -33,7 +33,8 @@
+ 
+   // Strict policy on top of the WebUI defaults (object-src 'none',
+   // Trusted Types, frame-ancestors 'none'): nothing outside the page itself,
+-  // no network, no inline script or style.
++  // no network, no inline script or style. data: images only: vault images
++  // (B5) arrive from the handler as data: URLs, never from the network.
+   using network::mojom::CSPDirectiveName;
+   source->OverrideContentSecurityPolicy(CSPDirectiveName::DefaultSrc,
+                                         "default-src 'none';");
+@@ -42,7 +43,7 @@
+   source->OverrideContentSecurityPolicy(CSPDirectiveName::StyleSrc,
+                                         "style-src 'self';");
+   source->OverrideContentSecurityPolicy(CSPDirectiveName::ImgSrc,
+-                                        "img-src 'self';");
++                                        "img-src 'self' data:;");
+   source->OverrideContentSecurityPolicy(CSPDirectiveName::ConnectSrc,
+                                         "connect-src 'none';");
+   source->OverrideContentSecurityPolicy(CSPDirectiveName::FormAction,
+--- a/chrome/browser/ui/webui/aero_notes/BUILD.gn
++++ b/chrome/browser/ui/webui/aero_notes/BUILD.gn
+@@ -31,16 +31,22 @@
+   sources = [
+     "vault_reader.cc",
+     "vault_reader.h",
++    "vault_watcher.cc",
++    "vault_watcher.h",
+   ]
+   public_deps = [ "//base" ]
+ }
+ 
+ source_set("unit_tests") {
+   testonly = true
+-  sources = [ "vault_reader_unittest.cc" ]
++  sources = [
++    "vault_reader_unittest.cc",
++    "vault_watcher_unittest.cc",
++  ]
+   deps = [
+     ":vault_reader",
+     "//base",
++    "//base/test:test_support",
+     "//testing/gtest",
+   ]
+ }
+--- a/chrome/browser/ui/webui/aero_notes/notes_handler.cc
++++ b/chrome/browser/ui/webui/aero_notes/notes_handler.cc
+@@ -5,7 +5,12 @@
+ 
+ #include <utility>
+ 
++#include "base/base64.h"
+ #include "base/functional/bind.h"
++#include "base/location.h"
++#include "base/task/bind_post_task.h"
++#include "base/task/single_thread_task_runner.h"
++#include "base/time/time.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/task/thread_pool.h"
+ #include "build/build_config.h"
+@@ -22,6 +27,9 @@
+ 
+ namespace {
+ 
++// Events from the watcher are coalesced: one message to the page per window.
++constexpr base::TimeDelta kChangeWindow = base::Milliseconds(200);
++
+ constexpr base::TaskTraits kIoTraits = {
+     base::MayBlock(), base::TaskPriority::USER_VISIBLE,
+     base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN};
+@@ -69,11 +77,23 @@
+   web_ui()->RegisterMessageCallback(
+       "deleteNote", base::BindRepeating(&NotesHandler::HandleDeleteNote,
+                                         base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "watchVault", base::BindRepeating(&NotesHandler::HandleWatchVault,
++                                        base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "searchVault", base::BindRepeating(&NotesHandler::HandleSearchVault,
++                                         base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "readImage", base::BindRepeating(&NotesHandler::HandleReadImage,
++                                       base::Unretained(this)));
+ }
+ 
+ void NotesHandler::OnJavascriptDisallowed() {
+   // Late replies are dropped: callbacks check IsJavascriptAllowed().
+   pick_callback_id_ = base::Value();
++  // The page is gone or reloading: no watch outlives it.
++  watcher_.Reset();
++  change_pending_ = false;
+ }
+ 
+ bool NotesHandler::FromNotesPage() {
+@@ -185,6 +205,9 @@
+   }
+   base::ListValue list;
+   for (const VaultEntry& e : *entries) {
++    if (!base::IsStringUTF8(e.path)) {
++      continue;  // base::Value strings must be UTF-8
++    }
+     base::DictValue item;
+     item.Set("path", e.path);
+     item.Set("dir", e.is_dir);
+@@ -347,4 +370,159 @@
+                         root, args[1].GetString()));
+ }
+ 
++// args = [callback_id]. Replaces any earlier watcher; the reply says whether
++// the watch is running (false: no vault, unsupported system, or inotify limit).
++void NotesHandler::HandleWatchVault(const base::ListValue& args) {
++  if (args.size() != 1 || !FromNotesPage()) {
++    return;
++  }
++  AllowJavascript();
++  watcher_.Reset();
++  change_pending_ = false;
++  const base::FilePath root = prefs_->GetFilePath(kVaultPathPref);
++  if (root.empty() || !kVaultReadSupported) {
++    ResolveJavascriptCallback(args[0], base::Value(false));
++    return;
++  }
++  // Both callbacks run on the watcher's sequence and are posted back here.
++  watcher_ = base::SequenceBound<VaultWatcher>(
++      base::ThreadPool::CreateSequencedTaskRunner(kIoTraits), root,
++      base::BindPostTaskToCurrentDefault(base::BindRepeating(
++          &NotesHandler::OnVaultChanged, weak_ptr_factory_.GetWeakPtr())),
++      base::BindPostTaskToCurrentDefault(
++          base::BindOnce(&NotesHandler::OnWatchStarted,
++                         weak_ptr_factory_.GetWeakPtr(), args[0].Clone())));
++}
++
++void NotesHandler::OnWatchStarted(base::Value callback_id, bool ok) {
++  if (!IsJavascriptAllowed()) {
++    return;
++  }
++  if (!ok) {
++    watcher_.Reset();
++  }
++  ResolveJavascriptCallback(callback_id, base::Value(ok));
++}
++
++void NotesHandler::OnVaultChanged() {
++  if (!IsJavascriptAllowed() || change_pending_) {
++    return;
++  }
++  change_pending_ = true;
++  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
++      FROM_HERE,
++      base::BindOnce(&NotesHandler::FlushVaultChanged,
++                     weak_ptr_factory_.GetWeakPtr()),
++      kChangeWindow);
++}
++
++void NotesHandler::FlushVaultChanged() {
++  change_pending_ = false;
++  if (IsJavascriptAllowed() && watcher_) {
++    FireWebUIListener("vaultChanged");
++  }
++}
++
++// args = [callback_id, query]
++void NotesHandler::HandleSearchVault(const base::ListValue& args) {
++  const std::string* query = RelativeArg(args);  // same shape: id + string
++  if (!query || !FromNotesPage()) {
++    return;
++  }
++  AllowJavascript();
++  const base::FilePath root = prefs_->GetFilePath(kVaultPathPref);
++  if (root.empty()) {
++    RejectJavascriptCallback(args[0], base::Value("noVault"));
++    return;
++  }
++  if (!kVaultReadSupported) {
++    RejectJavascriptCallback(args[0], base::Value("unsupported"));
++    return;
++  }
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, kIoTraits,
++      base::BindOnce(
++          [](base::FilePath root, std::string query) {
++            return SearchVault(root, query);
++          },
++          root, *query),
++      base::BindOnce(&NotesHandler::OnSearched, weak_ptr_factory_.GetWeakPtr(),
++                     args[0].Clone()));
++}
++
++void NotesHandler::OnSearched(base::Value callback_id, SearchResult result) {
++  if (!IsJavascriptAllowed()) {
++    return;
++  }
++  base::ListValue hits;
++  for (SearchHit& h : result.hits) {
++    base::DictValue item;
++    item.Set("path", std::move(h.path));
++    item.Set("nameMatch", h.name_match);
++    item.Set("snippet", std::move(h.snippet));
++    hits.Append(std::move(item));
++  }
++  base::DictValue reply;
++  reply.Set("hits", std::move(hits));
++  reply.Set("truncated", result.truncated);
++  ResolveJavascriptCallback(callback_id, base::Value(std::move(reply)));
++}
++
++// args = [callback_id, path, note_dir]. Tries `note_dir + path` (relative to
++// the open note), then `path` from the vault root, then, for a bare file name,
++// the first file with that name anywhere in the vault (Obsidian embeds).
++void NotesHandler::HandleReadImage(const base::ListValue& args) {
++  if (args.size() != 3 || !args[1].is_string() || !args[2].is_string() ||
++      !FromNotesPage()) {
++    return;
++  }
++  AllowJavascript();
++  const base::FilePath root = prefs_->GetFilePath(kVaultPathPref);
++  if (root.empty() || !kVaultReadSupported) {
++    RejectJavascriptCallback(args[0], base::Value(root.empty()
++                                                      ? "noVault"
++                                                      : "unsupported"));
++    return;
++  }
++  base::ThreadPool::PostTaskAndReplyWithResult(
++      FROM_HERE, kIoTraits,
++      base::BindOnce(
++          [](base::FilePath root, std::string path, std::string note_dir)
++              -> std::optional<ImageContent> {
++            if (!note_dir.empty()) {
++              if (std::optional<ImageContent> image =
++                      ReadVaultImage(root, note_dir + path)) {
++                return image;
++              }
++            }
++            if (std::optional<ImageContent> image =
++                    ReadVaultImage(root, path)) {
++              return image;
++            }
++            if (std::optional<std::string> found =
++                    FindVaultFileByName(root, path)) {
++              return ReadVaultImage(root, *found);
++            }
++            return std::nullopt;
++          },
++          root, args[1].GetString(), args[2].GetString()),
++      base::BindOnce(&NotesHandler::OnImage, weak_ptr_factory_.GetWeakPtr(),
++                     args[0].Clone()));
++}
++
++void NotesHandler::OnImage(base::Value callback_id,
++                           std::optional<ImageContent> image) {
++  if (!IsJavascriptAllowed()) {
++    return;
++  }
++  if (!image) {
++    RejectJavascriptCallback(callback_id, base::Value("notFound"));
++    return;
++  }
++  base::DictValue reply;
++  reply.Set("mime", std::move(image->mime));
++  reply.Set("data", base::Base64Encode(image->bytes));
++  ResolveJavascriptCallback(callback_id, base::Value(std::move(reply)));
++}
++
+ }  // namespace aerographene::notes
+--- a/chrome/browser/ui/webui/aero_notes/notes_handler.h
++++ b/chrome/browser/ui/webui/aero_notes/notes_handler.h
+@@ -13,8 +13,10 @@
+ #include "base/memory/raw_ptr.h"
+ #include "base/memory/scoped_refptr.h"
+ #include "base/memory/weak_ptr.h"
++#include "base/threading/sequence_bound.h"
+ #include "base/values.h"
+ #include "chrome/browser/ui/webui/aero_notes/vault_reader.h"
++#include "chrome/browser/ui/webui/aero_notes/vault_watcher.h"
+ #include "content/public/browser/web_ui_message_handler.h"
+ #include "ui/shell_dialogs/select_file_dialog.h"
+ 
+@@ -29,8 +31,12 @@
+ // Messages from chrome://notes only (WebUI bindings exist only in that
+ // page's renderer). getVault, pickVault, listDir, readNote (text + mtime) and,
+ // from B4, writeNote (atomic, mtime conflict check), createNote, renameNote,
+-// deleteNote; all replies for writes are {status, mtime}. Paths from the page
+-// are untrusted and go through vault_reader.
++// deleteNote; all replies for writes are {status, mtime}. B5: watchVault
++// (starts the recursive watcher of the vault, replies whether it runs; later
++// changes arrive as the "vaultChanged" listener event), searchVault(query) ->
++// {hits: [{path, nameMatch, snippet}], truncated} and readImage(path, noteDir)
++// -> {mime, data (base64)}. Paths from the page are untrusted and go through
++// vault_reader. The watcher dies with the handler (tab) or on a page reload.
+ class NotesHandler : public content::WebUIMessageHandler,
+                      public ui::SelectFileDialog::Listener {
+  public:
+@@ -58,6 +64,15 @@
+   void HandleCreateNote(const base::ListValue& args);
+   void HandleRenameNote(const base::ListValue& args);
+   void HandleDeleteNote(const base::ListValue& args);
++  void HandleWatchVault(const base::ListValue& args);
++  void HandleSearchVault(const base::ListValue& args);
++  void HandleReadImage(const base::ListValue& args);
++
++  void OnWatchStarted(base::Value callback_id, bool ok);
++  void OnVaultChanged();
++  void FlushVaultChanged();
++  void OnSearched(base::Value callback_id, SearchResult result);
++  void OnImage(base::Value callback_id, std::optional<ImageContent> image);
+ 
+   // Common checks for a write message; false when it was answered/dropped.
+   bool PrepareWrite(const base::ListValue& args,
+@@ -75,6 +90,8 @@
+   raw_ptr<PrefService> prefs_;
+   scoped_refptr<ui::SelectFileDialog> select_file_dialog_;
+   base::Value pick_callback_id_;
++  base::SequenceBound<VaultWatcher> watcher_;
++  bool change_pending_ = false;
+   base::WeakPtrFactory<NotesHandler> weak_ptr_factory_{this};
+ };
+ 
+--- a/chrome/browser/ui/webui/aero_notes/vault_reader.cc
++++ b/chrome/browser/ui/webui/aero_notes/vault_reader.cc
+@@ -28,6 +28,21 @@
+   return std::nullopt;
+ }
+ 
++// B5 on Windows: nothing until the D3c confined reader.
++SearchResult SearchVault(const base::FilePath& root, std::string_view query) {
++  return {};
++}
++
++std::optional<std::string> FindVaultFileByName(const base::FilePath& root,
++                                               std::string_view name) {
++  return std::nullopt;
++}
++
++std::optional<ImageContent> ReadVaultImage(const base::FilePath& root,
++                                           std::string_view relative) {
++  return std::nullopt;
++}
++
+ std::optional<NoteContent> ReadVaultNoteWithMtime(const base::FilePath& root,
+                                                   std::string_view relative) {
+   return std::nullopt;
+@@ -73,7 +88,10 @@
+ #include <unistd.h>
+ 
+ #include <algorithm>
++#include <utility>
+ 
++#include "base/functional/bind.h"
++#include "base/functional/callback.h"
+ #include "base/files/file_enumerator.h"
+ #include "base/files/file_util.h"
+ #include "base/files/scoped_file.h"
+@@ -431,6 +449,218 @@
+   return std::move(note->text);
+ }
+ 
++namespace {
++
++// Walks the visible tree depth first (ListVaultDir order). `visit` gets each
++// entry; returning false stops the walk. Stops by itself at kMaxSearchFiles
++// entries or kMaxSearchDepth levels (returns true when a limit cut it off).
++bool WalkVault(const base::FilePath& root,
++               const base::RepeatingCallback<bool(const VaultEntry&)>& visit) {
++  size_t visited = 0;
++  bool cut = false;
++  bool stop = false;
++  std::vector<std::pair<std::string, size_t>> stack;
++  stack.emplace_back(std::string(), 0);
++  while (!stack.empty() && !stop) {
++    auto [dir, depth] = std::move(stack.back());
++    stack.pop_back();
++    std::optional<std::vector<VaultEntry>> entries = ListVaultDir(root, dir);
++    if (!entries) {
++      continue;
++    }
++    // Pushed in reverse so the walk keeps the listing order.
++    std::vector<std::string> subdirs;
++    for (const VaultEntry& e : *entries) {
++      if (++visited > kMaxSearchFiles) {
++        cut = true;
++        stop = true;
++        break;
++      }
++      if (!visit.Run(e)) {
++        stop = true;
++        break;
++      }
++      if (e.is_dir) {
++        if (depth + 1 >= kMaxSearchDepth) {
++          cut = true;
++        } else {
++          subdirs.push_back(e.path);
++        }
++      }
++    }
++    for (auto it = subdirs.rbegin(); it != subdirs.rend(); ++it) {
++      stack.emplace_back(std::move(*it), depth + 1);
++    }
++  }
++  return cut;
++}
++
++// Valid-UTF-8 excerpt of `line` around byte offset `at`.
++std::string Snippet(std::string_view line, size_t at) {
++  size_t begin = at > 40 ? at - 40 : 0;
++  while (begin < line.size() &&
++         (static_cast<unsigned char>(line[begin]) & 0xC0) == 0x80) {
++    ++begin;  // do not start inside a multi-byte character
++  }
++  std::string out(line.substr(begin));
++  if (out.size() > kMaxSnippetBytes) {
++    out = std::string(base::TruncateUTF8ToByteSize(out, kMaxSnippetBytes));
++  }
++  if (!base::IsStringUTF8(out)) {
++    return std::string();  // invalid note text: no excerpt
++  }
++  return std::string(base::TrimWhitespaceASCII(out, base::TRIM_ALL));
++}
++
++}  // namespace
++
++SearchResult SearchVault(const base::FilePath& root, std::string_view query) {
++  SearchResult result;
++  if (query.empty() || query.size() > kMaxSearchQueryBytes ||
++      !base::IsStringUTF8(query)) {
++    return result;
++  }
++  const std::string needle = base::ToLowerASCII(query);
++  std::vector<SearchHit> name_hits;
++  std::vector<SearchHit> content_hits;
++  size_t bytes_read = 0;
++  bool full = false;
++  result.truncated = WalkVault(
++      root, base::BindRepeating(
++                [](const base::FilePath& root, const std::string& needle,
++                   std::vector<SearchHit>* name_hits,
++                   std::vector<SearchHit>* content_hits, size_t* bytes_read,
++                   bool* full, const VaultEntry& e) {
++                  if (e.is_dir || !base::IsStringUTF8(e.path)) {
++                    return true;
++                  }
++                  const std::string leaf =
++                      base::ToLowerASCII(e.path.substr(e.path.rfind('/') + 1));
++                  const bool by_name = leaf.find(needle) != std::string::npos;
++                  SearchHit hit;
++                  hit.path = e.path;
++                  hit.name_match = by_name;
++                  if (IsNote(base::FilePath(e.path)) &&
++                      e.size <= static_cast<int64_t>(kMaxNoteBytes) &&
++                      *bytes_read + static_cast<size_t>(e.size) <=
++                          kMaxSearchBytes) {
++                    std::optional<std::string> text =
++                        ReadVaultNote(root, e.path);
++                    if (text) {
++                      *bytes_read += text->size();
++                      const std::string lower = base::ToLowerASCII(*text);
++                      const size_t at = lower.find(needle);
++                      if (at != std::string::npos) {
++                        const size_t b = lower.rfind('\n', at);
++                        const size_t start = b == std::string::npos ? 0 : b + 1;
++                        size_t end = lower.find('\n', at);
++                        if (end == std::string::npos) {
++                          end = lower.size();
++                        }
++                        hit.snippet = Snippet(
++                            std::string_view(*text).substr(start, end - start),
++                            at - start);
++                        if (hit.snippet.empty()) {
++                          hit.snippet = " ";  // matched; excerpt unavailable
++                        }
++                      }
++                    }
++                  } else if (IsNote(base::FilePath(e.path))) {
++                    *full = true;  // skipped for size or byte budget
++                  }
++                  if (by_name) {
++                    name_hits->push_back(std::move(hit));
++                  } else if (!hit.snippet.empty()) {
++                    content_hits->push_back(std::move(hit));
++                  }
++                  return name_hits->size() + content_hits->size() <
++                         kMaxSearchHits;
++                },
++                root, needle, &name_hits, &content_hits, &bytes_read, &full));
++  for (SearchHit& h : content_hits) {
++    name_hits.push_back(std::move(h));
++  }
++  if (name_hits.size() >= kMaxSearchHits) {
++    name_hits.resize(kMaxSearchHits);
++    result.truncated = true;
++  }
++  result.truncated = result.truncated || full;
++  result.hits = std::move(name_hits);
++  return result;
++}
++
++std::optional<std::string> FindVaultFileByName(const base::FilePath& root,
++                                               std::string_view name) {
++  if (name.empty() || name.size() > kMaxNameBytes ||
++      name.find('/') != std::string_view::npos || name[0] == '.' ||
++      !IsValidRelative(name)) {
++    return std::nullopt;
++  }
++  const std::string want = base::ToLowerASCII(name);
++  std::optional<std::string> found;
++  WalkVault(root,
++            base::BindRepeating(
++                [](const std::string& want, std::optional<std::string>* found,
++                   const VaultEntry& e) {
++                  if (!e.is_dir &&
++                      base::ToLowerASCII(e.path.substr(
++                          e.path.rfind('/') + 1)) == want) {
++                    *found = e.path;
++                    return false;
++                  }
++                  return true;
++                },
++                want, &found));
++  return found;
++}
++
++std::optional<ImageContent> ReadVaultImage(const base::FilePath& root,
++                                           std::string_view relative) {
++  std::optional<RealRef> ref = ResolveReal(root, relative);
++  if (!ref) {
++    return std::nullopt;
++  }
++  const std::string ext =
++      base::ToLowerASCII(base::FilePath(ref->rel).FinalExtension());
++  ImageContent image;
++  if (ext == ".png") {
++    image.mime = "image/png";
++  } else if (ext == ".jpg" || ext == ".jpeg") {
++    image.mime = "image/jpeg";
++  } else if (ext == ".gif") {
++    image.mime = "image/gif";
++  } else if (ext == ".webp") {
++    image.mime = "image/webp";
++  } else {
++    return std::nullopt;
++  }
++  base::ScopedFD fd = OpenVaultFileNoFollow(
++      ref->root, ref->rel, O_RDONLY | O_NONBLOCK | O_NOCTTY);
++  if (!fd.is_valid()) {
++    return std::nullopt;
++  }
++  struct stat st = {};
++  if (fstat(fd.get(), &st) != 0 || !S_ISREG(st.st_mode) || st.st_size < 0 ||
++      static_cast<uint64_t>(st.st_size) > kMaxImageBytes) {
++    return std::nullopt;
++  }
++  char buf[64 * 1024];
++  while (true) {
++    const ssize_t n = HANDLE_EINTR(read(fd.get(), buf, sizeof(buf)));
++    if (n < 0) {
++      return std::nullopt;
++    }
++    if (n == 0) {
++      break;
++    }
++    image.bytes.append(buf, static_cast<size_t>(n));
++    if (image.bytes.size() > kMaxImageBytes) {
++      return std::nullopt;  // grew while reading
++    }
++  }
++  return image;
++}
++
+ WriteResult WriteVaultNote(const base::FilePath& root,
+                            std::string_view relative,
+                            std::string_view text,
+--- a/chrome/browser/ui/webui/aero_notes/vault_reader.h
++++ b/chrome/browser/ui/webui/aero_notes/vault_reader.h
+@@ -84,6 +84,47 @@
+ std::optional<NoteContent> ReadVaultNoteWithMtime(const base::FilePath& root,
+                                                   std::string_view relative);
+ 
++// Search and images (B5).
++inline constexpr size_t kMaxSearchQueryBytes = 256;
++inline constexpr size_t kMaxSearchHits = 100;
++inline constexpr size_t kMaxSearchFiles = 20000;      // files visited
++inline constexpr size_t kMaxSearchBytes = 128 << 20;  // note bytes read
++inline constexpr size_t kMaxSearchDepth = 16;
++inline constexpr size_t kMaxSnippetBytes = 160;
++inline constexpr size_t kMaxImageBytes = 10 << 20;
++
++struct SearchHit {
++  std::string path;  // relative, '/'-separated, valid UTF-8
++  bool name_match = false;
++  std::string snippet;  // line of the first content match; valid UTF-8
++};
++
++struct SearchResult {
++  std::vector<SearchHit> hits;  // name matches first, then content-only
++  bool truncated = false;       // a limit above stopped the walk
++};
++
++// Case-insensitive (ASCII) substring search in file names and in the text of
++// ".md" notes, over the visible tree (same filters as ListVaultDir, so no
++// hidden entries and no symlink leaving the vault). Bounded by the kMaxSearch*
++// limits. An empty or over-long query yields no hits.
++SearchResult SearchVault(const base::FilePath& root, std::string_view query);
++
++// First visible file anywhere in the vault whose name equals `name`
++// (case-insensitive ASCII; no '/'), or nullopt. For Obsidian-style
++// ![[picture.png]] embeds that name only the file.
++std::optional<std::string> FindVaultFileByName(const base::FilePath& root,
++                                               std::string_view name);
++
++struct ImageContent {
++  std::string mime;   // image/png, image/jpeg, image/gif or image/webp
++  std::string bytes;  // at most kMaxImageBytes
++};
++// Contents of a png/jpg/jpeg/gif/webp regular file in the vault (SVG is not
++// served), opened like notes (openat O_NOFOLLOW per component).
++std::optional<ImageContent> ReadVaultImage(const base::FilePath& root,
++                                           std::string_view relative);
++
+ // Writes (B4). Only ".md" names (no leading '.', at most 255 bytes per
+ // component), regular files, never through a symlink of the entry itself.
+ enum class WriteStatus {
+--- a/chrome/browser/ui/webui/aero_notes/vault_reader_unittest.cc
++++ b/chrome/browser/ui/webui/aero_notes/vault_reader_unittest.cc
+@@ -10,7 +10,10 @@
+ 
+ #include <string>
+ 
++#include "base/files/file.h"
+ #include "base/files/file_util.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/string_util.h"
+ #include "base/files/file_enumerator.h"
+ #include "base/files/scoped_temp_dir.h"
+ #include "base/time/time.h"
+@@ -366,5 +369,152 @@
+   EXPECT_EQ(WriteStatusName(WriteStatus::kExists), "exists");
+ }
+ 
++// --- B5: search and images ---
++
++class VaultSearchTest : public VaultReaderTest {
++ protected:
++  void SetUp() override {
++    VaultReaderTest::SetUp();
++    ASSERT_TRUE(base::WriteFile(root_.Append("sub/receita.md"),
++                                "linha um\nbolo de Cenoura com calda\nfim"));
++    ASSERT_TRUE(base::WriteFile(root_.Append("cenoura-lista.md"), "nada"));
++    ASSERT_TRUE(base::WriteFile(root_.Append(".hidden.md"), "cenoura"));
++    ASSERT_TRUE(base::CreateDirectory(root_.Append(".git")));
++    ASSERT_TRUE(base::WriteFile(root_.Append(".git/x.md"), "cenoura"));
++    ASSERT_TRUE(base::WriteFile(outer_.GetPath().Append("secret.md"),
++                                "cenoura fora"));
++  }
++
++  static const SearchHit* Find(const SearchResult& r, std::string_view path) {
++    for (const SearchHit& h : r.hits) {
++      if (h.path == path) {
++        return &h;
++      }
++    }
++    return nullptr;
++  }
++};
++
++TEST_F(VaultSearchTest, FindsByNameAndContentCaseInsensitive) {
++  SearchResult r = SearchVault(root_, "CENOURA");
++  ASSERT_EQ(r.hits.size(), 2u);
++  EXPECT_EQ(r.hits[0].path, "cenoura-lista.md");  // name matches come first
++  EXPECT_TRUE(r.hits[0].name_match);
++  const SearchHit* c = Find(r, "sub/receita.md");
++  ASSERT_TRUE(c);
++  EXPECT_FALSE(c->name_match);
++  EXPECT_EQ(c->snippet, "bolo de Cenoura com calda");
++  EXPECT_FALSE(r.truncated);
++}
++
++TEST_F(VaultSearchTest, SkipsHiddenAndOutsideAndImagesContent) {
++  ASSERT_TRUE(base::CreateSymbolicLink(outer_.GetPath().Append("secret.md"),
++                                       root_.Append("link.md")));
++  ASSERT_TRUE(base::CreateSymbolicLink(outer_.GetPath().Append("outdir"),
++                                       root_.Append("outlink")));
++  SearchResult r = SearchVault(root_, "cenoura");
++  EXPECT_FALSE(Find(r, ".hidden.md"));
++  EXPECT_FALSE(Find(r, ".git/x.md"));
++  EXPECT_FALSE(Find(r, "link.md"));  // resolves outside the vault
++  // Image files match by name, never by content.
++  r = SearchVault(root_, "img");
++  ASSERT_EQ(r.hits.size(), 1u);
++  EXPECT_EQ(r.hits[0].path, "img.png");
++  EXPECT_TRUE(r.hits[0].name_match);
++}
++
++TEST_F(VaultSearchTest, BadQueries) {
++  EXPECT_TRUE(SearchVault(root_, "").hits.empty());
++  EXPECT_TRUE(SearchVault(root_, std::string(kMaxSearchQueryBytes + 1, 'a'))
++                  .hits.empty());
++  EXPECT_TRUE(SearchVault(root_, "\xff\xfe").hits.empty());
++  EXPECT_TRUE(SearchVault(root_, "zzzz-nao-existe").hits.empty());
++}
++
++TEST_F(VaultSearchTest, SnippetIsValidUtf8EvenWhenCutMidCharacter) {
++  // 60 two-byte characters before the match: the excerpt starts 40 bytes
++  // before it, inside a character unless the start is realigned.
++  std::string text;
++  for (int i = 0; i < 60; ++i) {
++    text += "\xc3\xa9";  // e acute
++  }
++  text += "alvo";
++  for (int i = 0; i < 200; ++i) {
++    text += "\xc3\xa9";
++  }
++  ASSERT_TRUE(base::WriteFile(root_.Append("utf.md"), text));
++  SearchResult r = SearchVault(root_, "alvo");
++  const SearchHit* h = Find(r, "utf.md");
++  ASSERT_TRUE(h);
++  EXPECT_TRUE(base::IsStringUTF8(h->snippet));
++  EXPECT_LE(h->snippet.size(), kMaxSnippetBytes);
++  EXPECT_NE(h->snippet.find("alvo"), std::string::npos);
++}
++
++TEST_F(VaultSearchTest, CapsHits) {
++  for (size_t i = 0; i < kMaxSearchHits + 20; ++i) {
++    ASSERT_TRUE(base::WriteFile(
++        root_.AppendASCII("many-" + base::NumberToString(i) + ".md"), "x"));
++  }
++  SearchResult r = SearchVault(root_, "many-");
++  EXPECT_EQ(r.hits.size(), kMaxSearchHits);
++  EXPECT_TRUE(r.truncated);
++}
++
++TEST_F(VaultSearchTest, DepthIsBounded) {
++  base::FilePath dir = root_;
++  for (size_t i = 0; i < kMaxSearchDepth + 3; ++i) {
++    dir = dir.AppendASCII("d");
++  }
++  ASSERT_TRUE(base::CreateDirectory(dir));
++  ASSERT_TRUE(base::WriteFile(dir.Append("deep.md"), "profundo"));
++  SearchResult r = SearchVault(root_, "profundo");
++  EXPECT_TRUE(r.hits.empty());
++  EXPECT_TRUE(r.truncated);
++}
++
++TEST_F(VaultSearchTest, FindsFileByName) {
++  ASSERT_TRUE(base::WriteFile(root_.Append("sub/Foto.PNG"), "png"));
++  EXPECT_EQ(FindVaultFileByName(root_, "img.png"), "img.png");
++  EXPECT_EQ(FindVaultFileByName(root_, "foto.png"), "sub/Foto.PNG");
++  EXPECT_FALSE(FindVaultFileByName(root_, "nao-existe.png"));
++  EXPECT_FALSE(FindVaultFileByName(root_, "sub/Foto.PNG"));
++  EXPECT_FALSE(FindVaultFileByName(root_, ".hidden.md"));
++  EXPECT_FALSE(FindVaultFileByName(root_, "secret.md"));  // only outside
++}
++
++TEST_F(VaultSearchTest, ReadsImagesConfined) {
++  std::optional<ImageContent> png = ReadVaultImage(root_, "img.png");
++  ASSERT_TRUE(png);
++  EXPECT_EQ(png->mime, "image/png");
++  EXPECT_EQ(png->bytes, "png");
++  ASSERT_TRUE(base::WriteFile(root_.Append("sub/p.JPG"), "jpg"));
++  ASSERT_TRUE(base::WriteFile(root_.Append("v.svg"), "<svg/>"));
++  EXPECT_EQ(ReadVaultImage(root_, "sub/p.JPG")->mime, "image/jpeg");
++  EXPECT_FALSE(ReadVaultImage(root_, "v.svg"));  // SVG is not served
++  EXPECT_FALSE(ReadVaultImage(root_, "a.md"));
++  EXPECT_FALSE(ReadVaultImage(root_, "../secret.md"));
++  EXPECT_FALSE(ReadVaultImage(root_, "missing.png"));
++  // Symlink to an image outside the vault is refused; inside it works.
++  ASSERT_TRUE(base::WriteFile(outer_.GetPath().Append("out.png"), "x"));
++  ASSERT_TRUE(base::CreateSymbolicLink(outer_.GetPath().Append("out.png"),
++                                       root_.Append("out.png")));
++  EXPECT_FALSE(ReadVaultImage(root_, "out.png"));
++  ASSERT_TRUE(base::CreateSymbolicLink(base::FilePath("img.png"),
++                                       root_.Append("in.png")));
++  EXPECT_TRUE(ReadVaultImage(root_, "in.png"));
++}
++
++TEST_F(VaultSearchTest, FifoImageDoesNotBlockAndHugeImageIsRefused) {
++  ASSERT_EQ(mkfifo(root_.Append("f.png").value().c_str(), 0600), 0);
++  EXPECT_FALSE(ReadVaultImage(root_, "f.png"));
++  const base::FilePath big = root_.Append("big.png");
++  base::File f(big, base::File::FLAG_CREATE | base::File::FLAG_WRITE);
++  ASSERT_TRUE(f.IsValid());
++  ASSERT_TRUE(f.SetLength(kMaxImageBytes + 1));
++  f.Close();
++  EXPECT_FALSE(ReadVaultImage(root_, "big.png"));
++}
++
+ }  // namespace
+ }  // namespace aerographene::notes
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_notes/vault_watcher.cc
+@@ -0,0 +1,56 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "chrome/browser/ui/webui/aero_notes/vault_watcher.h"
++
++#include <utility>
++
++#include "base/files/file_util.h"
++#include "base/functional/bind.h"
++#include "build/build_config.h"
++
++namespace aerographene::notes {
++
++VaultWatcher::VaultWatcher(const base::FilePath& root,
++                           base::RepeatingClosure changed,
++                           base::OnceCallback<void(bool)> started)
++    : real_root_(base::MakeAbsoluteFilePath(root)),
++      changed_(std::move(changed)) {
++  bool ok = false;
++  if (!real_root_.empty() && base::DirectoryExists(real_root_)) {
++    base::FilePathWatcher::WatchOptions options;
++    options.type = base::FilePathWatcher::Type::kRecursive;
++#if BUILDFLAG(IS_LINUX)
++    options.report_modified_path = true;
++#endif
++    ok = watcher_.WatchWithOptions(
++        real_root_, options,
++        base::BindRepeating(&VaultWatcher::OnPath, base::Unretained(this)));
++  }
++  std::move(started).Run(ok);
++}
++
++VaultWatcher::~VaultWatcher() = default;
++
++// static
++bool VaultWatcher::IsVisibleChange(const base::FilePath& real_root,
++                                   const base::FilePath& path) {
++  base::FilePath rel;
++  if (!real_root.AppendRelativePath(path, &rel)) {
++    return true;  // the root itself or an unexpected form: do not hide it
++  }
++  for (const base::FilePath::StringType& part : rel.GetComponents()) {
++    if (!part.empty() && part[0] == FILE_PATH_LITERAL('.')) {
++      return false;
++    }
++  }
++  return true;
++}
++
++void VaultWatcher::OnPath(const base::FilePath& path, bool error) {
++  if (error || IsVisibleChange(real_root_, path)) {
++    changed_.Run();
++  }
++}
++
++}  // namespace aerographene::notes
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_notes/vault_watcher.h
+@@ -0,0 +1,44 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_AERO_NOTES_VAULT_WATCHER_H_
++#define CHROME_BROWSER_UI_WEBUI_AERO_NOTES_VAULT_WATCHER_H_
++
++#include "base/files/file_path.h"
++#include "base/files/file_path_watcher.h"
++#include "base/functional/callback.h"
++
++namespace aerographene::notes {
++
++// Recursive watch of the vault root (inotify on Linux) for the notes page
++// (B5). Lives and dies on one MayBlock sequence (use base::SequenceBound);
++// destroying it removes every watch, so it never outlives the tab's handler.
++// `changed` runs on that sequence for each change that is not under a hidden
++// (leading '.') path component, which also hides the editor's own
++// ".aero-N.tmp" files, ".git" and ".obsidian"; it carries no path: the page
++// re-lists and compares mtimes. `started` runs once with whether the watch
++// could be set up (false: bad root or inotify limit).
++class VaultWatcher {
++ public:
++  VaultWatcher(const base::FilePath& root,
++               base::RepeatingClosure changed,
++               base::OnceCallback<void(bool)> started);
++  VaultWatcher(const VaultWatcher&) = delete;
++  VaultWatcher& operator=(const VaultWatcher&) = delete;
++  ~VaultWatcher();
++
++  // False when `path` (inside `real_root`) has a hidden component.
++  static bool IsVisibleChange(const base::FilePath& real_root,
++                              const base::FilePath& path);
++
++ private:
++  void OnPath(const base::FilePath& path, bool error);
++
++  base::FilePath real_root_;
++  base::RepeatingClosure changed_;
++  base::FilePathWatcher watcher_;  // last: destroyed first
++};
++
++}  // namespace aerographene::notes
++
++#endif  // CHROME_BROWSER_UI_WEBUI_AERO_NOTES_VAULT_WATCHER_H_
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_notes/vault_watcher_unittest.cc
+@@ -0,0 +1,131 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "chrome/browser/ui/webui/aero_notes/vault_watcher.h"
++
++#include <utility>
++
++#include "base/files/file_util.h"
++#include "base/files/scoped_temp_dir.h"
++#include "base/functional/bind.h"
++#include "base/functional/callback_helpers.h"
++#include "base/run_loop.h"
++#include "base/task/bind_post_task.h"
++#include "base/threading/sequence_bound.h"
++#include "base/task/thread_pool.h"
++#include "base/test/task_environment.h"
++#include "base/time/time.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace aerographene::notes {
++namespace {
++
++TEST(VaultWatcherTest, HiddenComponentsAreNotChanges) {
++  const base::FilePath root("/v");
++  EXPECT_TRUE(VaultWatcher::IsVisibleChange(root, base::FilePath("/v/a.md")));
++  EXPECT_TRUE(VaultWatcher::IsVisibleChange(root, base::FilePath("/v")));
++  EXPECT_TRUE(
++      VaultWatcher::IsVisibleChange(root, base::FilePath("/v/sub/b.md")));
++  EXPECT_FALSE(
++      VaultWatcher::IsVisibleChange(root, base::FilePath("/v/.aero-1.tmp")));
++  EXPECT_FALSE(
++      VaultWatcher::IsVisibleChange(root, base::FilePath("/v/.git/HEAD")));
++  EXPECT_FALSE(VaultWatcher::IsVisibleChange(
++      root, base::FilePath("/v/sub/.obsidian/x.json")));
++}
++
++void OnStarted(bool* out, base::OnceClosure quit, bool started) {
++  *out = started;
++  std::move(quit).Run();
++}
++
++class VaultWatcherLiveTest : public testing::Test {
++ protected:
++  void SetUp() override {
++    ASSERT_TRUE(dir_.CreateUniqueTempDir());
++    root_ = dir_.GetPath();
++    ASSERT_TRUE(base::CreateDirectory(root_.Append("sub")));
++  }
++
++  // Starts the watcher and waits until it is armed.
++  void Start() {
++    base::RunLoop armed;
++    bool ok = false;
++    watcher_ = base::SequenceBound<VaultWatcher>(
++        base::ThreadPool::CreateSequencedTaskRunner({base::MayBlock()}), root_,
++        base::BindPostTaskToCurrentDefault(base::BindRepeating(
++            &VaultWatcherLiveTest::OnChanged, base::Unretained(this))),
++        base::BindPostTaskToCurrentDefault(
++            base::BindOnce(&OnStarted, &ok, armed.QuitClosure())));
++    armed.Run();
++    ASSERT_TRUE(ok);
++  }
++
++  void OnChanged() {
++    ++changes_;
++    if (quit_) {
++      std::move(quit_).Run();
++    }
++  }
++
++  void WaitForChange() {
++    base::RunLoop loop;
++    quit_ = loop.QuitClosure();
++    loop.Run();
++  }
++
++  base::test::TaskEnvironment env_{
++      base::test::TaskEnvironment::TimeSource::SYSTEM_TIME};
++  base::ScopedTempDir dir_;
++  base::FilePath root_;
++  base::SequenceBound<VaultWatcher> watcher_;
++  base::OnceClosure quit_;
++  int changes_ = 0;
++};
++
++TEST_F(VaultWatcherLiveTest, ReportsFileCreatedOutsideAndInSubfolder) {
++  Start();
++  ASSERT_TRUE(base::WriteFile(root_.Append("novo.md"), "x"));
++  WaitForChange();
++  EXPECT_GE(changes_, 1);
++  const int before = changes_;
++  ASSERT_TRUE(base::WriteFile(root_.Append("sub/fundo.md"), "y"));
++  WaitForChange();
++  EXPECT_GT(changes_, before);
++}
++
++TEST_F(VaultWatcherLiveTest, IgnoresHiddenFilesAndStopsAfterReset) {
++  ASSERT_TRUE(base::CreateDirectory(root_.Append(".git")));
++  Start();
++  ASSERT_TRUE(base::WriteFile(root_.Append(".git/obj"), "x"));
++  ASSERT_TRUE(base::WriteFile(root_.Append(".aero-1.tmp"), "x"));
++  base::RunLoop settle;
++  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
++      FROM_HERE, settle.QuitClosure(), base::Milliseconds(300));
++  settle.Run();
++  EXPECT_EQ(changes_, 0);  // hidden changes were seen and dropped
++  // Destroying the holder removes the watch: nothing is reported afterwards.
++  watcher_.Reset();
++  env_.RunUntilIdle();
++  ASSERT_TRUE(base::WriteFile(root_.Append("depois.md"), "x"));
++  base::RunLoop wait;
++  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
++      FROM_HERE, wait.QuitClosure(), base::Milliseconds(300));
++  wait.Run();
++  EXPECT_EQ(changes_, 0);
++}
++
++TEST_F(VaultWatcherLiveTest, FailsOnMissingRoot) {
++  base::RunLoop done;
++  bool ok = true;
++  watcher_ = base::SequenceBound<VaultWatcher>(
++      base::ThreadPool::CreateSequencedTaskRunner({base::MayBlock()}),
++      root_.Append("nao-existe"), base::DoNothing(),
++      base::BindPostTaskToCurrentDefault(
++          base::BindOnce(&OnStarted, &ok, done.QuitClosure())));
++  done.Run();
++  EXPECT_FALSE(ok);
++}
++
++}  // namespace
++}  // namespace aerographene::notes

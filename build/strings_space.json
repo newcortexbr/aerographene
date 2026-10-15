@@ -1,0 +1,151 @@
+{
+  "_comment": "aerographene: vocabulário de produto (profile -> space) nas telas do menu do avatar, profile picker e customização. Chave: nome IDS; valor: texto final en e pt-BR (marcadores <ph name=\"X\"/> para placeholders, que precisam coincidir com a mensagem). build/branding_strings.py troca o corpo da mensagem no .grd/.grdp, recalcula o id GRIT e grava o texto pt-BR e en-GB no .xtb sob o id novo; outros idiomas só têm o id renomeado. Sem apóstrofo fora de texto plural (ICU).",
+  "IDS_PROFILE_MENU_CUSTOMIZE_PROFILE_BUTTON": {
+    "en": "Customise space",
+    "pt-BR": "Personalizar space"
+  },
+  "IDS_PROFILE_MENU_ADD_PROFILE": {
+    "en": "Add space",
+    "pt-BR": "Adicionar space"
+  },
+  "IDS_PROFILE_MENU_OPEN_GUEST_PROFILE": {
+    "en": "Open guest window",
+    "pt-BR": "Abrir janela de visitante"
+  },
+  "IDS_PROFILE_MENU_MANAGE_PROFILES": {
+    "en": "Manage spaces",
+    "pt-BR": "Gerenciar spaces"
+  },
+  "IDS_PROFILE_MENU_PROFILES_LIST_TITLE": {
+    "en": "Other spaces",
+    "pt-BR": "Outros spaces"
+  },
+  "IDS_PROFILE_MENU_CLOSE_PROFILE_X_WINDOWS_BUTTON": {
+    "en": "{0, plural, =1 {Close this space} other {Close this space (# windows)} }",
+    "pt-BR": "{0, plural, =1 {Fechar este space} other {Fechar este space (# janelas)} }"
+  },
+  "IDS_PROFILE_MENU_PROFILE_MANAGED_HEADER": {
+    "en": "This space is managed",
+    "pt-BR": "Este space é gerenciado"
+  },
+  "IDS_PROFILE_PICKER_MAIN_VIEW_TITLE": {
+    "en": "Which space?",
+    "pt-BR": "Qual space?"
+  },
+  "IDS_PROFILE_PICKER_MAIN_VIEW_TITLE_V2": {
+    "en": "Which space?",
+    "pt-BR": "Qual space?"
+  },
+  "IDS_PROFILE_PICKER_MAIN_VIEW_SUBTITLE": {
+    "en": "Each space keeps its own history, passwords and tabs, in its own window. Make one for work, one for fun, one for the family.",
+    "pt-BR": "Cada space tem seu próprio histórico, senhas e abas, em uma janela própria. Crie um para o trabalho, um para a diversão e um para a família."
+  },
+  "IDS_PROFILE_PICKER_ADD_SPACE_BUTTON": {
+    "en": "Add space",
+    "pt-BR": "Adicionar space"
+  },
+  "IDS_PROFILE_PICKER_BROWSE_AS_GUEST_BUTTON": {
+    "en": "Open guest window",
+    "pt-BR": "Abrir janela de visitante"
+  },
+  "IDS_PROFILE_PICKER_OPEN_ALL_PROFILES_BUTTON": {
+    "en": "Open all spaces",
+    "pt-BR": "Abrir todos os spaces"
+  },
+  "IDS_PROFILE_PICKER_PROFILE_CARD_INPUT_LABEL": {
+    "en": "Rename your space",
+    "pt-BR": "Renomear o seu space"
+  },
+  "IDS_PROFILE_PICKER_PROFILE_CARD_LABEL": {
+    "en": "Open <ph name=\"PROFILE_NAME\"/> space",
+    "pt-BR": "Abrir o space <ph name=\"PROFILE_NAME\"/>"
+  },
+  "IDS_PROFILE_PICKER_PROFILE_CARD_LABEL_SUPERVISED": {
+    "en": "Open <ph name=\"PROFILE_NAME\"/> space. This space is managed by your parent.",
+    "pt-BR": "Abrir o space <ph name=\"PROFILE_NAME\"/>. Este space é gerenciado pelos seus pais."
+  },
+  "IDS_PROFILE_PICKER_REMOVE_WARNING_LOCAL_PROFILE_TITLE": {
+    "en": "Delete this space and its data?",
+    "pt-BR": "Excluir este space e seus dados?"
+  },
+  "IDS_PROFILE_PICKER_REMOVE_WARNING_SIGNED_IN_PROFILE_TITLE": {
+    "en": "Delete this space?",
+    "pt-BR": "Excluir este space?"
+  },
+  "IDS_PROFILE_PICKER_PROFILE_CREATION_FLOW_PROFILE_TYPE_CHOICE_TITLE": {
+    "en": "New space",
+    "pt-BR": "Novo space"
+  },
+  "IDS_PROFILE_PICKER_PROFILE_SWITCH_TITLE": {
+    "en": "Switch to existing space?",
+    "pt-BR": "Mudar para o space existente?"
+  },
+  "IDS_PROFILE_PICKER_PROFILE_SWITCH_SUBTITLE": {
+    "en": "A space with this account already exists on this device",
+    "pt-BR": "Já existe um space com esta conta neste dispositivo"
+  },
+  "IDS_PROFILE_PICKER_PROFILE_CREATION_FLOW_DEVICE_MANAGED_DESCRIPTION": {
+    "en": "Your device is managed by your organization. Administrators can access the data in any space on this device.",
+    "pt-BR": "Seu dispositivo é gerenciado pela sua organização. Os administradores podem acessar os dados de qualquer space neste dispositivo."
+  },
+  "IDS_PROFILE_PICKER_PROFILE_CREATION_FLOW_DEVICE_MANAGED_BY_DESCRIPTION": {
+    "en": "Your device is managed by <ph name=\"PROFILE_NAME\"/>. Administrators can access the data in any space on this device.",
+    "pt-BR": "Seu dispositivo é gerenciado por <ph name=\"PROFILE_NAME\"/>. Os administradores podem acessar os dados de qualquer space neste dispositivo."
+  },
+  "IDS_PROFILE_PICKER_IPH_FOR_PROFILES_TEXT": {
+    "en": "Each space holds its own history, passwords, tabs and more",
+    "pt-BR": "Cada space guarda seu próprio histórico, senhas, abas e mais"
+  },
+  "IDS_PROFILE_CUSTOMIZATION_LOCAL_PROFILE_CREATION_TITLE": {
+    "en": "New space",
+    "pt-BR": "Novo space"
+  },
+  "IDS_PROFILE_CUSTOMIZATION_TITLE_V2": {
+    "en": "Customise your space",
+    "pt-BR": "Personalize o seu space"
+  },
+  "IDS_PROFILE_CUSTOMIZATION_TEXT": {
+    "en": "Customise your new space",
+    "pt-BR": "Personalize o seu novo space"
+  },
+  "IDS_PROFILE_CUSTOMIZATION_INPUT_LABEL": {
+    "en": "Rename your space",
+    "pt-BR": "Renomear o seu space"
+  },
+  "IDS_PROFILE_CUSTOMIZATION_INPUT_TITLE": {
+    "en": "A space keeps its own history, passwords, pinned tabs and notes folder, and opens in its own window. No account, nothing leaves this machine.",
+    "pt-BR": "Um space guarda seu próprio histórico, senhas, abas fixadas e pasta de notas, e abre em uma janela própria. Sem conta, nada sai desta máquina."
+  },
+  "IDS_PROFILE_CUSTOMIZATION_INPUT_ERROR_MESSAGE": {
+    "en": "Enter a space name",
+    "pt-BR": "Digite um nome para o space"
+  },
+  "IDS_PROFILE_CUSTOMIZATION_THEME_PICKER_LABEL": {
+    "en": "Colour of the space",
+    "pt-BR": "Cor do space"
+  },
+  "IDS_PROFILE_CUSTOMIZATION_DELETE_PROFILE_BUTTON_LABEL": {
+    "en": "Delete space",
+    "pt-BR": "Excluir space"
+  },
+  "IDS_PROFILE_PICKER_PROFILE_CREATION_FLOW_PROFILE_TYPE_CHOICE_SUBTITLE_UNO": {
+    "en": "A space keeps its own history, passwords, pinned tabs and notes folder, and opens in its own window. No account, nothing leaves this machine.",
+    "pt-BR": "Um space guarda seu próprio histórico, senhas, abas fixadas e pasta de notas, e abre em uma janela própria. Sem conta, nada sai desta máquina."
+  },
+  "IDS_PROFILE_PICKER_PROFILE_CREATION_FLOW_PROFILE_TYPE_CHOICE_SUBTITLE_UNO_BOOKMARKS": {
+    "en": "A space keeps its own history, passwords, pinned tabs and notes folder, and opens in its own window. No account, nothing leaves this machine.",
+    "pt-BR": "Um space guarda seu próprio histórico, senhas, abas fixadas e pasta de notas, e abre em uma janela própria. Sem conta, nada sai desta máquina."
+  },
+  "IDS_PROFILE_PICKER_PROFILE_CREATION_FLOW_NOT_NOW_BUTTON_LABEL": {
+    "en": "Create space →",
+    "pt-BR": "Criar space →"
+  },
+  "IDS_PROFILE_PICKER_PROFILE_CREATION_FLOW_DONT_SIGN_IN_BUTTON_LABEL": {
+    "en": "Create space →",
+    "pt-BR": "Criar space →"
+  },
+  "IDS_PROFILE_PICKER_PROFILE_CREATION_FLOW_STAY_SIGNED_OUT_BUTTON_LABEL": {
+    "en": "Create space →",
+    "pt-BR": "Criar space →"
+  }
+}

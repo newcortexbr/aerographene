@@ -11,18 +11,18 @@ arquivo e nunca no incógnito (escuro + grayscale sem tema custom). Leitura
 muda. Feature kAerographeneThemeTokens (ligada por padrão; desligar com
 --disable-features=AerographeneThemeTokens). WebUI recebe as cores via
 chrome://theme/colors.css.
+D3b (Windows): arquivo em %LOCALAPPDATA%\aerographene\theme.json; leitura Win32
+(CreateFileW com FILE_FLAG_OPEN_REPARSE_POINT) que recusa o que não for
+FILE_TYPE_DISK, reparse point e diretório; POSIX mantido sob #if.
 
 
 --- /dev/null
 +++ b/chrome/browser/ui/color/aerographene_theme_tokens.cc
-@@ -0,0 +1,237 @@
+@@ -0,0 +1,301 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
 +#include "chrome/browser/ui/color/aerographene_theme_tokens.h"
-+
-+#include <fcntl.h>
-+#include <unistd.h>
 +
 +#include <memory>
 +#include <optional>
@@ -46,6 +46,19 @@ chrome://theme/colors.css.
 +#include "ui/color/color_recipe.h"
 +#include "ui/color/color_provider_key.h"
 +#include "ui/color/color_transform.h"
++
++#include "build/build_config.h"
++
++#if BUILDFLAG(IS_WIN)
++#include <windows.h>
++
++#include "base/base_paths.h"
++#include "base/path_service.h"
++#include "base/win/scoped_handle.h"
++#else
++#include <fcntl.h>
++#include <unistd.h>
++#endif  // BUILDFLAG(IS_WIN)
 +
 +BASE_FEATURE(kAerographeneThemeTokens, base::FEATURE_ENABLED_BY_DEFAULT);
 +
@@ -142,13 +155,66 @@ chrome://theme/colors.css.
 +  if (cmd->HasSwitch(kThemeSwitch)) {
 +    return cmd->GetSwitchValuePath(kThemeSwitch);
 +  }
++#if BUILDFLAG(IS_WIN)
++  // %LOCALAPPDATA%\aerographene\theme.json (Windows data layout: D3d).
++  base::FilePath dir;
++  if (!base::PathService::Get(base::DIR_LOCAL_APP_DATA, &dir)) {
++    return base::FilePath();
++  }
++  return dir.Append(FILE_PATH_LITERAL("aerographene"))
++      .Append(FILE_PATH_LITERAL("theme.json"));
++#else
 +  std::unique_ptr<base::Environment> env = base::Environment::Create();
 +  return base::nix::GetXDGDirectory(env.get(), base::nix::kXdgConfigHomeEnvVar,
 +                                    base::nix::kDotConfigDir)
 +      .Append("aerographene")
 +      .Append("theme.json");
++#endif  // BUILDFLAG(IS_WIN)
 +}
 +
++#if BUILDFLAG(IS_WIN)
++// Plain Win32 read of a small file, once per process. Like the POSIX branch,
++// avoids base::File so the UI thread blocking assertions do not fire; the
++// file is capped at kMaxFileSize. Only a disk file is read: a pipe, console
++// or other device in place of theme.json is refused before any read, and a
++// directory does not open (no FILE_FLAG_BACKUP_SEMANTICS).
++std::optional<std::string> ReadSmallFile(const base::FilePath& path) {
++  if (path.empty()) {
++    return std::nullopt;
++  }
++  base::win::ScopedHandle file(::CreateFileW(
++      path.value().c_str(), GENERIC_READ,
++      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
++      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
++      nullptr));
++  if (!file.is_valid() || ::GetFileType(file.get()) != FILE_TYPE_DISK) {
++    return std::nullopt;
++  }
++  // The link itself was opened (FILE_FLAG_OPEN_REPARSE_POINT): a symlink or
++  // junction in place of the file, or a directory, is refused.
++  BY_HANDLE_FILE_INFORMATION info;
++  if (!::GetFileInformationByHandle(file.get(), &info) ||
++      (info.dwFileAttributes &
++       (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY))) {
++    return std::nullopt;
++  }
++  std::string data;
++  char buf[4096];
++  while (true) {
++    DWORD n = 0;
++    if (!::ReadFile(file.get(), buf, sizeof(buf), &n, nullptr)) {
++      return std::nullopt;
++    }
++    if (n == 0) {
++      return data;
++    }
++    data.append(buf, n);
++    if (data.size() > kMaxFileSize) {
++      return std::nullopt;
++    }
++  }
++}
++#else
 +// Plain POSIX read of a small file, once per process. Intentionally avoids
 +// base::File so the UI thread blocking assertions do not fire; the file is
 +// capped at kMaxFileSize.
@@ -181,6 +247,7 @@ chrome://theme/colors.css.
 +  }
 +  return data;
 +}
++#endif  // BUILDFLAG(IS_WIN)
 +
 +TokenOverrides LoadOverrides() {
 +  TokenOverrides result;
@@ -253,7 +320,6 @@ chrome://theme/colors.css.
 +    mixer[id] = ui::ColorTransform(color);
 +  }
 +}
-
 --- /dev/null
 +++ b/chrome/browser/ui/color/aerographene_theme_tokens.h
 @@ -0,0 +1,22 @@
@@ -279,7 +345,6 @@ chrome://theme/colors.css.
 +                                     const ui::ColorProviderKey& key);
 +
 +#endif  // CHROME_BROWSER_UI_COLOR_AEROGRAPHENE_THEME_TOKENS_H_
-
 --- a/chrome/browser/ui/color/BUILD.gn
 +++ b/chrome/browser/ui/color/BUILD.gn
 @@ -18,6 +18,8 @@
@@ -299,7 +364,6 @@ chrome://theme/colors.css.
      "//build:branding_buildflags",
      "//chrome/app/theme:theme_resources",
      "//chrome/browser/task_manager/common",
-
 --- a/chrome/browser/ui/color/chrome_color_mixers.cc
 +++ b/chrome/browser/ui/color/chrome_color_mixers.cc
 @@ -10,6 +10,7 @@

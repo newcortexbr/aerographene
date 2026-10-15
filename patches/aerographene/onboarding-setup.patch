@@ -1,0 +1,1505 @@
+aerographene: página de primeiro uso aerographene://setup (chrome://setup), uma vez por perfil (space) novo.
+
+Origem: aerographene (original). Licença: GPL-3.0. Segue o padrão das WebUIs próprias
+(aero_notes, aero_terminal); a tela chrome://setup do Helium (helium/core/onboarding-page.patch,
+fora da série) serviu só de referência de registro. Sem código nem recursos dela.
+Efeito: AeroSetupUIConfig no WebUIConfigMap (host "setup"; só perfil normal, anônimo e convidado
+não têm a página), AeroSetupUI com data source de quatro recursos BINDATA (setup.html/.css/.js e
+wordmark.svg, sem ícone) e CSP estrita (default-src 'none', script/style/img 'self',
+connect-src 'none'). Nada de rede, nem fonte ou imagem externa: a tipografia usa fontes do
+sistema (JetBrains Mono se instalada, senão DejaVu Sans Mono/monospace).
+SetupHandler (mensagens só da página chrome://setup, com id de callback) liga cada passo a um
+controle que existe: tema (pref aerographene.theme, validado por ListThemes como em
+configurações > aparência; vale no próximo início), buscador (TemplateURLService, só entradas
+pré-populadas), sugestões de busca (pref search.suggest_enabled), pasta de notas
+(aerographene.notes.vault_path, seletor de pasta com gesto do usuário), navegador padrão
+(shell_integration::DefaultBrowserWorker), importação (abre chrome://settings/importData numa aba
+nova) e "finish"/"skip" (grava aerographene.onboarding_completed e a aba vira a nova aba). Crash
+reports, uBlock Origin e loja de extensões são só texto informativo (não há controle).
+Pref nova aerographene.onboarding_completed (boolean, false), registrada em browser_prefs.cc
+(Linux e Windows) e declarada em chrome/common/pref_names.h; kChromeUISetupURL em
+webui_url_constants.h. O redirecionamento do startup está em first-run-off.patch.
+Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-theme-picker
+(ListThemes) e terminal-webui (mesmo bloco do BUILD.gn e do grd).
+
+--- a/chrome/browser/browser_resources.grd
++++ b/chrome/browser/browser_resources.grd
+@@ -115,6 +115,12 @@
+         <include name="IDR_AERO_NOTES_EDITOR_JS" file="resources\aero_notes\editor.js" type="BINDATA" />
+       </if>
+       <if expr="is_linux or is_win">
++        <include name="IDR_AERO_SETUP_HTML" file="resources\aero_setup\setup.html" type="BINDATA" />
++        <include name="IDR_AERO_SETUP_CSS" file="resources\aero_setup\setup.css" type="BINDATA" />
++        <include name="IDR_AERO_SETUP_JS" file="resources\aero_setup\setup.js" type="BINDATA" />
++        <include name="IDR_AERO_SETUP_WORDMARK_SVG" file="resources\aero_setup\wordmark.svg" type="BINDATA" />
++      </if>
++      <if expr="is_linux or is_win">
+         <include name="IDR_AERO_TERMINAL_HTML" file="resources\aero_terminal\terminal.html" type="BINDATA" />
+         <include name="IDR_AERO_TERMINAL_CSS" file="resources\aero_terminal\terminal.css" type="BINDATA" />
+         <include name="IDR_AERO_TERMINAL_JS" file="resources\aero_terminal\terminal.js" type="BINDATA" />
+--- a/chrome/browser/prefs/browser_prefs.cc
++++ b/chrome/browser/prefs/browser_prefs.cc
+@@ -1793,6 +1793,9 @@
+   // (aerographene::notes::kVaultPathPref, aero_notes/notes_handler.h).
+   registry->RegisterFilePathPref("aerographene.notes.vault_path",
+                                  base::FilePath());
++  // aerographene: the first-run page (chrome://setup) was finished or skipped
++  // (prefs::kAerographeneOnboardingCompleted, chrome/common/pref_names.h).
++  registry->RegisterBooleanPref("aerographene.onboarding_completed", false);
+ #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
+   AccessibilityLabelsService::RegisterProfilePrefs(registry);
+   registry->RegisterBooleanPref(prefs::kRendererAccessibilityEnabled, true);
+--- a/chrome/browser/ui/webui/BUILD.gn
++++ b/chrome/browser/ui/webui/BUILD.gn
+@@ -113,6 +113,10 @@
+   }
+ 
+   if (is_linux || is_win) {
++    deps += [ "//chrome/browser/ui/webui/aero_setup" ]
++  }
++
++  if (is_linux || is_win) {
+     deps += [ "//chrome/browser/ui/webui/aero_terminal" ]
+   }
+ 
+--- a/chrome/browser/ui/webui/chrome_web_ui_configs.cc
++++ b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
+@@ -242,6 +242,10 @@
+ #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
+ 
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
++#include "chrome/browser/ui/webui/aero_setup/aero_setup_ui.h"
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
++
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
+ #include "chrome/browser/ui/webui/aero_terminal/aero_terminal_ui.h"
+ #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
+ 
+@@ -331,6 +335,9 @@
+   map.AddWebUIConfig(std::make_unique<AeroNotesUIConfig>());
+ #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
++  map.AddWebUIConfig(std::make_unique<AeroSetupUIConfig>());
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
+   map.AddWebUIConfig(std::make_unique<AeroTerminalUIConfig>());
+ #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
+ #if BUILDFLAG(ENABLE_WEBUI_NTP)
+--- a/chrome/common/pref_names.h
++++ b/chrome/common/pref_names.h
+@@ -376,6 +376,11 @@
+ // Boolean that is true when Suggest support is enabled.
+ inline constexpr char kSearchSuggestEnabled[] = "search.suggest_enabled";
+ 
++// aerographene: true once the first-run page (chrome://setup) of this profile
++// was finished or skipped; it never opens again for the profile.
++inline constexpr char kAerographeneOnboardingCompleted[] =
++    "aerographene.onboarding_completed";
++
+ #if BUILDFLAG(IS_ANDROID)
+ // String indicating the Contextual Search enabled state.
+ // "false" - opt-out (disabled)
+--- a/chrome/common/webui_url_constants.h
++++ b/chrome/common/webui_url_constants.h
+@@ -506,6 +506,8 @@
+ inline constexpr char kChromeUIProfilePickerOmniboxEverywhereQuery[] =
+     "omnibox-everywhere";
+ inline constexpr char kChromeUIProfilePickerUrl[] = "chrome://profile-picker/";
++// aerographene: first-run page of a new profile (aerographene://setup).
++inline constexpr char kChromeUISetupURL[] = "chrome://setup/";
+ inline constexpr char kChromeUIHistorySyncOptinHost[] = "history-sync-optin";
+ inline constexpr char kChromeUIHistorySyncOptinURL[] =
+     "chrome://history-sync-optin/";
+--- /dev/null
++++ b/chrome/browser/resources/aero_setup/setup.css
+@@ -0,0 +1,264 @@
++/* Copyright 2026 The aerographene Authors
++ * Use of this source code is governed by the GPL-3.0 license.
++ *
++ * Style of the aerographene site and of the approved onboarding mockup
++ * (theming/mockups/perfis-onboarding/03-onboarding): mono type, thin borders,
++ * dotted background, titled panes. System fonts only; nothing is loaded from
++ * outside the package. */
++:root {
++  --bg: #05070c;
++  --panel: #0a0e16;
++  --line: #1c2433;
++  --line2: #2c3a52;
++  --text: #e6edf8;
++  --text2: #9aa8bf;
++  --muted: #5e6b82;
++  --accent: #6cb6ff;
++  --notes: #c4a7ff;
++  --term: #58a6ff;
++  --mono: "JetBrains Mono", "JetBrainsMono Nerd Font", ui-monospace,
++      "DejaVu Sans Mono", monospace;
++}
++* { box-sizing: border-box; margin: 0; }
++html {
++  background: var(--bg);
++  color: var(--text);
++  font: 14px/1.7 var(--mono);
++  scroll-behavior: smooth;
++}
++@media (prefers-reduced-motion: reduce) {
++  html { scroll-behavior: auto; }
++}
++body {
++  background-image: radial-gradient(circle at 1px 1px, #ffffff0b 1px, transparent 1.5px);
++  background-size: 14px 24px;
++  min-height: 100vh;
++}
++a { color: var(--text); text-decoration: none; }
++b { font-weight: 600; }
++kbd {
++  border: 1px solid var(--line2);
++  color: var(--text2);
++  font: inherit;
++  font-size: 11px;
++  margin-right: 4px;
++  padding: 0 6px;
++}
++:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
++
++.shell {
++  display: grid;
++  gap: 28px;
++  grid-template-columns: 250px minmax(0, 1fr);
++  margin: 0 auto;
++  max-width: 1240px;
++  padding: 28px;
++}
++
++/* left rail, like a TUI side pane */
++.rail {
++  align-self: start;
++  background: var(--bg);
++  border: 1px solid var(--line);
++  display: flex;
++  flex-direction: column;
++  gap: 18px;
++  padding: 20px 18px;
++  position: sticky;
++  top: 28px;
++}
++.logo { display: block; height: auto; width: 100%; }
++.ver { color: var(--muted); font-size: 11px; margin-top: -8px; }
++.idx { display: flex; flex-direction: column; }
++.idx a {
++  border-left: 2px solid transparent;
++  color: var(--text2);
++  padding: 3px 8px;
++}
++.idx a span { color: var(--muted); margin-right: 8px; }
++.idx a.on {
++  background: var(--text);
++  border-left-color: var(--accent);
++  color: var(--bg);
++}
++.idx a.on span { color: var(--bg); }
++.keys { color: var(--muted); font-size: 11px; }
++
++/* panes with the title in the border */
++main { display: flex; flex-direction: column; gap: 30px; min-width: 0; }
++.pane {
++  background: var(--bg);
++  border: 1px solid var(--line);
++  padding: 36px 36px 30px;
++  position: relative;
++  scroll-margin-top: 28px;
++}
++.pane::before {
++  background: var(--bg);
++  color: var(--muted);
++  content: "─ " attr(data-title) " ─";
++  font-size: 12px;
++  left: 16px;
++  padding: 0 6px;
++  position: absolute;
++  top: -10px;
++}
++.pane.on { border-color: var(--line2); }
++.pane.on::before { color: var(--text); }
++
++h1 { font-size: 38px; letter-spacing: -.5px; line-height: 1.2; margin-bottom: 14px; }
++h1 em { color: var(--text2); font-style: normal; }
++.lede { color: var(--text2); max-width: 640px; }
++.lede + .cmdb, .lede + .term { margin-top: 14px; }
++.dim { color: var(--muted); }
++.c-notes { color: var(--notes); }
++.c-term { color: var(--term); }
++.note-line { color: var(--muted); font-size: 12px; margin-top: 10px; }
++
++.btns { display: flex; gap: 12px; margin-top: 18px; }
++.btn {
++  align-items: center;
++  background: none;
++  border: 1px solid var(--text);
++  color: var(--text);
++  cursor: pointer;
++  display: inline-flex;
++  font: inherit;
++  gap: 8px;
++  padding: 5px 14px;
++  white-space: nowrap;
++}
++.btn.solid { background: var(--text); color: var(--bg); }
++.btn.ghost { border-color: var(--line2); color: var(--text2); }
++.btn.sm { font-size: 12px; padding: 2px 10px; }
++.btn:hover { border-color: var(--text); }
++
++/* theme cards */
++.opts { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
++.opt {
++  background: var(--panel);
++  border: 1px solid var(--line);
++  color: var(--text2);
++  cursor: pointer;
++  display: flex;
++  flex-direction: column;
++  font: inherit;
++  gap: 6px;
++  padding: 14px 16px;
++  text-align: left;
++}
++.opt b { color: var(--text); display: flex; justify-content: space-between; }
++.opt b::after { color: var(--muted); content: "[ ]"; font-weight: 400; }
++.opt.on { border-color: var(--text); }
++.opt.on b::after { color: var(--text); content: "[x]"; }
++.opt small { color: var(--muted); font-size: 11px; }
++.mini {
++  background: #04070e;
++  border: 1px solid var(--line);
++  height: 90px;
++  margin-bottom: 6px;
++  overflow: hidden;
++  position: relative;
++}
++.mini::before {
++  background: #060a14;
++  border-right: 1px solid #ffffff17;
++  bottom: 0;
++  content: "";
++  left: 0;
++  position: absolute;
++  top: 0;
++  width: 26%;
++}
++.mini i { background: #ffffff22; height: 8px; left: 34%; position: absolute; top: 26px; width: 46%; }
++.mini i + i { top: 44px; width: 30%; }
++.mini.px { background: #000; }
++.mini.px::before { background: #141414; }
++.mini.d1 {
++  background:
++      radial-gradient(60% 70% at 40% 40%, #1a3f80aa, transparent),
++      radial-gradient(40% 50% at 85% 30%, #4a2280aa, transparent), #03060d;
++}
++.mini.lt { background: #eceff4; }
++.mini.lt::before { background: #dfe3ea; border-right-color: #00000017; }
++.mini.lt i { background: #00000022; }
++
++/* rows */
++.line {
++  align-items: center;
++  border-bottom: 1px solid var(--line);
++  display: flex;
++  gap: 20px;
++  justify-content: space-between;
++  padding: 9px 0;
++}
++.line:last-child { border: 0; }
++.line small { color: var(--muted); display: block; font-size: 11px; line-height: 1.4; }
++.line label { cursor: pointer; }
++.static { color: var(--text2); flex: none; }
++select {
++  background: var(--bg);
++  border: 1px solid var(--line2);
++  color: var(--text);
++  font: inherit;
++  min-width: 170px;
++  padding: 4px 10px;
++}
++select:disabled, .tog:disabled { opacity: .5; }
++.tog {
++  background: none;
++  border: 1px solid var(--line2);
++  cursor: pointer;
++  flex: none;
++  height: 18px;
++  padding: 0;
++  position: relative;
++  width: 36px;
++}
++.tog::after {
++  background: var(--muted);
++  content: "";
++  height: 10px;
++  left: 3px;
++  position: absolute;
++  top: 3px;
++  width: 10px;
++}
++.tog[aria-checked="true"] { background: var(--text); border-color: var(--text); }
++.tog[aria-checked="true"]::after { background: var(--bg); left: auto; right: 3px; }
++
++.cmdb {
++  background: var(--panel);
++  border: 1px solid var(--line2);
++  color: var(--text);
++  display: flex;
++  gap: 10px;
++  margin: 8px 0 6px;
++  padding: 8px 14px;
++}
++.term {
++  background: #020409;
++  border: 1px solid var(--term);
++  color: var(--text2);
++  font-size: 12px;
++  padding: 12px 16px;
++}
++.term b { color: var(--term); font-weight: 400; }
++.folder {
++  align-items: center;
++  background: var(--panel);
++  border: 1px solid var(--line);
++  color: var(--text2);
++  display: flex;
++  font-size: 12px;
++  gap: 16px;
++  margin-top: 12px;
++  padding: 12px 16px;
++}
++.folder .dim { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++
++@media (max-width: 820px) {
++  .shell { grid-template-columns: 1fr; }
++  .rail { position: static; }
++  .pane { padding: 30px 20px 24px; }
++}
+--- /dev/null
++++ b/chrome/browser/resources/aero_setup/setup.html
+@@ -0,0 +1,100 @@
++<!doctype html>
++<html lang="en">
++<head>
++<meta charset="utf-8">
++<title>aerographene setup</title>
++<meta name="color-scheme" content="dark">
++<link rel="stylesheet" href="setup.css">
++<script type="module" src="setup.js"></script>
++</head>
++<body>
++<div class="shell">
++  <aside class="rail">
++    <img class="logo" src="wordmark.svg" alt="aerographene">
++    <p class="ver" id="ver">first run</p>
++    <nav class="idx" id="idx" aria-label="steps">
++      <a href="#s00" data-i="0"><span>00</span> hello</a>
++      <a href="#s01" data-i="1"><span>01</span> theme</a>
++      <a href="#s02" data-i="2"><span>02</span> defaults</a>
++      <a href="#s03" data-i="3"><span>03</span> o: notes</a>
++      <a href="#s04" data-i="4"><span>04</span> t: terminal</a>
++      <a href="#s05" data-i="5"><span>05</span> command bar</a>
++      <a href="#s06" data-i="6"><span>06</span> privacy</a>
++      <a href="#s07" data-i="7"><span>07</span> import</a>
++    </nav>
++    <p class="keys"><kbd>j</kbd><kbd>k</kbd> move · <kbd>enter</kbd> next</p>
++  </aside>
++  <main>
++    <section class="pane" id="s00" data-title="00 hello">
++      <h1>light. fast.<br><em>pretty.</em></h1>
++      <p class="lede">Eight short steps, all optional, all changeable later in settings. No account is needed and nothing here sends data anywhere.</p>
++      <div class="btns">
++        <button class="btn solid" id="start" type="button">start →</button>
++        <button class="btn ghost" id="skip" type="button">skip, use defaults</button>
++      </div>
++    </section>
++
++    <section class="pane" id="s01" data-title="01 theme">
++      <div class="opts" id="themes" role="radiogroup" aria-label="theme"></div>
++      <p class="note-line" id="themeNote" hidden>The theme applies the next time the browser starts.</p>
++    </section>
++
++    <section class="pane" id="s02" data-title="02 defaults">
++      <div class="line">
++        <div><label for="engine">Search engine</label><small>used in the address bar and the new tab</small></div>
++        <select id="engine" disabled></select>
++      </div>
++      <div class="line">
++        <div>Extension store<small>installs from the Chrome Web Store through the bundled Chromium Web Store extension</small></div>
++        <span class="static">Chromium Web Store</span>
++      </div>
++      <div class="line" id="defBrowserRow">
++        <div>Make aerographene the default browser<small id="defBrowserNote"></small></div>
++        <button class="tog" id="defBrowser" type="button" role="switch" aria-checked="false" aria-label="make aerographene the default browser" disabled></button>
++      </div>
++    </section>
++
++    <section class="pane" id="s03" data-title="03 o: notes">
++      <p class="lede">Type <b class="c-notes">o:</b> in the address bar to open markdown notes from a folder you choose.</p>
++      <div class="cmdb"><span class="dim">aerographene</span><span><span class="c-notes">o:</span> notes</span></div>
++      <div class="folder"><span class="tag c-notes">notes folder</span><span id="vaultPath" class="dim">none chosen</span><button class="btn sm ghost" id="vaultPick" type="button">choose…</button></div>
++    </section>
++
++    <section class="pane" id="s04" data-title="04 t: terminal">
++      <p class="lede">Type <b class="c-term">t:</b> for a terminal workspace tab, a canvas of terminals.</p>
++      <div class="term" aria-hidden="true"><b>$</b> echo hello &nbsp; <span class="dim">t: workspace 1</span><br>hello</div>
++      <p class="note-line">Example only: nothing runs here.</p>
++    </section>
++
++    <section class="pane" id="s05" data-title="05 command bar">
++      <p class="lede">One bar for tabs, spaces, commands and search.</p>
++      <div class="cmdb"><kbd>ctrl</kbd><kbd>t</kbd><span class="dim">search, open a page, or type o: / t:</span></div>
++      <p class="note-line">Ctrl+T opens it empty, Ctrl+L or a click on the address bar opens it with the current address.</p>
++    </section>
++
++    <section class="pane" id="s06" data-title="06 privacy">
++      <div class="line">
++        <div>Crash reports<small>none are sent: crash report upload is turned off in this build</small></div>
++        <span class="static">off</span>
++      </div>
++      <div class="line">
++        <div><label for="suggest">Search suggestions</label><small>sends what you type to the search engine</small></div>
++        <button class="tog" id="suggest" type="button" role="switch" aria-checked="false" disabled></button>
++      </div>
++      <div class="line">
++        <div>Block ads and trackers<small>uBlock Origin, bundled as a built-in extension</small></div>
++        <span class="static">included</span>
++      </div>
++    </section>
++
++    <section class="pane" id="s07" data-title="07 import">
++      <p class="lede">Bring bookmarks and more from another browser: Chrome, Firefox, Arc and the others the importer finds on this machine. The import page of settings opens in a new tab.</p>
++      <div class="btns">
++        <button class="btn ghost" id="import" type="button">import…</button>
++        <button class="btn solid" id="finish" type="button">finish →</button>
++      </div>
++    </section>
++  </main>
++</div>
++</body>
++</html>
+--- /dev/null
++++ b/chrome/browser/resources/aero_setup/setup.js
+@@ -0,0 +1,328 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++// chrome://setup: first-run page of a new profile (space). Every control
++// below is wired to a setting that exists (theme pref, search engine model,
++// notes vault pref, default browser, import page) through SetupHandler. No
++// network, no innerHTML (Trusted Types is enforced by the WebUI CSP).
++
++// Minimal replacement for cr.sendWithPromise: the browser answers with
++// cr.webUIResponse(id, ok, value) (WebUIMessageHandler::Resolve/Reject).
++const pending = new Map();
++let nextId = 0;
++window.cr = window.cr || {};
++window.cr.webUIResponse = (id, ok, value) => {
++  const p = pending.get(id);
++  if (p) {
++    pending.delete(id);
++    (ok ? p.resolve : p.reject)(value);
++  }
++};
++window.cr.webUIListenerCallback = () => {};
++function send(name, ...args) {
++  const id = `setup${nextId++}`;
++  return new Promise((resolve, reject) => {
++    pending.set(id, {resolve, reject});
++    chrome.send(name, [id, ...args]);
++  });
++}
++
++const $ = (id) => document.getElementById(id);
++const panes = Array.from(document.querySelectorAll('.pane'));
++const links = Array.from(document.querySelectorAll('#idx a'));
++let current = 0;
++
++function el(tag, cls, text) {
++  const e = document.createElement(tag);
++  if (cls) {
++    e.className = cls;
++  }
++  if (text !== undefined) {
++    e.textContent = text;
++  }
++  return e;
++}
++
++// --- steps: rail, j/k, enter ---
++
++function mark(i) {
++  current = i;
++  panes.forEach((p, k) => p.classList.toggle('on', k === i));
++  links.forEach((a, k) => {
++    a.classList.toggle('on', k === i);
++    if (k === i) {
++      a.setAttribute('aria-current', 'step');
++    } else {
++      a.removeAttribute('aria-current');
++    }
++  });
++}
++
++function go(i) {
++  i = Math.max(0, Math.min(panes.length - 1, i));
++  mark(i);
++  panes[i].scrollIntoView({block: 'start'});
++}
++
++links.forEach((a, i) => a.addEventListener('click', (e) => {
++  e.preventDefault();
++  go(i);
++}));
++
++document.addEventListener('keydown', (e) => {
++  if (e.ctrlKey || e.metaKey || e.altKey) {
++    return;
++  }
++  const t = e.target;
++  if (t.closest && t.closest('input, select, textarea')) {
++    return;
++  }
++  const interactive = t.closest && t.closest('button, a');
++  if (e.key === 'j') {
++    go(current + 1);
++  } else if (e.key === 'k') {
++    go(current - 1);
++  } else if (e.key === 'Enter' && !interactive) {
++    go(current + 1);
++  } else {
++    return;
++  }
++  e.preventDefault();
++});
++
++// The current step follows the scroll position too.
++let ticking = false;
++window.addEventListener('scroll', () => {
++  if (ticking) {
++    return;
++  }
++  ticking = true;
++  requestAnimationFrame(() => {
++    ticking = false;
++    const line = window.innerHeight * 0.35;
++    let idx = 0;
++    panes.forEach((p, k) => {
++      if (p.getBoundingClientRect().top <= line) {
++        idx = k;
++      }
++    });
++    if (idx !== current) {
++      mark(idx);
++    }
++  });
++});
++
++// --- finish: marks the profile as onboarded, then the new tab page ---
++
++let finishing = false;
++async function complete() {
++  if (finishing) {
++    return;
++  }
++  finishing = true;
++  for (const id of ['skip', 'finish', 'start']) {
++    $(id).disabled = true;
++  }
++  try {
++    await send('complete');
++  } catch (e) {
++    finishing = false;
++    for (const id of ['skip', 'finish', 'start']) {
++      $(id).disabled = false;
++    }
++  }
++}
++
++$('start').addEventListener('click', () => go(1));
++$('skip').addEventListener('click', complete);
++$('finish').addEventListener('click', complete);
++$('import').addEventListener('click', () => {
++  send('openImport').catch(() => {});
++});
++
++// --- 01 theme ---
++
++const THEME_TEXT = {
++  default: 'soft gradients, dark, system font',
++  pixelized: 'mono greys, square corners, pixel icons',
++};
++
++function themeCard(t, active) {
++  const card = el('button', 'opt');
++  card.type = 'button';
++  card.setAttribute('role', 'radio');
++  card.dataset.name = t.name;
++  const mini = el('div', 'mini');
++  if (t.name === 'default' && t.builtin) {
++    mini.classList.add('d1');
++  } else if (t.name === 'pixelized' && t.builtin) {
++    mini.classList.add('px');
++  } else if (!t.dark) {
++    mini.classList.add('lt');
++  }
++  mini.append(el('i'), el('i'));
++  card.append(mini, el('b', '', t.name));
++  card.append(el('small', '',
++      (t.builtin && THEME_TEXT[t.name]) ||
++      (t.dark ? 'custom theme, dark' : 'custom theme, light')));
++  card.classList.toggle('on', t.name === active);
++  card.setAttribute('aria-checked', String(t.name === active));
++  return card;
++}
++
++async function initThemes() {
++  const box = $('themes');
++  let data;
++  try {
++    data = await send('getThemes');
++  } catch (e) {
++    return;
++  }
++  const render = (active) => {
++    box.replaceChildren(...data.themes.map((t) => themeCard(t, active)));
++  };
++  render(data.active);
++  let active = data.active;
++  box.addEventListener('click', async (e) => {
++    const card = e.target.closest('.opt');
++    if (!card || card.dataset.name === active) {
++      return;
++    }
++    const name = card.dataset.name;
++    let ok = false;
++    try {
++      ok = await send('setTheme', name);
++    } catch (err) {
++      ok = false;
++    }
++    if (ok) {
++      active = name;
++      render(active);
++      $('themeNote').hidden = false;
++    }
++  });
++}
++
++// --- 02 defaults: search engine, default browser ---
++
++async function initSearch() {
++  const sel = $('engine');
++  const sug = $('suggest');
++  let data;
++  try {
++    data = await send('getSearch');
++  } catch (e) {
++    return;
++  }
++  for (const en of data.engines) {
++    const o = el('option', '', en.name);
++    o.value = en.keyword;
++    sel.append(o);
++  }
++  sel.value = data.current;
++  if (!data.engines.some((en) => en.keyword === data.current)) {
++    sel.selectedIndex = -1;
++  }
++  sel.disabled = data.engines.length === 0;
++  let last = sel.value;
++  sel.addEventListener('change', async () => {
++    let ok = false;
++    try {
++      ok = await send('setSearchEngine', sel.value);
++    } catch (e) {
++      ok = false;
++    }
++    if (ok) {
++      last = sel.value;
++    } else {
++      sel.value = last;
++    }
++  });
++
++  // 06 privacy: search suggestions (the existing pref).
++  sug.setAttribute('aria-checked', String(!!data.suggest));
++  sug.disabled = false;
++  sug.addEventListener('click', async () => {
++    const next = sug.getAttribute('aria-checked') !== 'true';
++    sug.disabled = true;
++    try {
++      if (await send('setSuggest', next)) {
++        sug.setAttribute('aria-checked', String(next));
++      }
++    } catch (e) {
++      // keep the old value
++    }
++    sug.disabled = false;
++  });
++}
++
++function showDefaultBrowser(s) {
++  const tog = $('defBrowser');
++  const note = $('defBrowserNote');
++  tog.setAttribute('aria-checked', String(!!s.isDefault));
++  if (s.isDefault) {
++    tog.disabled = true;
++    note.textContent = 'it already is the default browser';
++  } else if (s.canSet) {
++    tog.disabled = false;
++    note.textContent = 'links and html files open here';
++  } else {
++    tog.disabled = true;
++    note.textContent = 'cannot be set from here, use the system settings';
++  }
++}
++
++async function initDefaultBrowser() {
++  const tog = $('defBrowser');
++  try {
++    showDefaultBrowser(await send('getDefaultBrowser'));
++  } catch (e) {
++    $('defBrowserNote').textContent = 'could not read the system setting';
++    return;
++  }
++  tog.addEventListener('click', async () => {
++    tog.disabled = true;
++    try {
++      showDefaultBrowser(await send('setDefaultBrowser'));
++    } catch (e) {
++      tog.disabled = false;
++    }
++  });
++}
++
++// --- 03 notes folder ---
++
++function showVault(v) {
++  const path = v && v.path;
++  $('vaultPath').textContent = path || 'none chosen';
++  $('vaultPath').title = path || '';
++}
++
++async function initVault(info) {
++  showVault(info.vault);
++  $('vaultPick').addEventListener('click', async () => {
++    try {
++      const v = await send('pickVault');
++      if (v) {
++        showVault(v);
++      }
++    } catch (e) {
++      // keep the old folder
++    }
++  });
++}
++
++async function init() {
++  mark(0);
++  let info = {vault: null};
++  try {
++    info = await send('getInfo');
++    $('ver').textContent = `first run · v${info.version} · ${info.platform}`;
++  } catch (e) {
++    // the page still works without the header line
++  }
++  await Promise.all([initThemes(), initSearch(), initDefaultBrowser(), initVault(info)]);
++  window.setupReady = true;
++}
++
++init();
+--- /dev/null
++++ b/chrome/browser/resources/aero_setup/wordmark.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="92 -8 884 100" width="884" height="100"><g transform="translate(108 0)" shape-rendering="crispEdges"><g fill="#8a8f98"><rect x="12" y="0" width="12" height="12"/><rect x="24" y="0" width="12" height="12"/><rect x="36" y="0" width="12" height="12"/><rect x="0" y="12" width="12" height="12"/><rect x="48" y="12" width="12" height="12"/><rect x="0" y="24" width="12" height="12"/><rect x="48" y="24" width="12" height="12"/><rect x="0" y="36" width="12" height="12"/><rect x="12" y="36" width="12" height="12"/><rect x="24" y="36" width="12" height="12"/><rect x="36" y="36" width="12" height="12"/><rect x="48" y="36" width="12" height="12"/><rect x="0" y="48" width="12" height="12"/><rect x="48" y="48" width="12" height="12"/><rect x="0" y="60" width="12" height="12"/><rect x="48" y="60" width="12" height="12"/><rect x="0" y="72" width="12" height="12"/><rect x="48" y="72" width="12" height="12"/><rect x="72" y="0" width="12" height="12"/><rect x="84" y="0" width="12" height="12"/><rect x="96" y="0" width="12" height="12"/><rect x="108" y="0" width="12" height="12"/><rect x="120" y="0" width="12" height="12"/><rect x="72" y="12" width="12" height="12"/><rect x="72" y="24" width="12" height="12"/><rect x="72" y="36" width="12" height="12"/><rect x="84" y="36" width="12" height="12"/><rect x="96" y="36" width="12" height="12"/><rect x="108" y="36" width="12" height="12"/><rect x="72" y="48" width="12" height="12"/><rect x="72" y="60" width="12" height="12"/><rect x="72" y="72" width="12" height="12"/><rect x="84" y="72" width="12" height="12"/><rect x="96" y="72" width="12" height="12"/><rect x="108" y="72" width="12" height="12"/><rect x="120" y="72" width="12" height="12"/><rect x="144" y="0" width="12" height="12"/><rect x="156" y="0" width="12" height="12"/><rect x="168" y="0" width="12" height="12"/><rect x="180" y="0" width="12" height="12"/><rect x="144" y="12" width="12" height="12"/><rect x="192" y="12" width="12" height="12"/><rect x="144" y="24" width="12" height="12"/><rect x="192" y="24" width="12" height="12"/><rect x="144" y="36" width="12" height="12"/><rect x="156" y="36" width="12" height="12"/><rect x="168" y="36" width="12" height="12"/><rect x="180" y="36" width="12" height="12"/><rect x="144" y="48" width="12" height="12"/><rect x="168" y="48" width="12" height="12"/><rect x="144" y="60" width="12" height="12"/><rect x="180" y="60" width="12" height="12"/><rect x="144" y="72" width="12" height="12"/><rect x="192" y="72" width="12" height="12"/><rect x="228" y="0" width="12" height="12"/><rect x="240" y="0" width="12" height="12"/><rect x="252" y="0" width="12" height="12"/><rect x="216" y="12" width="12" height="12"/><rect x="264" y="12" width="12" height="12"/><rect x="216" y="24" width="12" height="12"/><rect x="264" y="24" width="12" height="12"/><rect x="216" y="36" width="12" height="12"/><rect x="264" y="36" width="12" height="12"/><rect x="216" y="48" width="12" height="12"/><rect x="264" y="48" width="12" height="12"/><rect x="216" y="60" width="12" height="12"/><rect x="264" y="60" width="12" height="12"/><rect x="228" y="72" width="12" height="12"/><rect x="240" y="72" width="12" height="12"/><rect x="252" y="72" width="12" height="12"/></g><g fill="#f2f3f5"><rect x="300" y="0" width="12" height="12"/><rect x="312" y="0" width="12" height="12"/><rect x="324" y="0" width="12" height="12"/><rect x="336" y="0" width="12" height="12"/><rect x="288" y="12" width="12" height="12"/><rect x="288" y="24" width="12" height="12"/><rect x="288" y="36" width="12" height="12"/><rect x="324" y="36" width="12" height="12"/><rect x="336" y="36" width="12" height="12"/><rect x="288" y="48" width="12" height="12"/><rect x="336" y="48" width="12" height="12"/><rect x="288" y="60" width="12" height="12"/><rect x="336" y="60" width="12" height="12"/><rect x="300" y="72" width="12" height="12"/><rect x="312" y="72" width="12" height="12"/><rect x="324" y="72" width="12" height="12"/><rect x="336" y="72" width="12" height="12"/><rect x="360" y="0" width="12" height="12"/><rect x="372" y="0" width="12" height="12"/><rect x="384" y="0" width="12" height="12"/><rect x="396" y="0" width="12" height="12"/><rect x="360" y="12" width="12" height="12"/><rect x="408" y="12" width="12" height="12"/><rect x="360" y="24" width="12" height="12"/><rect x="408" y="24" width="12" height="12"/><rect x="360" y="36" width="12" height="12"/><rect x="372" y="36" width="12" height="12"/><rect x="384" y="36" width="12" height="12"/><rect x="396" y="36" width="12" height="12"/><rect x="360" y="48" width="12" height="12"/><rect x="384" y="48" width="12" height="12"/><rect x="360" y="60" width="12" height="12"/><rect x="396" y="60" width="12" height="12"/><rect x="360" y="72" width="12" height="12"/><rect x="408" y="72" width="12" height="12"/><rect x="444" y="0" width="12" height="12"/><rect x="456" y="0" width="12" height="12"/><rect x="468" y="0" width="12" height="12"/><rect x="432" y="12" width="12" height="12"/><rect x="480" y="12" width="12" height="12"/><rect x="432" y="24" width="12" height="12"/><rect x="480" y="24" width="12" height="12"/><rect x="432" y="36" width="12" height="12"/><rect x="444" y="36" width="12" height="12"/><rect x="456" y="36" width="12" height="12"/><rect x="468" y="36" width="12" height="12"/><rect x="480" y="36" width="12" height="12"/><rect x="432" y="48" width="12" height="12"/><rect x="480" y="48" width="12" height="12"/><rect x="432" y="60" width="12" height="12"/><rect x="480" y="60" width="12" height="12"/><rect x="432" y="72" width="12" height="12"/><rect x="480" y="72" width="12" height="12"/><rect x="504" y="0" width="12" height="12"/><rect x="516" y="0" width="12" height="12"/><rect x="528" y="0" width="12" height="12"/><rect x="540" y="0" width="12" height="12"/><rect x="504" y="12" width="12" height="12"/><rect x="552" y="12" width="12" height="12"/><rect x="504" y="24" width="12" height="12"/><rect x="552" y="24" width="12" height="12"/><rect x="504" y="36" width="12" height="12"/><rect x="516" y="36" width="12" height="12"/><rect x="528" y="36" width="12" height="12"/><rect x="540" y="36" width="12" height="12"/><rect x="504" y="48" width="12" height="12"/><rect x="504" y="60" width="12" height="12"/><rect x="504" y="72" width="12" height="12"/><rect x="576" y="0" width="12" height="12"/><rect x="624" y="0" width="12" height="12"/><rect x="576" y="12" width="12" height="12"/><rect x="624" y="12" width="12" height="12"/><rect x="576" y="24" width="12" height="12"/><rect x="624" y="24" width="12" height="12"/><rect x="576" y="36" width="12" height="12"/><rect x="588" y="36" width="12" height="12"/><rect x="600" y="36" width="12" height="12"/><rect x="612" y="36" width="12" height="12"/><rect x="624" y="36" width="12" height="12"/><rect x="576" y="48" width="12" height="12"/><rect x="624" y="48" width="12" height="12"/><rect x="576" y="60" width="12" height="12"/><rect x="624" y="60" width="12" height="12"/><rect x="576" y="72" width="12" height="12"/><rect x="624" y="72" width="12" height="12"/><rect x="648" y="0" width="12" height="12"/><rect x="660" y="0" width="12" height="12"/><rect x="672" y="0" width="12" height="12"/><rect x="684" y="0" width="12" height="12"/><rect x="696" y="0" width="12" height="12"/><rect x="648" y="12" width="12" height="12"/><rect x="648" y="24" width="12" height="12"/><rect x="648" y="36" width="12" height="12"/><rect x="660" y="36" width="12" height="12"/><rect x="672" y="36" width="12" height="12"/><rect x="684" y="36" width="12" height="12"/><rect x="648" y="48" width="12" height="12"/><rect x="648" y="60" width="12" height="12"/><rect x="648" y="72" width="12" height="12"/><rect x="660" y="72" width="12" height="12"/><rect x="672" y="72" width="12" height="12"/><rect x="684" y="72" width="12" height="12"/><rect x="696" y="72" width="12" height="12"/><rect x="720" y="0" width="12" height="12"/><rect x="768" y="0" width="12" height="12"/><rect x="720" y="12" width="12" height="12"/><rect x="732" y="12" width="12" height="12"/><rect x="768" y="12" width="12" height="12"/><rect x="720" y="24" width="12" height="12"/><rect x="744" y="24" width="12" height="12"/><rect x="768" y="24" width="12" height="12"/><rect x="720" y="36" width="12" height="12"/><rect x="756" y="36" width="12" height="12"/><rect x="768" y="36" width="12" height="12"/><rect x="720" y="48" width="12" height="12"/><rect x="768" y="48" width="12" height="12"/><rect x="720" y="60" width="12" height="12"/><rect x="768" y="60" width="12" height="12"/><rect x="720" y="72" width="12" height="12"/><rect x="768" y="72" width="12" height="12"/><rect x="792" y="0" width="12" height="12"/><rect x="804" y="0" width="12" height="12"/><rect x="816" y="0" width="12" height="12"/><rect x="828" y="0" width="12" height="12"/><rect x="840" y="0" width="12" height="12"/><rect x="792" y="12" width="12" height="12"/><rect x="792" y="24" width="12" height="12"/><rect x="792" y="36" width="12" height="12"/><rect x="804" y="36" width="12" height="12"/><rect x="816" y="36" width="12" height="12"/><rect x="828" y="36" width="12" height="12"/><rect x="792" y="48" width="12" height="12"/><rect x="792" y="60" width="12" height="12"/><rect x="792" y="72" width="12" height="12"/><rect x="804" y="72" width="12" height="12"/><rect x="816" y="72" width="12" height="12"/><rect x="828" y="72" width="12" height="12"/><rect x="840" y="72" width="12" height="12"/></g></g></svg>
+\ No newline at end of file
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_setup/BUILD.gn
+@@ -0,0 +1,34 @@
++# Copyright 2026 The aerographene Authors
++# Use of this source code is governed by the GPL-3.0 license.
++
++assert(is_linux || is_win)
++
++source_set("aero_setup") {
++  sources = [
++    "aero_setup_ui.cc",
++    "aero_setup_ui.h",
++    "setup_handler.cc",
++    "setup_handler.h",
++  ]
++  public_deps = [
++    "//content/public/browser",
++    "//content/public/common",
++  ]
++  deps = [
++    "//base",
++    "//chrome/browser:resources",
++    "//chrome/browser:shell_integration",
++    "//chrome/browser/profiles:profile",
++    "//chrome/browser/search_engines",
++    "//chrome/browser/themes",
++    "//chrome/browser/ui/navigator",
++    "//chrome/browser/ui/select_file_policy",
++    "//chrome/browser/ui/webui/aero_notes",
++    "//chrome/common",
++    "//components/prefs",
++    "//components/search_engines",
++    "//services/network/public/mojom",
++    "//ui/shell_dialogs",
++    "//url",
++  ]
++}
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_setup/aero_setup_ui.cc
+@@ -0,0 +1,55 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "chrome/browser/ui/webui/aero_setup/aero_setup_ui.h"
++
++#include <memory>
++
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/webui/aero_setup/setup_handler.h"
++#include "chrome/grit/browser_resources.h"
++#include "content/public/browser/browser_context.h"
++#include "content/public/browser/web_ui.h"
++#include "content/public/browser/web_ui_data_source.h"
++#include "services/network/public/mojom/content_security_policy.mojom.h"
++
++bool AeroSetupUIConfig::IsWebUIEnabled(
++    content::BrowserContext* browser_context) {
++  return !browser_context->IsOffTheRecord();
++}
++
++AeroSetupUI::AeroSetupUI(content::WebUI* web_ui)
++    : content::WebUIController(web_ui) {
++  Profile* profile = Profile::FromWebUI(web_ui);
++  content::WebUIDataSource* source =
++      content::WebUIDataSource::CreateAndAdd(profile, kAeroSetupHost);
++  source->AddResourcePath("setup.css", IDR_AERO_SETUP_CSS);
++  source->AddResourcePath("setup.js", IDR_AERO_SETUP_JS);
++  source->AddResourcePath("wordmark.svg", IDR_AERO_SETUP_WORDMARK_SVG);
++  source->SetDefaultResource(IDR_AERO_SETUP_HTML);
++
++  // The page reads and writes only the few settings it shows, through this
++  // handler; WebUI bindings (so these messages) exist only in this renderer.
++  web_ui->AddMessageHandler(
++      std::make_unique<aerographene::setup::SetupHandler>(profile));
++
++  // Strict policy on top of the WebUI defaults: nothing outside the page
++  // itself, no network, no inline script or style, no remote font or image.
++  using network::mojom::CSPDirectiveName;
++  source->OverrideContentSecurityPolicy(CSPDirectiveName::DefaultSrc,
++                                        "default-src 'none';");
++  source->OverrideContentSecurityPolicy(CSPDirectiveName::ScriptSrc,
++                                        "script-src 'self';");
++  source->OverrideContentSecurityPolicy(CSPDirectiveName::StyleSrc,
++                                        "style-src 'self';");
++  source->OverrideContentSecurityPolicy(CSPDirectiveName::ImgSrc,
++                                        "img-src 'self';");
++  source->OverrideContentSecurityPolicy(CSPDirectiveName::ConnectSrc,
++                                        "connect-src 'none';");
++  source->OverrideContentSecurityPolicy(CSPDirectiveName::FormAction,
++                                        "form-action 'none';");
++  source->OverrideContentSecurityPolicy(CSPDirectiveName::BaseURI,
++                                        "base-uri 'none';");
++}
++
++AeroSetupUI::~AeroSetupUI() = default;
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_setup/aero_setup_ui.h
+@@ -0,0 +1,41 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_AERO_SETUP_AERO_SETUP_UI_H_
++#define CHROME_BROWSER_UI_WEBUI_AERO_SETUP_AERO_SETUP_UI_H_
++
++#include "content/public/browser/web_ui_controller.h"
++#include "content/public/browser/webui_config.h"
++#include "content/public/common/url_constants.h"
++
++namespace content {
++class BrowserContext;
++}
++
++inline constexpr char kAeroSetupHost[] = "setup";
++
++class AeroSetupUI;
++
++// chrome://setup (shown as aerographene://setup): first-run page of a new
++// profile (space). Only the config lives in the WebUIConfigMap; the controller
++// and its data source are created when a tab navigates to the page.
++class AeroSetupUIConfig : public content::DefaultWebUIConfig<AeroSetupUI> {
++ public:
++  AeroSetupUIConfig()
++      : DefaultWebUIConfig(content::kChromeUIScheme, kAeroSetupHost) {}
++
++  // Off the record (incognito and guest) profiles do not get the page.
++  bool IsWebUIEnabled(content::BrowserContext* browser_context) override;
++};
++
++class AeroSetupUI : public content::WebUIController {
++ public:
++  explicit AeroSetupUI(content::WebUI* web_ui);
++
++  AeroSetupUI(const AeroSetupUI&) = delete;
++  AeroSetupUI& operator=(const AeroSetupUI&) = delete;
++
++  ~AeroSetupUI() override;
++};
++
++#endif  // CHROME_BROWSER_UI_WEBUI_AERO_SETUP_AERO_SETUP_UI_H_
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_setup/setup_handler.cc
+@@ -0,0 +1,444 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#include "chrome/browser/ui/webui/aero_setup/setup_handler.h"
++
++#include <string_view>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/strings/utf_string_conversions.h"
++#include "build/build_config.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/search_engines/template_url_service_factory.h"
++#include "chrome/browser/themes/aerographene_theme.h"
++#include "chrome/browser/ui/navigator/browser_navigator.h"
++#include "chrome/browser/ui/navigator/browser_navigator_params.h"
++#include "chrome/browser/ui/select_file_policy/chrome_select_file_policy.h"
++#include "chrome/browser/ui/webui/aero_notes/notes_handler.h"
++#include "chrome/common/aero_version.h"
++#include "chrome/common/pref_names.h"
++#include "chrome/common/webui_url_constants.h"
++#include "components/prefs/pref_service.h"
++#include "components/search_engines/template_url.h"
++#include "components/search_engines/template_url_service.h"
++#include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/web_contents.h"
++#include "content/public/browser/web_ui.h"
++#include "ui/base/page_transition_types.h"
++#include "ui/base/window_open_disposition.h"
++#include "ui/shell_dialogs/selected_file_info.h"
++#include "url/gurl.h"
++#include "url/origin.h"
++
++namespace aerographene::setup {
++
++namespace {
++
++// A search engine the page may offer and select: a regular entry that comes
++// from the prepopulated list (no extension, no user-typed custom engine).
++bool IsListable(TemplateURLService* service, const TemplateURL* url) {
++  return url->type() == TemplateURL::NORMAL && url->prepopulate_id() != 0 &&
++         service->CanMakeDefault(url);
++}
++
++}  // namespace
++
++SetupHandler::SetupHandler(Profile* profile) : profile_(profile) {}
++
++SetupHandler::~SetupHandler() {
++  if (select_file_dialog_) {
++    select_file_dialog_->ListenerDestroyed();
++  }
++}
++
++void SetupHandler::RegisterMessages() {
++  web_ui()->RegisterMessageCallback(
++      "getInfo", base::BindRepeating(&SetupHandler::HandleGetInfo,
++                                     base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "getThemes", base::BindRepeating(&SetupHandler::HandleGetThemes,
++                                       base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "setTheme", base::BindRepeating(&SetupHandler::HandleSetTheme,
++                                      base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "getSearch", base::BindRepeating(&SetupHandler::HandleGetSearch,
++                                       base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "setSearchEngine",
++      base::BindRepeating(&SetupHandler::HandleSetSearchEngine,
++                          base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "setSuggest", base::BindRepeating(&SetupHandler::HandleSetSuggest,
++                                        base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "pickVault", base::BindRepeating(&SetupHandler::HandlePickVault,
++                                       base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "getDefaultBrowser",
++      base::BindRepeating(&SetupHandler::HandleGetDefaultBrowser,
++                          base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "setDefaultBrowser",
++      base::BindRepeating(&SetupHandler::HandleSetDefaultBrowser,
++                          base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "openImport", base::BindRepeating(&SetupHandler::HandleOpenImport,
++                                        base::Unretained(this)));
++  web_ui()->RegisterMessageCallback(
++      "complete", base::BindRepeating(&SetupHandler::HandleComplete,
++                                      base::Unretained(this)));
++}
++
++void SetupHandler::OnJavascriptDisallowed() {
++  // Late replies are dropped: callbacks check IsJavascriptAllowed().
++  pick_callback_id_ = base::Value();
++  pending_search_ids_.clear();
++  template_urls_loaded_subscription_ = {};
++  weak_ptr_factory_.InvalidateWeakPtrs();
++}
++
++bool SetupHandler::FromSetupPage() {
++  content::RenderFrameHost* rfh = web_ui()->GetRenderFrameHost();
++  return rfh && rfh->IsInPrimaryMainFrame() &&
++         rfh->GetLastCommittedOrigin().IsSameOriginWith(
++             GURL(chrome::kChromeUISetupURL));
++}
++
++bool SetupHandler::CheckArgs(const base::ListValue& args,
++                             base::Value::Type arg_type) {
++  if (!FromSetupPage()) {
++    return false;
++  }
++  const bool has_arg = arg_type != base::Value::Type::NONE;
++  if (args.size() == (has_arg ? 2u : 1u) && args[0].is_string() &&
++      (!has_arg || args[1].type() == arg_type)) {
++    return true;
++  }
++  // Malformed message from the setup page itself: settle the promise (when
++  // there is a callback id) instead of leaving it pending forever.
++  if (!args.empty() && args[0].is_string()) {
++    AllowJavascript();
++    RejectJavascriptCallback(args[0], base::Value("bad_request"));
++  }
++  return false;
++}
++
++base::Value SetupHandler::VaultInfo() const {
++  const base::FilePath root =
++      profile_->GetPrefs()->GetFilePath(aerographene::notes::kVaultPathPref);
++  base::DictValue info;
++  info.Set("path", root.AsUTF8Unsafe());
++  return base::Value(std::move(info));
++}
++
++void SetupHandler::HandleGetInfo(const base::ListValue& args) {
++  if (!CheckArgs(args, base::Value::Type::NONE)) {
++    return;
++  }
++  AllowJavascript();
++  base::DictValue info;
++  info.Set("version", std::string(aero::kVersion));
++#if BUILDFLAG(IS_WIN)
++  info.Set("platform", "windows");
++#else
++  info.Set("platform", "linux");
++#endif
++  info.Set("vault", VaultInfo());
++  ResolveJavascriptCallback(args[0], info);
++}
++
++// --- theme: the same pref and the same validation as settings > appearance ---
++
++void SetupHandler::HandleGetThemes(const base::ListValue& args) {
++  if (!CheckArgs(args, base::Value::Type::NONE)) {
++    return;
++  }
++  AllowJavascript();
++  aerographene::ListThemes(
++      base::BindOnce(&SetupHandler::OnThemesListed,
++                     weak_ptr_factory_.GetWeakPtr(), args[0].Clone()));
++}
++
++void SetupHandler::OnThemesListed(base::Value callback_id,
++                                  std::vector<aerographene::ThemeInfo> themes) {
++  if (!IsJavascriptAllowed()) {
++    return;
++  }
++  const std::string pref =
++      profile_->GetPrefs()->GetString(aerographene::kThemePref);
++  // A name without a valid folder runs as "default" (ResolveTheme).
++  std::string active = aerographene::kThemeDefault;
++  base::ListValue list;
++  for (const aerographene::ThemeInfo& info : themes) {
++    if (info.theme.name == pref) {
++      active = pref;
++    }
++    base::DictValue entry;
++    entry.Set("name", info.theme.name);
++    entry.Set("builtin", info.builtin);
++    entry.Set("dark", info.theme.scheme == aerographene::ThemeScheme::kDark);
++    list.Append(std::move(entry));
++  }
++  base::DictValue result;
++  result.Set("themes", std::move(list));
++  result.Set("active", active);
++  ResolveJavascriptCallback(callback_id, result);
++}
++
++void SetupHandler::HandleSetTheme(const base::ListValue& args) {
++  if (!CheckArgs(args, base::Value::Type::STRING)) {
++    return;
++  }
++  AllowJavascript();
++  aerographene::ListThemes(
++      base::BindOnce(&SetupHandler::OnThemeValidated,
++                     weak_ptr_factory_.GetWeakPtr(), args[0].Clone(),
++                     args[1].GetString()));
++}
++
++void SetupHandler::OnThemeValidated(
++    base::Value callback_id,
++    std::string name,
++    std::vector<aerographene::ThemeInfo> themes) {
++  if (!IsJavascriptAllowed()) {
++    return;
++  }
++  bool found = false;
++  for (const aerographene::ThemeInfo& info : themes) {
++    if (info.theme.name == name) {
++      found = true;
++      break;
++    }
++  }
++  if (found) {
++    // Read once in ThemeService::Init: applies on the next browser start.
++    profile_->GetPrefs()->SetString(aerographene::kThemePref, name);
++  }
++  ResolveJavascriptCallback(callback_id, base::Value(found));
++}
++
++// --- search engine: TemplateURLService; suggestions: the existing pref ---
++
++void SetupHandler::HandleGetSearch(const base::ListValue& args) {
++  if (!CheckArgs(args, base::Value::Type::NONE)) {
++    return;
++  }
++  AllowJavascript();
++  TemplateURLService* service =
++      TemplateURLServiceFactory::GetForProfile(profile_);
++  if (!service) {
++    RejectJavascriptCallback(args[0], base::Value("unavailable"));
++    return;
++  }
++  if (service->loaded()) {
++    ResolveSearch(args[0]);
++    return;
++  }
++  pending_search_ids_.push_back(args[0].Clone());
++  if (!template_urls_loaded_subscription_) {
++    template_urls_loaded_subscription_ = service->RegisterOnLoadedCallback(
++        base::BindOnce(&SetupHandler::OnTemplateURLsLoaded,
++                       weak_ptr_factory_.GetWeakPtr()));
++    service->Load();
++  }
++}
++
++void SetupHandler::OnTemplateURLsLoaded() {
++  template_urls_loaded_subscription_ = {};
++  std::vector<base::Value> ids = std::move(pending_search_ids_);
++  pending_search_ids_.clear();
++  if (!IsJavascriptAllowed()) {
++    return;
++  }
++  for (const base::Value& id : ids) {
++    ResolveSearch(id);
++  }
++}
++
++void SetupHandler::ResolveSearch(const base::Value& callback_id) {
++  TemplateURLService* service =
++      TemplateURLServiceFactory::GetForProfile(profile_);
++  const TemplateURL* current = service->GetDefaultSearchProvider();
++  base::ListValue engines;
++  for (const TemplateURL* url : service->GetTemplateURLs()) {
++    if (!IsListable(service, url) && url != current) {
++      continue;
++    }
++    base::DictValue entry;
++    entry.Set("keyword", base::UTF16ToUTF8(url->keyword()));
++    entry.Set("name", base::UTF16ToUTF8(url->short_name()));
++    engines.Append(std::move(entry));
++  }
++  base::DictValue result;
++  result.Set("engines", std::move(engines));
++  result.Set("current",
++             current ? base::UTF16ToUTF8(current->keyword()) : std::string());
++  result.Set("suggest",
++             profile_->GetPrefs()->GetBoolean(prefs::kSearchSuggestEnabled));
++  ResolveJavascriptCallback(callback_id, result);
++}
++
++void SetupHandler::HandleSetSearchEngine(const base::ListValue& args) {
++  if (!CheckArgs(args, base::Value::Type::STRING)) {
++    return;
++  }
++  AllowJavascript();
++  TemplateURLService* service =
++      TemplateURLServiceFactory::GetForProfile(profile_);
++  bool ok = false;
++  if (service && service->loaded()) {
++    TemplateURL* url = service->GetTemplateURLForKeyword(
++        base::UTF8ToUTF16(args[1].GetString()));
++    if (url && url == service->GetDefaultSearchProvider()) {
++      // The engine getSearch listed as current: already selected (no-op).
++      ok = true;
++    } else if (url && IsListable(service, url)) {
++      service->SetUserSelectedDefaultSearchProvider(url);
++      ok = true;
++    }
++  }
++  ResolveJavascriptCallback(args[0], base::Value(ok));
++}
++
++void SetupHandler::HandleSetSuggest(const base::ListValue& args) {
++  if (!CheckArgs(args, base::Value::Type::BOOLEAN)) {
++    return;
++  }
++  AllowJavascript();
++  profile_->GetPrefs()->SetBoolean(prefs::kSearchSuggestEnabled,
++                                   args[1].GetBool());
++  ResolveJavascriptCallback(args[0], base::Value(true));
++}
++
++// --- notes folder: the pref of chrome://notes, picked the same way ---
++
++void SetupHandler::HandlePickVault(const base::ListValue& args) {
++  if (!CheckArgs(args, base::Value::Type::NONE)) {
++    return;
++  }
++  AllowJavascript();
++  // The folder picker only opens from a user gesture (click on the button),
++  // and one at a time.
++  if (select_file_dialog_ ||
++      !web_ui()->GetRenderFrameHost()->HasTransientUserActivation()) {
++    ResolveJavascriptCallback(args[0], base::Value());
++    return;
++  }
++  pick_callback_id_ = args[0].Clone();
++  content::WebContents* web_contents = web_ui()->GetWebContents();
++  select_file_dialog_ = ui::SelectFileDialog::Create(
++      this, std::make_unique<ChromeSelectFilePolicy>(web_contents));
++  select_file_dialog_->SelectFile(
++      ui::SelectFileDialog::SELECT_FOLDER, std::u16string(),
++      profile_->GetPrefs()->GetFilePath(aerographene::notes::kVaultPathPref),
++      nullptr, 0, base::FilePath::StringType(),
++      web_contents->GetTopLevelNativeWindow(), nullptr);
++}
++
++void SetupHandler::FileSelected(const ui::SelectedFileInfo& file,
++                                int /*index*/) {
++  select_file_dialog_ = nullptr;
++  if (file.path().IsAbsolute()) {
++    profile_->GetPrefs()->SetFilePath(aerographene::notes::kVaultPathPref,
++                                      file.path());
++  }
++  if (IsJavascriptAllowed() && !pick_callback_id_.is_none()) {
++    ResolveJavascriptCallback(pick_callback_id_, VaultInfo());
++  }
++  pick_callback_id_ = base::Value();
++}
++
++void SetupHandler::FileSelectionCanceled() {
++  select_file_dialog_ = nullptr;
++  if (IsJavascriptAllowed() && !pick_callback_id_.is_none()) {
++    ResolveJavascriptCallback(pick_callback_id_, base::Value());
++  }
++  pick_callback_id_ = base::Value();
++}
++
++// --- default browser: shell_integration ---
++
++bool SetupHandler::CanSetDefaultBrowser() const {
++  const shell_integration::DefaultWebClientSetPermission permission =
++      shell_integration::GetDefaultBrowserSetPermission();
++  return permission == shell_integration::SET_DEFAULT_UNATTENDED ||
++         permission == shell_integration::SET_DEFAULT_INTERACTIVE;
++}
++
++void SetupHandler::HandleGetDefaultBrowser(const base::ListValue& args) {
++  if (!CheckArgs(args, base::Value::Type::NONE)) {
++    return;
++  }
++  AllowJavascript();
++  base::MakeRefCounted<shell_integration::DefaultBrowserWorker>()
++      ->StartCheckIsDefault(
++          base::BindOnce(&SetupHandler::OnDefaultBrowserState,
++                         weak_ptr_factory_.GetWeakPtr(), args[0].Clone()));
++}
++
++void SetupHandler::HandleSetDefaultBrowser(const base::ListValue& args) {
++  if (!CheckArgs(args, base::Value::Type::NONE)) {
++    return;
++  }
++  AllowJavascript();
++  if (!CanSetDefaultBrowser()) {
++    OnDefaultBrowserState(args[0].Clone(),
++                          shell_integration::UNKNOWN_DEFAULT);
++    return;
++  }
++  // Runs on a blocking sequence; the worker re-checks the state afterwards
++  // and reports it, so the page shows what the system really says.
++  base::MakeRefCounted<shell_integration::DefaultBrowserWorker>()
++      ->StartSetAsDefault(
++          base::BindOnce(&SetupHandler::OnDefaultBrowserState,
++                         weak_ptr_factory_.GetWeakPtr(), args[0].Clone()));
++}
++
++void SetupHandler::OnDefaultBrowserState(
++    base::Value callback_id,
++    shell_integration::DefaultWebClientState state) {
++  if (!IsJavascriptAllowed()) {
++    return;
++  }
++  base::DictValue result;
++  result.Set("canSet", CanSetDefaultBrowser());
++  result.Set("isDefault", state == shell_integration::IS_DEFAULT);
++  ResolveJavascriptCallback(callback_id, result);
++}
++
++// --- import and finish ---
++
++void SetupHandler::HandleOpenImport(const base::ListValue& args) {
++  if (!CheckArgs(args, base::Value::Type::NONE)) {
++    return;
++  }
++  AllowJavascript();
++  // The import page of settings (the existing importer), in a new tab: this
++  // page stays open until the user finishes.
++  const GURL url(std::string(chrome::kChromeUISettingsURL) +
++                 std::string(chrome::kImportDataSubPage));
++  NavigateParams params(profile_, url, ui::PAGE_TRANSITION_LINK);
++  params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
++  params.source_contents = web_ui()->GetWebContents();
++  Navigate(&params);
++  ResolveJavascriptCallback(args[0], base::Value(true));
++}
++
++void SetupHandler::HandleComplete(const base::ListValue& args) {
++  if (!CheckArgs(args, base::Value::Type::NONE)) {
++    return;
++  }
++  AllowJavascript();
++  profile_->GetPrefs()->SetBoolean(prefs::kAerographeneOnboardingCompleted,
++                                   true);
++  ResolveJavascriptCallback(args[0], base::Value(true));
++  // The setup tab becomes the new tab page.
++  web_ui()->GetWebContents()->GetController().LoadURLWithParams(
++      content::NavigationController::LoadURLParams(
++          GURL(chrome::kChromeUINewTabURL)));
++}
++
++}  // namespace aerographene::setup
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_setup/setup_handler.h
+@@ -0,0 +1,98 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_AERO_SETUP_SETUP_HANDLER_H_
++#define CHROME_BROWSER_UI_WEBUI_AERO_SETUP_SETUP_HANDLER_H_
++
++#include <string>
++#include <vector>
++
++#include "base/memory/raw_ptr.h"
++#include "base/memory/scoped_refptr.h"
++#include "base/memory/weak_ptr.h"
++#include "base/callback_list.h"
++#include "base/values.h"
++#include "chrome/browser/shell_integration.h"
++#include "chrome/browser/themes/aerographene_theme_repo.h"
++#include "content/public/browser/web_ui_message_handler.h"
++#include "ui/shell_dialogs/select_file_dialog.h"
++
++class Profile;
++
++namespace aerographene::setup {
++
++// Messages from chrome://setup only (WebUI bindings exist only in that
++// page's renderer). Every message carries a callback id as first argument and
++// only touches a setting the page really shows:
++//   getInfo()                 -> {version, platform, vault}
++//   getThemes()               -> {themes: [{name, builtin, dark}], active}
++//   setTheme(name)            -> bool (name must be one ListThemes reports)
++//   getSearch()               -> {engines: [{keyword, name}], current, suggest}
++//   setSearchEngine(keyword)  -> bool (keyword must be one getSearch listed)
++//   setSuggest(bool)          -> bool
++//   pickVault()               -> {path} or null (needs a user gesture)
++//   getDefaultBrowser()       -> {canSet, isDefault}
++//   setDefaultBrowser()       -> {canSet, isDefault}
++//   openImport()              -> bool (opens settings, import page, in a tab)
++//   complete()                -> bool (marks the profile as onboarded and
++//                                      goes to the new tab page)
++class SetupHandler : public content::WebUIMessageHandler,
++                     public ui::SelectFileDialog::Listener {
++ public:
++  explicit SetupHandler(Profile* profile);
++  SetupHandler(const SetupHandler&) = delete;
++  SetupHandler& operator=(const SetupHandler&) = delete;
++  ~SetupHandler() override;
++
++  // content::WebUIMessageHandler:
++  void RegisterMessages() override;
++  void OnJavascriptDisallowed() override;
++
++  // ui::SelectFileDialog::Listener:
++  void FileSelected(const ui::SelectedFileInfo& file, int index) override;
++  void FileSelectionCanceled() override;
++
++ private:
++  // Sender is the primary main frame committed at chrome://setup.
++  bool FromSetupPage();
++  // FromSetupPage() plus argument shape: [callback_id] or [callback_id, arg]
++  // with |arg_type| (NONE = no extra argument). Rejects the callback when
++  // the shape is wrong.
++  bool CheckArgs(const base::ListValue& args, base::Value::Type arg_type);
++
++  void HandleGetInfo(const base::ListValue& args);
++  void HandleGetThemes(const base::ListValue& args);
++  void HandleSetTheme(const base::ListValue& args);
++  void HandleGetSearch(const base::ListValue& args);
++  void HandleSetSearchEngine(const base::ListValue& args);
++  void HandleSetSuggest(const base::ListValue& args);
++  void HandlePickVault(const base::ListValue& args);
++  void HandleGetDefaultBrowser(const base::ListValue& args);
++  void HandleSetDefaultBrowser(const base::ListValue& args);
++  void HandleOpenImport(const base::ListValue& args);
++  void HandleComplete(const base::ListValue& args);
++
++  void OnThemesListed(base::Value callback_id,
++                      std::vector<aerographene::ThemeInfo> themes);
++  void OnThemeValidated(base::Value callback_id,
++                        std::string name,
++                        std::vector<aerographene::ThemeInfo> themes);
++  void OnTemplateURLsLoaded();
++  void ResolveSearch(const base::Value& callback_id);
++  void OnDefaultBrowserState(base::Value callback_id,
++                             shell_integration::DefaultWebClientState state);
++
++  base::Value VaultInfo() const;
++  bool CanSetDefaultBrowser() const;
++
++  raw_ptr<Profile> profile_;
++  scoped_refptr<ui::SelectFileDialog> select_file_dialog_;
++  base::Value pick_callback_id_;
++  std::vector<base::Value> pending_search_ids_;
++  base::CallbackListSubscription template_urls_loaded_subscription_;
++  base::WeakPtrFactory<SetupHandler> weak_ptr_factory_{this};
++};
++
++}  // namespace aerographene::setup
++
++#endif  // CHROME_BROWSER_UI_WEBUI_AERO_SETUP_SETUP_HANDLER_H_

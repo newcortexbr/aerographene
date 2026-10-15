@@ -74,6 +74,29 @@ class Unit(unittest.TestCase):
     def test_xtb_text(self):
         self.assertEqual(bs.xtb_text('A & B <ph name="X"/> <b>'), 'A &amp; B <ph name="X"/> &lt;b&gt;')
 
+    def test_space_body(self):
+        f = bs.space_body
+        self.assertEqual(f("\n  Customize profile\n", "Customise space"), "\n  Customise space\n")
+        self.assertEqual(f("A &amp; B", "A & B"), "A &amp; B")
+        # <ph> original (com <ex>) é restaurado; placeholders divergentes -> None
+        old = 'Open <ph name="PROFILE_NAME">$1<ex>User</ex></ph> profile'
+        self.assertEqual(f(old, 'Open <ph name="PROFILE_NAME"/> space'),
+                         'Open <ph name="PROFILE_NAME">$1<ex>User</ex></ph> space')
+        self.assertIsNone(f(old, "Open space"))
+        self.assertIsNone(f("Open profile", 'Open <ph name="X"/>'))
+
+    def test_space_json(self):
+        sp = bs.load_space(bs.SPACE_DEFAULT)
+        self.assertEqual(sp["IDS_PROFILE_MENU_MANAGE_PROFILES"]["en"], "Manage spaces")
+        for k, v in sp.items():
+            self.assertFalse(k.startswith("_"))
+            self.assertEqual(set(v), {"en", "pt-BR"}, k)
+            # mesmos placeholders nos dois idiomas
+            self.assertEqual(sorted(bs._PH_XTB.findall(v["en"])), sorted(bs._PH_XTB.findall(v["pt-BR"])), k)
+            # apóstrofo só vale fora de texto plural (ICU); nos outros cabe, mas o JSON evita
+            self.assertNotIn("'", v["en"], k)
+            self.assertNotRegex(v["en"] + v["pt-BR"], r"(?i)\bperfi[ls]\b|\bprofiles?\b", k)
+
     def test_extra_json(self):
         extra = bs.load_extra(bs.EXTRA_DEFAULT)
         self.assertIn("IDS_SETTINGS_APPEARANCE_AND_BEHAVIOR", extra)
@@ -147,11 +170,10 @@ class Integration(unittest.TestCase):
             pt = self.count("chrome/app/generated_resources.grd", "pt-BR")
             self.assertTrue(pt["IDS_SETTINGS_APPEARANCE_AND_BEHAVIOR"])
             g = open(os.path.join(self.tmp, "chrome/app/settings_strings.grdp"), encoding="utf-8").read()
-            # "Helium" só sobra nas mensagens de KEEP_NAMES (serviços operados pelo Helium)
+            # nenhuma mensagem mantém "Helium" (KEEP_NAMES vazio)
             left = {m.group(1) for m in re.finditer(r'<message\b[^>]*\bname="([^"]+)"[^>]*>((?:(?!</message>).)*)</message>', g, re.S)
                     if re.search(r"\bHelium\b", re.sub(r"<[^>]+>", "", m.group(2)))}
             self.assertTrue(left <= bs.KEEP_NAMES, left - bs.KEEP_NAMES)
-            self.assertIn("IDS_SETTINGS_HELIUM_SERVICES", left)
         # o texto inglês mudou de fato
         s = open(os.path.join(self.tmp, "chrome/app/chromium_strings.grd"), encoding="utf-8").read()
         self.assertIn("aerographene", s)

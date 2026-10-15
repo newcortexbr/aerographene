@@ -26,11 +26,15 @@ atualiza a lista e abre cr-dialog "usar tema", que grava a pref e reusa o
 modal de reinício da fatia 3. Strings IDS_SETTINGS_AEROGRAPHENE_THEME_
 IMPORT* em settings_strings.grdp, só em inglês. Inclui
 aerographene_theme_archive_unittest.cc (unit_tests de themes/BUILD.gn).
+D3b (Windows): leitura do .aerotheme por Win32 (CreateFileW com
+FILE_FLAG_OPEN_REPARSE_POINT) no pool, recusando o que não for FILE_TYPE_DISK
+(pipe, console, dispositivo), reparse point (symlink/junction) e diretório,
+com o mesmo teto; POSIX mantido sob #if.
 
 diff --git a/chrome/app/settings_strings.grdp b/chrome/app/settings_strings.grdp
 --- a/chrome/app/settings_strings.grdp
 +++ b/chrome/app/settings_strings.grdp
-@@ -307,6 +307,42 @@
+@@ -298,6 +298,42 @@
      <message name="IDS_SETTINGS_AEROGRAPHENE_RESET_EXTENSION_THEME" desc="Button next to the extension theme warning that removes the extension theme and goes back to the default Chromium theme.">
        Reset to default
      </message>
@@ -65,7 +69,7 @@ diff --git a/chrome/app/settings_strings.grdp b/chrome/app/settings_strings.grdp
 +      The theme in this file is not valid.
 +    </message>
 +    <message name="IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_ERROR_RESERVED" desc="Error shown in the Appearance settings when the imported theme uses the name of a built-in theme.">
-+      The names "default" and "pixelized" belong to the built-in themes.
++      The names "default", "pixelized", "metro-v2", "e-ink-gb", "graphite", "classical", "e-ink" and "cli" belong to the built-in themes.
 +    </message>
 +    <message name="IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_ERROR_IO" desc="Error shown in the Appearance settings when the imported theme could not be written to disk.">
 +      The theme could not be saved.
@@ -73,7 +77,6 @@ diff --git a/chrome/app/settings_strings.grdp b/chrome/app/settings_strings.grdp
      <message name="IDS_SETTINGS_TAB_STRIP_RIGHT_ALIGN" desc="Label for the toggle that displays vertical tabs on the right side of the browser window.">
        Show vertical tabs on right side
      </message>
-diff --git a/chrome/browser/resources/settings/appearance_page/appearance_browser_proxy.ts b/chrome/browser/resources/settings/appearance_page/appearance_browser_proxy.ts
 --- a/chrome/browser/resources/settings/appearance_page/appearance_browser_proxy.ts
 +++ b/chrome/browser/resources/settings/appearance_page/appearance_browser_proxy.ts
 @@ -19,9 +19,19 @@ export interface AerographeneThemes {
@@ -112,7 +115,6 @@ diff --git a/chrome/browser/resources/settings/appearance_page/appearance_browse
    getDefaultZoom(): Promise<number> {
      return chrome.settingsPrivate.getDefaultZoom();
    }
-diff --git a/chrome/browser/resources/settings/appearance_page/appearance_page.html.ts b/chrome/browser/resources/settings/appearance_page/appearance_page.html.ts
 --- a/chrome/browser/resources/settings/appearance_page/appearance_page.html.ts
 +++ b/chrome/browser/resources/settings/appearance_page/appearance_page.html.ts
 @@ -65,6 +65,17 @@ export function getHtml(this: SettingsAppearancePageElement) {
@@ -182,7 +184,6 @@ diff --git a/chrome/browser/resources/settings/appearance_page/appearance_page.h
  ${this.shouldShowRelaunchDialog ? html`
    <relaunch-confirmation-dialog .restartType="${RestartType.RESTART}"
        @close="${this.onRelaunchDialogClose}">
-diff --git a/chrome/browser/resources/settings/appearance_page/appearance_page.ts b/chrome/browser/resources/settings/appearance_page/appearance_page.ts
 --- a/chrome/browser/resources/settings/appearance_page/appearance_page.ts
 +++ b/chrome/browser/resources/settings/appearance_page/appearance_page.ts
 @@ -36,7 +36,7 @@ import {routes} from '../route.js';
@@ -304,10 +305,9 @@ diff --git a/chrome/browser/resources/settings/appearance_page/appearance_page.t
    protected onUseDefaultClick_() {
      if (this.isForcedTheme_) {
        this.showManagedThemeDialog_ = true;
-diff --git a/chrome/browser/themes/BUILD.gn b/chrome/browser/themes/BUILD.gn
 --- a/chrome/browser/themes/BUILD.gn
 +++ b/chrome/browser/themes/BUILD.gn
-@@ -9,6 +9,7 @@
+@@ -9,6 +9,7 @@ assert(is_win || is_mac || is_linux || is_chromeos)
  source_set("themes") {
    public = [
      "aerographene_theme.h",
@@ -315,7 +315,7 @@ diff --git a/chrome/browser/themes/BUILD.gn b/chrome/browser/themes/BUILD.gn
      "aerographene_theme_repo.h",
      "browser_theme_pack.h",
      "browser_theme_provider_delegate.h",
-@@ -24,6 +25,7 @@
+@@ -24,6 +25,7 @@ source_set("themes") {
    ]
    sources = [
      "aerographene_theme.cc",
@@ -323,7 +323,7 @@ diff --git a/chrome/browser/themes/BUILD.gn b/chrome/browser/themes/BUILD.gn
      "aerographene_theme_repo.cc",
      "browser_theme_pack.cc",
      "custom_theme_supplier.cc",
-@@ -66,6 +68,7 @@
+@@ -64,6 +66,7 @@ source_set("themes") {
      "//content/public/browser",
      "//third_party/abseil-cpp:absl",
      "//third_party/icu",
@@ -331,7 +331,7 @@ diff --git a/chrome/browser/themes/BUILD.gn b/chrome/browser/themes/BUILD.gn
      "//ui/color",
      "//ui/color/dynamic_color",
      "//ui/gfx",
-@@ -148,6 +151,7 @@
+@@ -151,6 +154,7 @@ if (!is_android) {
      testonly = true
  
      sources = [
@@ -339,7 +339,7 @@ diff --git a/chrome/browser/themes/BUILD.gn b/chrome/browser/themes/BUILD.gn
        "aerographene_theme_repo_unittest.cc",
        "browser_theme_pack_unittest.cc",
        "theme_local_data_batch_uploader_unittest.cc",
-@@ -178,6 +182,7 @@
+@@ -181,6 +185,7 @@ if (!is_android) {
        "//content/test:test_support",
        "//testing/gmock",
        "//testing/gtest",
@@ -347,34 +347,82 @@ diff --git a/chrome/browser/themes/BUILD.gn b/chrome/browser/themes/BUILD.gn
        "//ui/color:test_support",
        "//ui/color/dynamic_color",
        "//ui/gfx",
-diff --git a/chrome/browser/themes/aerographene_theme_archive.cc b/chrome/browser/themes/aerographene_theme_archive.cc
 --- /dev/null
 +++ b/chrome/browser/themes/aerographene_theme_archive.cc
-@@ -0,0 +1,153 @@
+@@ -0,0 +1,203 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
 +#include "chrome/browser/themes/aerographene_theme_archive.h"
 +
++#include <optional>
++#include <utility>
++
++#include "base/functional/bind.h"
++#include "base/location.h"
++#include "base/task/task_traits.h"
++#include "base/task/thread_pool.h"
++#include "build/build_config.h"
++#include "third_party/zlib/google/zip_reader.h"
++
++#if BUILDFLAG(IS_WIN)
++#include <windows.h>
++
++#include "base/win/scoped_handle.h"
++#else
 +#include <fcntl.h>
 +#include <sys/stat.h>
 +#include <unistd.h>
 +
-+#include <optional>
-+#include <utility>
-+
 +#include "base/files/scoped_file.h"
-+#include "base/functional/bind.h"
-+#include "base/location.h"
 +#include "base/posix/eintr_wrapper.h"
-+#include "base/task/task_traits.h"
-+#include "base/task/thread_pool.h"
-+#include "third_party/zlib/google/zip_reader.h"
++#endif  // BUILDFLAG(IS_WIN)
 +
 +namespace aerographene {
 +
 +namespace {
 +
++#if BUILDFLAG(IS_WIN)
++// Reads a small disk file (pool task, MayBlock). GetFileType keeps a pipe,
++// console or other device from blocking the task (the O_NONBLOCK + S_ISREG of
++// the POSIX branch). The link itself is opened (FILE_FLAG_OPEN_REPARSE_POINT)
++// and a reparse point or directory is refused, stricter than the POSIX
++// branch; the size is checked before and while reading.
++std::optional<std::string> ReadArchiveBytes(const base::FilePath& path) {
++  base::win::ScopedHandle file(::CreateFileW(
++      path.value().c_str(), GENERIC_READ,
++      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
++      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
++      nullptr));
++  if (!file.is_valid() || ::GetFileType(file.get()) != FILE_TYPE_DISK) {
++    return std::nullopt;
++  }
++  BY_HANDLE_FILE_INFORMATION info;
++  if (!::GetFileInformationByHandle(file.get(), &info) ||
++      (info.dwFileAttributes &
++       (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) ||
++      info.nFileSizeHigh != 0 || info.nFileSizeLow == 0 ||
++      info.nFileSizeLow > kMaxThemeArchiveBytes) {
++    return std::nullopt;
++  }
++  std::string data;
++  char buf[4096];
++  while (true) {
++    DWORD n = 0;
++    if (!::ReadFile(file.get(), buf, sizeof(buf), &n, nullptr)) {
++      return std::nullopt;
++    }
++    if (n == 0) {
++      break;
++    }
++    data.append(buf, n);
++    if (data.size() > kMaxThemeArchiveBytes) {
++      return std::nullopt;
++    }
++  }
++  return data;
++}
++#else
 +// Reads a small regular file. O_NONBLOCK + fstat keep a FIFO or device from
 +// blocking the task; the size is checked before and while reading.
 +std::optional<std::string> ReadArchiveBytes(const base::FilePath& path) {
@@ -405,6 +453,7 @@ diff --git a/chrome/browser/themes/aerographene_theme_archive.cc b/chrome/browse
 +  }
 +  return data;
 +}
++#endif  // BUILDFLAG(IS_WIN)
 +
 +struct ArchiveRead {
 +  ThemeArchiveResult result = ThemeArchiveResult::kUnreadable;
@@ -463,7 +512,7 @@ diff --git a/chrome/browser/themes/aerographene_theme_archive.cc b/chrome/browse
 +    return ThemeArchiveResult::kNotZip;
 +  }
 +  if (entry->is_directory || entry->is_unsafe || entry->is_encrypted ||
-+      entry->is_symbolic_link || entry->path.value() != kThemeFileName) {
++      entry->is_symbolic_link || entry->path != base::FilePath::FromASCII(kThemeFileName)) {
 +    return ThemeArchiveResult::kBadLayout;
 +  }
 +  // The declared size cannot be trusted; extraction stops at the cap, so a
@@ -504,7 +553,6 @@ diff --git a/chrome/browser/themes/aerographene_theme_archive.cc b/chrome/browse
 +}
 +
 +}  // namespace aerographene
-diff --git a/chrome/browser/themes/aerographene_theme_archive.h b/chrome/browser/themes/aerographene_theme_archive.h
 --- /dev/null
 +++ b/chrome/browser/themes/aerographene_theme_archive.h
 @@ -0,0 +1,66 @@
@@ -549,7 +597,7 @@ diff --git a/chrome/browser/themes/aerographene_theme_archive.h b/chrome/browser
 +  kInstalled,
 +  kBadArchive,  // ReadThemeArchive failed
 +  kInvalid,     // theme.json fails ParseThemeJson
-+  kReserved,    // name is default/pixelized
++  kReserved,    // name is a built-in name
 +  kConflict,    // same name (case-insensitive) exists and replace == false
 +  kIoError,
 +};
@@ -574,7 +622,6 @@ diff --git a/chrome/browser/themes/aerographene_theme_archive.h b/chrome/browser
 +}  // namespace aerographene
 +
 +#endif  // CHROME_BROWSER_THEMES_AEROGRAPHENE_THEME_ARCHIVE_H_
-diff --git a/chrome/browser/themes/aerographene_theme_archive_unittest.cc b/chrome/browser/themes/aerographene_theme_archive_unittest.cc
 --- /dev/null
 +++ b/chrome/browser/themes/aerographene_theme_archive_unittest.cc
 @@ -0,0 +1,166 @@
@@ -744,7 +791,6 @@ diff --git a/chrome/browser/themes/aerographene_theme_archive_unittest.cc b/chro
 +
 +}  // namespace
 +}  // namespace aerographene
-diff --git a/chrome/browser/ui/webui/settings/appearance_handler.cc b/chrome/browser/ui/webui/settings/appearance_handler.cc
 --- a/chrome/browser/ui/webui/settings/appearance_handler.cc
 +++ b/chrome/browser/ui/webui/settings/appearance_handler.cc
 @@ -4,7 +4,9 @@
@@ -793,10 +839,11 @@ diff --git a/chrome/browser/ui/webui/settings/appearance_handler.cc b/chrome/bro
  
  void AppearanceHandler::OnJavascriptAllowed() {}
  void AppearanceHandler::OnJavascriptDisallowed() {}
-@@ -80,6 +90,14 @@
+@@ -79,6 +89,14 @@ void AppearanceHandler::RegisterMessages() {
+       "setAerographeneTheme",
        base::BindRepeating(&AppearanceHandler::HandleSetAerographeneTheme,
                            base::Unretained(this)));
-   web_ui()->RegisterMessageCallback(
++  web_ui()->RegisterMessageCallback(
 +      "importAerographeneTheme",
 +      base::BindRepeating(&AppearanceHandler::HandleImportAerographeneTheme,
 +                          base::Unretained(this)));
@@ -804,11 +851,10 @@ diff --git a/chrome/browser/ui/webui/settings/appearance_handler.cc b/chrome/bro
 +      "replaceAerographeneTheme",
 +      base::BindRepeating(&AppearanceHandler::HandleReplaceAerographeneTheme,
 +                          base::Unretained(this)));
-+  web_ui()->RegisterMessageCallback(
+   web_ui()->RegisterMessageCallback(
        "recordVerticalTabStripModeChanged",
        base::BindRepeating(
-           &AppearanceHandler::HandleRecordVerticalTabStripModeChanged,
-@@ -202,4 +220,108 @@
+@@ -202,4 +220,109 @@ void AppearanceHandler::OnAerographeneThemeValidated(
    ResolveJavascriptCallback(callback_id, base::Value(found));
  }
  
@@ -829,7 +875,8 @@ diff --git a/chrome/browser/ui/webui/settings/appearance_handler.cc b/chrome/bro
 +  ui::SelectFileDialog::FileTypeInfo file_type_info;
 +  file_type_info.extensions.resize(1);
 +  file_type_info.extensions[0].push_back(
-+      base::FilePath::StringType(aerographene::kThemeArchiveExtension));
++      base::FilePath::FromASCII(aerographene::kThemeArchiveExtension)
++          .value());
 +  select_file_dialog_->SelectFile(
 +      ui::SelectFileDialog::SELECT_OPEN_FILE, std::u16string(),
 +      base::FilePath(), &file_type_info, 1, base::FilePath::StringType(),
@@ -917,7 +964,6 @@ diff --git a/chrome/browser/ui/webui/settings/appearance_handler.cc b/chrome/bro
 +}
 +
  }  // namespace settings
-diff --git a/chrome/browser/ui/webui/settings/appearance_handler.h b/chrome/browser/ui/webui/settings/appearance_handler.h
 --- a/chrome/browser/ui/webui/settings/appearance_handler.h
 +++ b/chrome/browser/ui/webui/settings/appearance_handler.h
 @@ -6,15 +6,19 @@
@@ -940,7 +986,7 @@ diff --git a/chrome/browser/ui/webui/settings/appearance_handler.h b/chrome/brow
  
  namespace content {
  class WebUI;
-@@ -25,7 +29,8 @@
+@@ -25,7 +29,8 @@ class Profile;
  namespace settings {
  
  // Chrome "Appearance" settings page UI handler.
@@ -950,7 +996,7 @@ diff --git a/chrome/browser/ui/webui/settings/appearance_handler.h b/chrome/brow
   public:
    explicit AppearanceHandler(content::WebUI* webui);
  
-@@ -68,8 +73,34 @@
+@@ -68,8 +73,34 @@ class AppearanceHandler : public SettingsPageUIHandler {
        std::string name,
        std::vector<aerographene::ThemeInfo> themes);
  
@@ -985,10 +1031,9 @@ diff --git a/chrome/browser/ui/webui/settings/appearance_handler.h b/chrome/brow
    base::WeakPtrFactory<AppearanceHandler> weak_ptr_factory_{this};
  };
  
-diff --git a/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc b/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
 --- a/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
 +++ b/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
-@@ -615,6 +615,30 @@ void AddAppearanceStrings(content::WebUIDataSource* html_source,
+@@ -612,6 +612,30 @@ void AddAppearanceStrings(content::WebUIDataSource* html_source,
         IDS_SETTINGS_AEROGRAPHENE_EXTENSION_THEME_WARNING},
        {"aerographeneResetExtensionTheme",
         IDS_SETTINGS_AEROGRAPHENE_RESET_EXTENSION_THEME},
@@ -1018,4 +1063,4 @@ diff --git a/chrome/browser/ui/webui/settings/settings_localized_strings_provide
 +       IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_ERROR_IO},
        {"centeredLocationBar", IDS_SETTINGS_CENTERED_LOCATION_BAR},
        {"verticalCollapseShortcut", IDS_SETTINGS_VERTICAL_COLLAPSE_SHORTCUT},
-       {"shiftRightClickContextMenu",
+       {"showHomeButton", IDS_SETTINGS_SHOW_HOME_BUTTON},

@@ -1,0 +1,1763 @@
+aerographene: D3c, confinamento Windows da vault de notas e do repositório de temas.
+
+Origem: aerographene (GPL-3.0). Depende de notes-vault-reader, notes-render, notes-editor,
+notes-b5, theme-repo, settings-theme-import e terminal-pty (contexto de chrome/test/BUILD.gn).
+Propósito: no Windows a leitura da vault (lista, leitura, busca, imagens, vigia) passa a ser
+confinada e é ativada (kVaultReadSupported = true): cada diretório é aberto por componente com
+FILE_FLAG_OPEN_REPARSE_POINT e mantido aberto sem FILE_SHARE_DELETE; reparse point abaixo da
+raiz, apelido 8.3 (nome final via GetFinalPathNameByHandleW comparado sem caixa), ADS (':'),
+caracteres proibidos, ponto/espaço final, nomes reservados (CON, NUL, COM1...) e raiz que não
+seja "X:\" (UNC, "\\?\", "\\.\") são recusados. Escrita continua sem suporte no Windows
+(kVaultWriteSupported = false, a página recebe "unsupported"). O repositório de temas no
+Windows usa as mesmas regras de nome em IsValidThemeName, recusa repositório/pasta/arquivo
+que seja reparse point ou apelido, e não substitui junção com o nome do tema. Linux: só código
+movido (busca comum aos dois sistemas), sem mudança de comportamento. Testes Windows novos em
+vault_reader_win_unittest.cc e aerographene_theme_repo_unittest.cc; unit_tests de notas
+entram no Windows. APIs desde o Windows Vista (piso Win10 1809 atendido).
+
+--- a/chrome/browser/ui/webui/aero_notes/BUILD.gn
++++ b/chrome/browser/ui/webui/aero_notes/BUILD.gn
+@@ -39,10 +39,16 @@
+ 
+ source_set("unit_tests") {
+   testonly = true
+-  sources = [
+-    "vault_reader_unittest.cc",
+-    "vault_watcher_unittest.cc",
+-  ]
++  if (is_win) {
++    # D3c: confined Win32 reading (the POSIX tests use fifos, symlinks and
++    # the B4 writer, which Windows does not have).
++    sources = [ "vault_reader_win_unittest.cc" ]
++  } else {
++    sources = [
++      "vault_reader_unittest.cc",
++      "vault_watcher_unittest.cc",
++    ]
++  }
+   deps = [
+     ":vault_reader",
+     "//base",
+--- a/chrome/browser/ui/webui/aero_notes/notes_handler.cc
++++ b/chrome/browser/ui/webui/aero_notes/notes_handler.cc
+@@ -179,7 +179,6 @@
+     return;
+   }
+   if (!kVaultReadSupported) {
+-    // Windows until D3c: no confined reader yet, nothing is read.
+     RejectJavascriptCallback(args[0], base::Value("unsupported"));
+     return;
+   }
+@@ -229,7 +228,6 @@
+     return;
+   }
+   if (!kVaultReadSupported) {
+-    // Windows until D3c: no confined reader yet, nothing is read.
+     RejectJavascriptCallback(args[0], base::Value("unsupported"));
+     return;
+   }
+@@ -277,8 +275,8 @@
+     RejectJavascriptCallback(args[0], base::Value("noVault"));
+     return false;
+   }
+-  if (!kVaultReadSupported) {
+-    // Windows until D3c: no confined writer yet, nothing is written.
++  if (!kVaultWriteSupported) {
++    // Windows: reading is confined (D3c), writing is not implemented.
+     RejectJavascriptCallback(args[0], base::Value("unsupported"));
+     return false;
+   }
+--- a/chrome/browser/ui/webui/aero_notes/vault_reader.cc
++++ b/chrome/browser/ui/webui/aero_notes/vault_reader.cc
+@@ -5,106 +5,42 @@
+ 
+ #include "build/build_config.h"
+ 
+-#if BUILDFLAG(IS_WIN)
+-
+-namespace aerographene::notes {
+-
+-// D3b: the confined reader for Windows (reparse points, reserved names, ADS,
+-// 8.3 names, case-insensitive compare) is D3c. Until then every call is
+-// refused (kVaultReadSupported is false); there is no unconfined fallback.
+-std::optional<base::FilePath> ResolveInVault(const base::FilePath& root,
+-                                             std::string_view relative) {
+-  return std::nullopt;
+-}
+-
+-std::optional<std::vector<VaultEntry>> ListVaultDir(
+-    const base::FilePath& root,
+-    std::string_view relative) {
+-  return std::nullopt;
+-}
+-
+-std::optional<std::string> ReadVaultNote(const base::FilePath& root,
+-                                         std::string_view relative) {
+-  return std::nullopt;
+-}
+-
+-// B5 on Windows: nothing until the D3c confined reader.
+-SearchResult SearchVault(const base::FilePath& root, std::string_view query) {
+-  return {};
+-}
+-
+-std::optional<std::string> FindVaultFileByName(const base::FilePath& root,
+-                                               std::string_view name) {
+-  return std::nullopt;
+-}
+-
+-std::optional<ImageContent> ReadVaultImage(const base::FilePath& root,
+-                                           std::string_view relative) {
+-  return std::nullopt;
+-}
+-
+-std::optional<NoteContent> ReadVaultNoteWithMtime(const base::FilePath& root,
+-                                                  std::string_view relative) {
+-  return std::nullopt;
+-}
+-
+-// B4 on Windows: no write path before the D3c confined reader/writer.
+-std::string_view WriteStatusName(WriteStatus status) {
+-  return status == WriteStatus::kUnsupported ? "unsupported" : "ioError";
+-}
+-
+-WriteResult WriteVaultNote(const base::FilePath& root,
+-                           std::string_view relative,
+-                           std::string_view text,
+-                           std::optional<int64_t> expected_mtime_us) {
+-  return {WriteStatus::kUnsupported, 0};
+-}
+-
+-WriteResult CreateVaultNote(const base::FilePath& root,
+-                            std::string_view relative,
+-                            std::string_view text) {
+-  return {WriteStatus::kUnsupported, 0};
+-}
+-
+-WriteResult RenameVaultNote(const base::FilePath& root,
+-                            std::string_view from,
+-                            std::string_view to) {
+-  return {WriteStatus::kUnsupported, 0};
+-}
+-
+-WriteResult DeleteVaultNote(const base::FilePath& root,
+-                            std::string_view relative) {
+-  return {WriteStatus::kUnsupported, 0};
+-}
++#include <algorithm>
++#include <utility>
+ 
+-}  // namespace aerographene::notes
++#include "base/functional/bind.h"
++#include "base/functional/callback.h"
++#include "base/strings/string_split.h"
++#include "base/strings/string_util.h"
+ 
+-#else  // BUILDFLAG(IS_WIN)
++#if BUILDFLAG(IS_WIN)
++#include <windows.h>
+ 
++#include "base/strings/utf_string_conversions.h"
++#include "base/time/time.h"
++#include "base/win/scoped_handle.h"
++#else
+ #include <errno.h>
+ #include <fcntl.h>
+ #include <sys/stat.h>
+ #include <sys/syscall.h>
+ #include <unistd.h>
+ 
+-#include <algorithm>
+-#include <utility>
+-
+-#include "base/functional/bind.h"
+-#include "base/functional/callback.h"
+ #include "base/files/file_enumerator.h"
+ #include "base/files/file_util.h"
+ #include "base/files/scoped_file.h"
+ #include "base/posix/eintr_wrapper.h"
+ #include "base/rand_util.h"
+ #include "base/strings/string_number_conversions.h"
+-#include "base/strings/string_split.h"
+-#include "base/strings/string_util.h"
++#endif  // BUILDFLAG(IS_WIN)
+ 
+ namespace aerographene::notes {
+ 
+ namespace {
+ 
++constexpr size_t kMaxNameBytes = 255;
++
++
+ bool IsValidRelative(std::string_view relative) {
+   if (relative.size() > kMaxRelativePathLength ||
+       relative.find('\0') != std::string_view::npos) {
+@@ -127,7 +63,12 @@
+ 
+ bool HasExtension(const base::FilePath& path,
+                   std::initializer_list<std::string_view> exts) {
++#if BUILDFLAG(IS_WIN)
++  const std::string ext =
++      base::ToLowerASCII(base::WideToUTF8(path.FinalExtension()));
++#else
+   const std::string ext = base::ToLowerASCII(path.FinalExtension());
++#endif
+   return std::ranges::any_of(exts,
+                              [&](std::string_view e) { return ext == e; });
+ }
+@@ -141,6 +82,499 @@
+                              ".svg"});
+ }
+ 
++}  // namespace
++
++#if BUILDFLAG(IS_WIN)
++
++// D3c: confined Win32 access, read only.
++//
++// Every access opens the path one component at a time from a handle of the
++// root, holding each directory handle open WITHOUT FILE_SHARE_DELETE: while
++// held, no component already checked can be renamed, deleted or swapped for a
++// junction or symlink. Each component is opened with
++// FILE_FLAG_OPEN_REPARSE_POINT and refused when it is a name-surrogate
++// reparse point (symlink, junction, mount point), so the walk never leaves
++// the vault; stricter than POSIX, which follows symlinks that stay inside.
++// Cloud placeholders (OneDrive, Dropbox) are accepted. The final path of
++// each opened component (GetFinalPathNameByHandleW, normalized) must equal
++// the final path of the held parent + '\\' + the requested name without
++// case: a component reached through a junction swapped meanwhile, an 8.3
++// short name ("NOTAS~1") or any other alias is refused. Names with ':'
++// (alternate data streams), the characters Win32 forbids, a trailing dot or
++// space (Win32 strips them), or a reserved device name (CON, NUL, COM1,
++// LPT1...) are refused before any open. The root must be a local drive
++// path ("X:\..."): UNC ("\\server\share"), "\\?\" and "\\.\" roots are refused.
++// Writes (B4) are not supported on Windows (kVaultWriteSupported).
++
++namespace {
++
++// Windows rules for one path component (UTF-16), on top of IsValidRelative.
++bool IsSafeWinComponent(std::wstring_view name) {
++  if (name.empty() || name.size() > 255 || name == L"." || name == L"..") {
++    return false;
++  }
++  for (wchar_t c : name) {
++    if (c < 0x20 || c == L'<' || c == L'>' || c == L':' || c == L'"' ||
++        c == L'/' || c == L'\\' || c == L'|' || c == L'?' || c == L'*') {
++      return false;
++    }
++  }
++  if (name.back() == L'.' || name.back() == L' ') {
++    return false;
++  }
++  // Reserved device names, alone or with any extension ("nul.md"), also with
++  // spaces before the dot ("CON .md").
++  std::wstring_view stem = name.substr(0, name.find(L'.'));
++  while (!stem.empty() && stem.back() == L' ') {
++    stem.remove_suffix(1);
++  }
++  static constexpr const wchar_t* kReserved[] = {
++      L"CON", L"PRN", L"AUX", L"NUL", L"CONIN$", L"CONOUT$", L"CLOCK$"};
++  for (const wchar_t* r : kReserved) {
++    if (base::EqualsCaseInsensitiveASCII(stem, r)) {
++      return false;
++    }
++  }
++  if (stem.size() == 4) {
++    const std::wstring_view head = stem.substr(0, 3);
++    const wchar_t d = stem[3];
++    if ((base::EqualsCaseInsensitiveASCII(head, L"COM") ||
++         base::EqualsCaseInsensitiveASCII(head, L"LPT")) &&
++        ((d >= L'0' && d <= L'9') || d == 0x00B9 || d == 0x00B2 ||
++         d == 0x00B3)) {
++      return false;
++    }
++  }
++  return true;
++}
++
++// Local drive root only: "X:\...". No UNC, no "\\?\" or "\\.\" prefix.
++bool IsLocalDriveRoot(const base::FilePath& root) {
++  const std::wstring& v = root.value();
++  return v.size() >= 3 && base::IsAsciiAlpha(v[0]) && v[1] == L':' &&
++         v[2] == L'\\' && root.IsAbsolute();
++}
++
++// Normalized final path of `h` ("\\?\X:\...", long names, case on disk),
++// without a trailing separator.
++std::optional<std::wstring> FinalPath(HANDLE h) {
++  wchar_t buf[MAX_PATH + 1];
++  std::wstring path;
++  DWORD n = ::GetFinalPathNameByHandleW(
++      h, buf, static_cast<DWORD>(std::size(buf)),
++      FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
++  if (n == 0) {
++    return std::nullopt;
++  }
++  if (n >= std::size(buf)) {
++    path.resize(n);
++    n = ::GetFinalPathNameByHandleW(h, path.data(), n,
++                                    FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
++    if (n == 0 || n >= path.size()) {
++      return std::nullopt;
++    }
++    path.resize(n);
++  } else {
++    path.assign(buf, n);
++  }
++  while (!path.empty() && path.back() == L'\\') {
++    path.pop_back();  // drive root "\\?\X:\"
++  }
++  return path;
++}
++
++bool SameNameNoCase(std::wstring_view a, std::wstring_view b) {
++  return ::CompareStringOrdinal(a.data(), static_cast<int>(a.size()), b.data(),
++                                static_cast<int>(b.size()),
++                                /*bIgnoreCase=*/TRUE) == CSTR_EQUAL;
++}
++
++// Handles of the root and of every directory below it, kept open (no
++// FILE_SHARE_DELETE) while the caller works on the last one.
++struct WinChain {
++  std::vector<base::win::ScopedHandle> dirs;
++  base::FilePath path;  // root + components, '\\'-separated
++  HANDLE dir() const { return dirs.back().get(); }
++};
++
++base::win::ScopedHandle OpenComponent(const base::FilePath& path,
++                                      bool directory) {
++  const DWORD share = directory ? (FILE_SHARE_READ | FILE_SHARE_WRITE)
++                                : (FILE_SHARE_READ | FILE_SHARE_WRITE |
++                                   FILE_SHARE_DELETE);
++  return base::win::ScopedHandle(::CreateFileW(
++      path.value().c_str(), GENERIC_READ, share, nullptr, OPEN_EXISTING,
++      FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
++}
++
++// Attributes of an open handle; nullopt unless it is a local disk object.
++std::optional<BY_HANDLE_FILE_INFORMATION> DiskInfo(HANDLE h) {
++  BY_HANDLE_FILE_INFORMATION info;
++  if (::GetFileType(h) != FILE_TYPE_DISK ||
++      !::GetFileInformationByHandle(h, &info)) {
++    return std::nullopt;
++  }
++  return info;
++}
++
++// True for reparse points that redirect the name (symlink, junction, mount
++// point). Cloud placeholders (OneDrive, Dropbox) are not name surrogates and
++// stay readable like regular files.
++bool IsNameSurrogate(HANDLE h, DWORD attrs) {
++  if (!(attrs & FILE_ATTRIBUTE_REPARSE_POINT)) {
++    return false;
++  }
++  FILE_ATTRIBUTE_TAG_INFO tag;
++  if (!::GetFileInformationByHandleEx(h, FileAttributeTagInfo, &tag,
++                                      sizeof(tag))) {
++    return true;  // unknown: refuse
++  }
++  return IsReparseTagNameSurrogate(tag.ReparseTag);
++}
++
++// Checks the component just opened below the held directory `parent`: not a
++// name-surrogate reparse point, the expected kind, and its final path equal
++// to the final path of `parent` + '\' + `want` without case. This proves the
++// object really is the entry of `parent` (a path re-resolved through a
++// swapped junction lands elsewhere) and refuses 8.3 aliases.
++bool CheckComponent(HANDLE parent,
++                    HANDLE h,
++                    std::wstring_view want,
++                    bool directory,
++                    BY_HANDLE_FILE_INFORMATION* out = nullptr) {
++  std::optional<BY_HANDLE_FILE_INFORMATION> info = DiskInfo(h);
++  if (!info || (info->dwFileAttributes & FILE_ATTRIBUTE_DEVICE) ||
++      IsNameSurrogate(h, info->dwFileAttributes)) {
++    return false;
++  }
++  if (!!(info->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != directory) {
++    return false;
++  }
++  std::optional<std::wstring> base = FinalPath(parent);
++  std::optional<std::wstring> path = FinalPath(h);
++  if (!base || !path || path->size() <= base->size() + 1 ||
++      (*path)[base->size()] != L'\\' ||
++      !SameNameNoCase(std::wstring_view(*path).substr(0, base->size()),
++                      *base)) {
++    return false;
++  }
++  const std::wstring_view leaf =
++      std::wstring_view(*path).substr(base->size() + 1);
++  if (leaf.find(L'\\') != std::wstring_view::npos ||
++      !SameNameNoCase(leaf, want)) {
++    return false;
++  }
++  if (out) {
++    *out = *info;
++  }
++  return true;
++}
++
++// Splits `relative` (already IsValidRelative) into UTF-16 components that
++// pass IsSafeWinComponent.
++std::optional<std::vector<std::wstring>> WinComponents(
++    std::string_view relative) {
++  std::vector<std::wstring> parts;
++  if (relative.empty()) {
++    return parts;
++  }
++  for (std::string_view part : base::SplitStringPiece(
++           relative, "/", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL)) {
++    std::wstring wide;
++    if (!base::UTF8ToWide(part.data(), part.size(), &wide) ||
++        !IsSafeWinComponent(wide)) {
++      return std::nullopt;
++    }
++    parts.push_back(std::move(wide));
++  }
++  return parts;
++}
++
++// Opens the root (it may itself be a link the user chose: followed once) and
++// then each of `dirs` as a confined directory.
++std::optional<WinChain> OpenChain(const base::FilePath& root,
++                                  const std::vector<std::wstring>& dirs) {
++  if (!IsLocalDriveRoot(root)) {
++    return std::nullopt;
++  }
++  WinChain chain;
++  chain.path = root.StripTrailingSeparators();
++  base::win::ScopedHandle h(::CreateFileW(
++      chain.path.value().c_str(), GENERIC_READ,
++      FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
++      FILE_FLAG_BACKUP_SEMANTICS, nullptr));
++  if (!h.is_valid()) {
++    return std::nullopt;
++  }
++  std::optional<BY_HANDLE_FILE_INFORMATION> info = DiskInfo(h.get());
++  if (!info || !(info->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
++    return std::nullopt;
++  }
++  chain.dirs.push_back(std::move(h));
++  for (const std::wstring& name : dirs) {
++    chain.path = chain.path.Append(name);
++    base::win::ScopedHandle next = OpenComponent(chain.path, true);
++    if (!next.is_valid() ||
++        !CheckComponent(chain.dir(), next.get(), name, true)) {
++      return std::nullopt;
++    }
++    chain.dirs.push_back(std::move(next));
++  }
++  return chain;
++}
++
++int64_t MtimeUs(const FILETIME& ft) {
++  return (base::Time::FromFileTime(ft) - base::Time::UnixEpoch())
++      .InMicroseconds();
++}
++
++struct WinFile {
++  std::string bytes;
++  int64_t mtime_us = 0;
++};
++
++// Regular file `relative` (not a reparse point, no alias), up to `max` bytes.
++std::optional<WinFile> ReadConfined(const base::FilePath& root,
++                                    std::string_view relative,
++                                    size_t max) {
++  if (relative.empty() || !IsValidRelative(relative)) {
++    return std::nullopt;
++  }
++  std::optional<std::vector<std::wstring>> parts = WinComponents(relative);
++  if (!parts || parts->empty()) {
++    return std::nullopt;
++  }
++  const std::wstring leaf = parts->back();
++  parts->pop_back();
++  std::optional<WinChain> chain = OpenChain(root, *parts);
++  if (!chain) {
++    return std::nullopt;
++  }
++  base::win::ScopedHandle file =
++      OpenComponent(chain->path.Append(leaf), /*directory=*/false);
++  BY_HANDLE_FILE_INFORMATION info;
++  if (!file.is_valid() ||
++      !CheckComponent(chain->dir(), file.get(), leaf, false, &info)) {
++    return std::nullopt;
++  }
++  const uint64_t size =
++      (static_cast<uint64_t>(info.nFileSizeHigh) << 32) | info.nFileSizeLow;
++  if (size > max) {
++    return std::nullopt;
++  }
++  WinFile out;
++  out.mtime_us = MtimeUs(info.ftLastWriteTime);
++  char buf[64 * 1024];
++  while (true) {
++    DWORD n = 0;
++    if (!::ReadFile(file.get(), buf, sizeof(buf), &n, nullptr)) {
++      return std::nullopt;
++    }
++    if (n == 0) {
++      break;
++    }
++    out.bytes.append(buf, n);
++    if (out.bytes.size() > max) {
++      return std::nullopt;  // grew while reading
++    }
++  }
++  return out;
++}
++
++}  // namespace
++
++std::optional<base::FilePath> ResolveInVault(const base::FilePath& root,
++                                             std::string_view relative) {
++  if (!IsValidRelative(relative)) {
++    return std::nullopt;
++  }
++  std::optional<std::vector<std::wstring>> parts = WinComponents(relative);
++  if (!parts) {
++    return std::nullopt;
++  }
++  std::optional<std::wstring> leaf;
++  if (!parts->empty()) {
++    leaf = parts->back();
++    parts->pop_back();
++  }
++  std::optional<WinChain> chain = OpenChain(root, *parts);
++  if (!chain) {
++    return std::nullopt;
++  }
++  if (!leaf) {
++    return chain->path;
++  }
++  const base::FilePath path = chain->path.Append(*leaf);
++  base::win::ScopedHandle h = OpenComponent(path, /*directory=*/false);
++  if (!h.is_valid()) {
++    return std::nullopt;
++  }
++  std::optional<BY_HANDLE_FILE_INFORMATION> info = DiskInfo(h.get());
++  if (!info || !CheckComponent(chain->dir(), h.get(), *leaf,
++                               !!(info->dwFileAttributes &
++                                  FILE_ATTRIBUTE_DIRECTORY))) {
++    return std::nullopt;
++  }
++  return path;
++}
++
++std::optional<std::vector<VaultEntry>> ListVaultDir(
++    const base::FilePath& root,
++    std::string_view relative) {
++  if (!IsValidRelative(relative)) {
++    return std::nullopt;
++  }
++  std::optional<std::vector<std::wstring>> parts = WinComponents(relative);
++  if (!parts) {
++    return std::nullopt;
++  }
++  std::optional<WinChain> chain = OpenChain(root, *parts);
++  if (!chain) {
++    return std::nullopt;
++  }
++  const std::string prefix =
++      relative.empty() ? std::string() : std::string(relative) + "/";
++  std::vector<VaultEntry> entries;
++  // Enumerated from the held handle itself, not by path.
++  alignas(8) char buf[64 * 1024];
++  FILE_INFO_BY_HANDLE_CLASS cls = FileIdBothDirectoryRestartInfo;
++  bool full = false;
++  while (!full && ::GetFileInformationByHandleEx(chain->dir(), cls, buf,
++                                                 sizeof(buf))) {
++    cls = FileIdBothDirectoryInfo;
++    for (size_t off = 0;;) {
++      const auto* e =
++          reinterpret_cast<const FILE_ID_BOTH_DIR_INFO*>(buf + off);
++      const std::wstring_view name(e->FileName,
++                                   e->FileNameLength / sizeof(wchar_t));
++      const DWORD attrs = e->FileAttributes;
++      std::string utf8;
++      // With FILE_ATTRIBUTE_REPARSE_POINT, EaSize holds the reparse tag.
++      const bool surrogate = (attrs & FILE_ATTRIBUTE_REPARSE_POINT) &&
++                             IsReparseTagNameSurrogate(e->EaSize);
++      // Hidden ('.'), name surrogates (symlink, junction, mount point),
++      // devices and names Win32 cannot open back as given are skipped, like
++      // symlinks leaving the vault on POSIX. Cloud placeholders are listed.
++      if (!name.empty() && name[0] != L'.' && !surrogate &&
++          !(attrs & FILE_ATTRIBUTE_DEVICE) &&
++          IsSafeWinComponent(name) &&
++          base::WideToUTF8(name.data(), name.size(), &utf8)) {
++        VaultEntry entry;
++        entry.path = prefix + utf8;
++        entry.is_dir = !!(attrs & FILE_ATTRIBUTE_DIRECTORY);
++        if (entry.is_dir || IsListable(base::FilePath(name))) {
++          if (!entry.is_dir) {
++            entry.size = e->EndOfFile.QuadPart;
++          }
++          entries.push_back(std::move(entry));
++          if (entries.size() >= kMaxListEntries) {
++            full = true;
++            break;
++          }
++        }
++      }
++      if (e->NextEntryOffset == 0) {
++        break;
++      }
++      off += e->NextEntryOffset;
++    }
++  }
++  // A failure other than the end of the directory is an error, not a
++  // partial list.
++  if (!full && ::GetLastError() != ERROR_NO_MORE_FILES) {
++    return std::nullopt;
++  }
++  std::ranges::sort(entries, [](const VaultEntry& a, const VaultEntry& b) {
++    if (a.is_dir != b.is_dir) {
++      return a.is_dir;
++    }
++    return a.path < b.path;
++  });
++  return entries;
++}
++
++std::optional<NoteContent> ReadVaultNoteWithMtime(const base::FilePath& root,
++                                                  std::string_view relative) {
++  if (!IsNote(base::FilePath::FromUTF8Unsafe(relative))) {
++    return std::nullopt;
++  }
++  std::optional<WinFile> file = ReadConfined(root, relative, kMaxNoteBytes);
++  if (!file) {
++    return std::nullopt;
++  }
++  NoteContent note;
++  note.text = std::move(file->bytes);
++  note.mtime_us = file->mtime_us;
++  return note;
++}
++
++std::optional<std::string> ReadVaultNote(const base::FilePath& root,
++                                         std::string_view relative) {
++  std::optional<NoteContent> note = ReadVaultNoteWithMtime(root, relative);
++  if (!note) {
++    return std::nullopt;
++  }
++  return std::move(note->text);
++}
++
++std::optional<ImageContent> ReadVaultImage(const base::FilePath& root,
++                                           std::string_view relative) {
++  const std::string ext = base::ToLowerASCII(base::WideToUTF8(
++      base::FilePath::FromUTF8Unsafe(relative).FinalExtension()));
++  ImageContent image;
++  if (ext == ".png") {
++    image.mime = "image/png";
++  } else if (ext == ".jpg" || ext == ".jpeg") {
++    image.mime = "image/jpeg";
++  } else if (ext == ".gif") {
++    image.mime = "image/gif";
++  } else if (ext == ".webp") {
++    image.mime = "image/webp";
++  } else {
++    return std::nullopt;
++  }
++  std::optional<WinFile> file = ReadConfined(root, relative, kMaxImageBytes);
++  if (!file) {
++    return std::nullopt;
++  }
++  image.bytes = std::move(file->bytes);
++  return image;
++}
++
++// B4 on Windows: no write path (kVaultWriteSupported is false); the handler
++// answers "unsupported" before reaching these.
++std::string_view WriteStatusName(WriteStatus status) {
++  return status == WriteStatus::kUnsupported ? "unsupported" : "ioError";
++}
++
++WriteResult WriteVaultNote(const base::FilePath& root,
++                           std::string_view relative,
++                           std::string_view text,
++                           std::optional<int64_t> expected_mtime_us) {
++  return {WriteStatus::kUnsupported, 0};
++}
++
++WriteResult CreateVaultNote(const base::FilePath& root,
++                            std::string_view relative,
++                            std::string_view text) {
++  return {WriteStatus::kUnsupported, 0};
++}
++
++WriteResult RenameVaultNote(const base::FilePath& root,
++                            std::string_view from,
++                            std::string_view to) {
++  return {WriteStatus::kUnsupported, 0};
++}
++
++WriteResult DeleteVaultNote(const base::FilePath& root,
++                            std::string_view relative) {
++  return {WriteStatus::kUnsupported, 0};
++}
++
++#else  // BUILDFLAG(IS_WIN)
++
++namespace {
++
+ // Type and size of `path` without following a final symlink (the caller
+ // already resolved it) and without opening it, so FIFOs and devices never
+ // block the worker.
+@@ -155,7 +589,6 @@
+ 
+ constexpr int kDirFlags =
+     O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC | O_NOCTTY;
+-constexpr size_t kMaxNameBytes = 255;
+ 
+ #ifndef RENAME_NOREPLACE
+ #define RENAME_NOREPLACE (1 << 0)
+@@ -449,170 +882,6 @@
+   return std::move(note->text);
+ }
+ 
+-namespace {
+-
+-// Walks the visible tree depth first (ListVaultDir order). `visit` gets each
+-// entry; returning false stops the walk. Stops by itself at kMaxSearchFiles
+-// entries or kMaxSearchDepth levels (returns true when a limit cut it off).
+-bool WalkVault(const base::FilePath& root,
+-               const base::RepeatingCallback<bool(const VaultEntry&)>& visit) {
+-  size_t visited = 0;
+-  bool cut = false;
+-  bool stop = false;
+-  std::vector<std::pair<std::string, size_t>> stack;
+-  stack.emplace_back(std::string(), 0);
+-  while (!stack.empty() && !stop) {
+-    auto [dir, depth] = std::move(stack.back());
+-    stack.pop_back();
+-    std::optional<std::vector<VaultEntry>> entries = ListVaultDir(root, dir);
+-    if (!entries) {
+-      continue;
+-    }
+-    // Pushed in reverse so the walk keeps the listing order.
+-    std::vector<std::string> subdirs;
+-    for (const VaultEntry& e : *entries) {
+-      if (++visited > kMaxSearchFiles) {
+-        cut = true;
+-        stop = true;
+-        break;
+-      }
+-      if (!visit.Run(e)) {
+-        stop = true;
+-        break;
+-      }
+-      if (e.is_dir) {
+-        if (depth + 1 >= kMaxSearchDepth) {
+-          cut = true;
+-        } else {
+-          subdirs.push_back(e.path);
+-        }
+-      }
+-    }
+-    for (auto it = subdirs.rbegin(); it != subdirs.rend(); ++it) {
+-      stack.emplace_back(std::move(*it), depth + 1);
+-    }
+-  }
+-  return cut;
+-}
+-
+-// Valid-UTF-8 excerpt of `line` around byte offset `at`.
+-std::string Snippet(std::string_view line, size_t at) {
+-  size_t begin = at > 40 ? at - 40 : 0;
+-  while (begin < line.size() &&
+-         (static_cast<unsigned char>(line[begin]) & 0xC0) == 0x80) {
+-    ++begin;  // do not start inside a multi-byte character
+-  }
+-  std::string out(line.substr(begin));
+-  if (out.size() > kMaxSnippetBytes) {
+-    out = std::string(base::TruncateUTF8ToByteSize(out, kMaxSnippetBytes));
+-  }
+-  if (!base::IsStringUTF8(out)) {
+-    return std::string();  // invalid note text: no excerpt
+-  }
+-  return std::string(base::TrimWhitespaceASCII(out, base::TRIM_ALL));
+-}
+-
+-}  // namespace
+-
+-SearchResult SearchVault(const base::FilePath& root, std::string_view query) {
+-  SearchResult result;
+-  if (query.empty() || query.size() > kMaxSearchQueryBytes ||
+-      !base::IsStringUTF8(query)) {
+-    return result;
+-  }
+-  const std::string needle = base::ToLowerASCII(query);
+-  std::vector<SearchHit> name_hits;
+-  std::vector<SearchHit> content_hits;
+-  size_t bytes_read = 0;
+-  bool full = false;
+-  result.truncated = WalkVault(
+-      root, base::BindRepeating(
+-                [](const base::FilePath& root, const std::string& needle,
+-                   std::vector<SearchHit>* name_hits,
+-                   std::vector<SearchHit>* content_hits, size_t* bytes_read,
+-                   bool* full, const VaultEntry& e) {
+-                  if (e.is_dir || !base::IsStringUTF8(e.path)) {
+-                    return true;
+-                  }
+-                  const std::string leaf =
+-                      base::ToLowerASCII(e.path.substr(e.path.rfind('/') + 1));
+-                  const bool by_name = leaf.find(needle) != std::string::npos;
+-                  SearchHit hit;
+-                  hit.path = e.path;
+-                  hit.name_match = by_name;
+-                  if (IsNote(base::FilePath(e.path)) &&
+-                      e.size <= static_cast<int64_t>(kMaxNoteBytes) &&
+-                      *bytes_read + static_cast<size_t>(e.size) <=
+-                          kMaxSearchBytes) {
+-                    std::optional<std::string> text =
+-                        ReadVaultNote(root, e.path);
+-                    if (text) {
+-                      *bytes_read += text->size();
+-                      const std::string lower = base::ToLowerASCII(*text);
+-                      const size_t at = lower.find(needle);
+-                      if (at != std::string::npos) {
+-                        const size_t b = lower.rfind('\n', at);
+-                        const size_t start = b == std::string::npos ? 0 : b + 1;
+-                        size_t end = lower.find('\n', at);
+-                        if (end == std::string::npos) {
+-                          end = lower.size();
+-                        }
+-                        hit.snippet = Snippet(
+-                            std::string_view(*text).substr(start, end - start),
+-                            at - start);
+-                        if (hit.snippet.empty()) {
+-                          hit.snippet = " ";  // matched; excerpt unavailable
+-                        }
+-                      }
+-                    }
+-                  } else if (IsNote(base::FilePath(e.path))) {
+-                    *full = true;  // skipped for size or byte budget
+-                  }
+-                  if (by_name) {
+-                    name_hits->push_back(std::move(hit));
+-                  } else if (!hit.snippet.empty()) {
+-                    content_hits->push_back(std::move(hit));
+-                  }
+-                  return name_hits->size() + content_hits->size() <
+-                         kMaxSearchHits;
+-                },
+-                root, needle, &name_hits, &content_hits, &bytes_read, &full));
+-  for (SearchHit& h : content_hits) {
+-    name_hits.push_back(std::move(h));
+-  }
+-  if (name_hits.size() >= kMaxSearchHits) {
+-    name_hits.resize(kMaxSearchHits);
+-    result.truncated = true;
+-  }
+-  result.truncated = result.truncated || full;
+-  result.hits = std::move(name_hits);
+-  return result;
+-}
+-
+-std::optional<std::string> FindVaultFileByName(const base::FilePath& root,
+-                                               std::string_view name) {
+-  if (name.empty() || name.size() > kMaxNameBytes ||
+-      name.find('/') != std::string_view::npos || name[0] == '.' ||
+-      !IsValidRelative(name)) {
+-    return std::nullopt;
+-  }
+-  const std::string want = base::ToLowerASCII(name);
+-  std::optional<std::string> found;
+-  WalkVault(root,
+-            base::BindRepeating(
+-                [](const std::string& want, std::optional<std::string>* found,
+-                   const VaultEntry& e) {
+-                  if (!e.is_dir &&
+-                      base::ToLowerASCII(e.path.substr(
+-                          e.path.rfind('/') + 1)) == want) {
+-                    *found = e.path;
+-                    return false;
+-                  }
+-                  return true;
+-                },
+-                want, &found));
+-  return found;
+-}
+ 
+ std::optional<ImageContent> ReadVaultImage(const base::FilePath& root,
+                                            std::string_view relative) {
+@@ -832,6 +1101,171 @@
+   return {WriteStatus::kOk, 0};
+ }
+ 
+-}  // namespace aerographene::notes
+-
+ #endif  // BUILDFLAG(IS_WIN)
++
++namespace {
++
++// Walks the visible tree depth first (ListVaultDir order). `visit` gets each
++// entry; returning false stops the walk. Stops by itself at kMaxSearchFiles
++// entries or kMaxSearchDepth levels (returns true when a limit cut it off).
++bool WalkVault(const base::FilePath& root,
++               const base::RepeatingCallback<bool(const VaultEntry&)>& visit) {
++  size_t visited = 0;
++  bool cut = false;
++  bool stop = false;
++  std::vector<std::pair<std::string, size_t>> stack;
++  stack.emplace_back(std::string(), 0);
++  while (!stack.empty() && !stop) {
++    auto [dir, depth] = std::move(stack.back());
++    stack.pop_back();
++    std::optional<std::vector<VaultEntry>> entries = ListVaultDir(root, dir);
++    if (!entries) {
++      continue;
++    }
++    // Pushed in reverse so the walk keeps the listing order.
++    std::vector<std::string> subdirs;
++    for (const VaultEntry& e : *entries) {
++      if (++visited > kMaxSearchFiles) {
++        cut = true;
++        stop = true;
++        break;
++      }
++      if (!visit.Run(e)) {
++        stop = true;
++        break;
++      }
++      if (e.is_dir) {
++        if (depth + 1 >= kMaxSearchDepth) {
++          cut = true;
++        } else {
++          subdirs.push_back(e.path);
++        }
++      }
++    }
++    for (auto it = subdirs.rbegin(); it != subdirs.rend(); ++it) {
++      stack.emplace_back(std::move(*it), depth + 1);
++    }
++  }
++  return cut;
++}
++
++// Valid-UTF-8 excerpt of `line` around byte offset `at`.
++std::string Snippet(std::string_view line, size_t at) {
++  size_t begin = at > 40 ? at - 40 : 0;
++  while (begin < line.size() &&
++         (static_cast<unsigned char>(line[begin]) & 0xC0) == 0x80) {
++    ++begin;  // do not start inside a multi-byte character
++  }
++  std::string out(line.substr(begin));
++  if (out.size() > kMaxSnippetBytes) {
++    out = std::string(base::TruncateUTF8ToByteSize(out, kMaxSnippetBytes));
++  }
++  if (!base::IsStringUTF8(out)) {
++    return std::string();  // invalid note text: no excerpt
++  }
++  return std::string(base::TrimWhitespaceASCII(out, base::TRIM_ALL));
++}
++
++}  // namespace
++
++SearchResult SearchVault(const base::FilePath& root, std::string_view query) {
++  SearchResult result;
++  if (query.empty() || query.size() > kMaxSearchQueryBytes ||
++      !base::IsStringUTF8(query)) {
++    return result;
++  }
++  const std::string needle = base::ToLowerASCII(query);
++  std::vector<SearchHit> name_hits;
++  std::vector<SearchHit> content_hits;
++  size_t bytes_read = 0;
++  bool full = false;
++  result.truncated = WalkVault(
++      root, base::BindRepeating(
++                [](const base::FilePath& root, const std::string& needle,
++                   std::vector<SearchHit>* name_hits,
++                   std::vector<SearchHit>* content_hits, size_t* bytes_read,
++                   bool* full, const VaultEntry& e) {
++                  if (e.is_dir || !base::IsStringUTF8(e.path)) {
++                    return true;
++                  }
++                  const std::string leaf =
++                      base::ToLowerASCII(e.path.substr(e.path.rfind('/') + 1));
++                  const bool by_name = leaf.find(needle) != std::string::npos;
++                  SearchHit hit;
++                  hit.path = e.path;
++                  hit.name_match = by_name;
++                  if (IsNote(base::FilePath::FromUTF8Unsafe(e.path)) &&
++                      e.size <= static_cast<int64_t>(kMaxNoteBytes) &&
++                      *bytes_read + static_cast<size_t>(e.size) <=
++                          kMaxSearchBytes) {
++                    std::optional<std::string> text =
++                        ReadVaultNote(root, e.path);
++                    if (text) {
++                      *bytes_read += text->size();
++                      const std::string lower = base::ToLowerASCII(*text);
++                      const size_t at = lower.find(needle);
++                      if (at != std::string::npos) {
++                        const size_t b = lower.rfind('\n', at);
++                        const size_t start = b == std::string::npos ? 0 : b + 1;
++                        size_t end = lower.find('\n', at);
++                        if (end == std::string::npos) {
++                          end = lower.size();
++                        }
++                        hit.snippet = Snippet(
++                            std::string_view(*text).substr(start, end - start),
++                            at - start);
++                        if (hit.snippet.empty()) {
++                          hit.snippet = " ";  // matched; excerpt unavailable
++                        }
++                      }
++                    }
++                  } else if (IsNote(base::FilePath::FromUTF8Unsafe(e.path))) {
++                    *full = true;  // skipped for size or byte budget
++                  }
++                  if (by_name) {
++                    name_hits->push_back(std::move(hit));
++                  } else if (!hit.snippet.empty()) {
++                    content_hits->push_back(std::move(hit));
++                  }
++                  return name_hits->size() + content_hits->size() <
++                         kMaxSearchHits;
++                },
++                root, needle, &name_hits, &content_hits, &bytes_read, &full));
++  for (SearchHit& h : content_hits) {
++    name_hits.push_back(std::move(h));
++  }
++  if (name_hits.size() >= kMaxSearchHits) {
++    name_hits.resize(kMaxSearchHits);
++    result.truncated = true;
++  }
++  result.truncated = result.truncated || full;
++  result.hits = std::move(name_hits);
++  return result;
++}
++
++std::optional<std::string> FindVaultFileByName(const base::FilePath& root,
++                                               std::string_view name) {
++  if (name.empty() || name.size() > kMaxNameBytes ||
++      name.find('/') != std::string_view::npos || name[0] == '.' ||
++      !IsValidRelative(name)) {
++    return std::nullopt;
++  }
++  const std::string want = base::ToLowerASCII(name);
++  std::optional<std::string> found;
++  WalkVault(root,
++            base::BindRepeating(
++                [](const std::string& want, std::optional<std::string>* found,
++                   const VaultEntry& e) {
++                  if (!e.is_dir &&
++                      base::ToLowerASCII(e.path.substr(
++                          e.path.rfind('/') + 1)) == want) {
++                    *found = e.path;
++                    return false;
++                  }
++                  return true;
++                },
++                want, &found));
++  return found;
++}
++
++}  // namespace aerographene::notes
+--- a/chrome/browser/ui/webui/aero_notes/vault_reader.h
++++ b/chrome/browser/ui/webui/aero_notes/vault_reader.h
+@@ -31,12 +31,17 @@
+ inline constexpr size_t kMaxNoteBytes = 4 * 1024 * 1024;
+ inline constexpr size_t kMaxListEntries = 5000;
+ 
+-// False on Windows until the confined reader of D3c: there every function
+-// below returns nullopt (no unconfined fallback).
++// Reading (list, read, search, images, watch) is confined on every system.
++// On Windows (D3c) the walk holds a handle per directory (no
++// FILE_SHARE_DELETE), refuses any reparse point below the root, aliases (8.3
++// short names: the name on disk must match without case), ADS (':'),
++// reserved device names, trailing dot/space and non-drive roots (UNC, "\\?\").
++// Writes stay POSIX only: on Windows they answer kUnsupported.
++inline constexpr bool kVaultReadSupported = true;
+ #if BUILDFLAG(IS_WIN)
+-inline constexpr bool kVaultReadSupported = false;
++inline constexpr bool kVaultWriteSupported = false;
+ #else
+-inline constexpr bool kVaultReadSupported = true;
++inline constexpr bool kVaultWriteSupported = true;
+ #endif
+ 
+ struct VaultEntry {
+@@ -134,7 +139,7 @@
+   kExists,       // create/rename destination already exists
+   kConflict,     // mtime on disk differs from the one the page opened
+   kTooLarge,     // more than kMaxNoteBytes
+-  kUnsupported,  // Windows until the D3c confined reader
++  kUnsupported,  // writes on Windows (kVaultWriteSupported)
+   kIoError,
+ };
+ 
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_notes/vault_reader_win_unittest.cc
+@@ -0,0 +1,184 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++// D3c: confined vault reading on Windows.
++
++#include <windows.h>
++
++#include <optional>
++#include <string>
++
++#include "base/files/file_path.h"
++#include "base/files/file_util.h"
++#include "base/files/scoped_temp_dir.h"
++#include "base/strings/utf_string_conversions.h"
++#include "base/test/file_path_reparse_point_win.h"
++#include "chrome/browser/ui/webui/aero_notes/vault_reader.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace aerographene::notes {
++namespace {
++
++class VaultReaderWinTest : public testing::Test {
++ protected:
++  void SetUp() override {
++    ASSERT_TRUE(outer_.CreateUniqueTempDir());
++    root_ = outer_.GetPath().Append(L"vault");
++    ASSERT_TRUE(base::CreateDirectory(root_.Append(L"sub")));
++    ASSERT_TRUE(base::WriteFile(root_.Append(L"a.md"), "# a"));
++    ASSERT_TRUE(base::WriteFile(root_.Append(L"sub").Append(L"b.md"), "b"));
++    ASSERT_TRUE(base::WriteFile(root_.Append(L"img.png"), "png"));
++    ASSERT_TRUE(base::WriteFile(root_.Append(L"x.txt"), "txt"));
++    ASSERT_TRUE(base::WriteFile(root_.Append(L".hidden.md"), "h"));
++    ASSERT_TRUE(base::CreateDirectory(outer_.GetPath().Append(L"outdir")));
++    ASSERT_TRUE(base::WriteFile(
++        outer_.GetPath().Append(L"outdir").Append(L"secret.md"), "s"));
++  }
++
++  base::ScopedTempDir outer_;
++  base::FilePath root_;
++};
++
++TEST_F(VaultReaderWinTest, ReadSupportedWriteNot) {
++  EXPECT_TRUE(kVaultReadSupported);
++  EXPECT_FALSE(kVaultWriteSupported);
++  EXPECT_EQ(WriteVaultNote(root_, "a.md", "x", std::nullopt).status,
++            WriteStatus::kUnsupported);
++  EXPECT_EQ(CreateVaultNote(root_, "n.md", "x").status,
++            WriteStatus::kUnsupported);
++  EXPECT_EQ(RenameVaultNote(root_, "a.md", "c.md").status,
++            WriteStatus::kUnsupported);
++  EXPECT_EQ(DeleteVaultNote(root_, "a.md").status, WriteStatus::kUnsupported);
++  EXPECT_EQ(ReadVaultNote(root_, "a.md"), "# a");  // untouched
++}
++
++TEST_F(VaultReaderWinTest, ReadsAndListsInside) {
++  EXPECT_EQ(ReadVaultNote(root_, "a.md"), "# a");
++  EXPECT_EQ(ReadVaultNote(root_, "sub/b.md"), "b");
++  std::optional<NoteContent> note = ReadVaultNoteWithMtime(root_, "a.md");
++  ASSERT_TRUE(note);
++  EXPECT_GT(note->mtime_us, 0);
++
++  std::optional<std::vector<VaultEntry>> list = ListVaultDir(root_, "");
++  ASSERT_TRUE(list);
++  ASSERT_EQ(list->size(), 3u);  // sub/, a.md, img.png (no .hidden, no .txt)
++  EXPECT_EQ((*list)[0].path, "sub");
++  EXPECT_TRUE((*list)[0].is_dir);
++  EXPECT_EQ((*list)[1].path, "a.md");
++  EXPECT_EQ((*list)[1].size, 3);
++  EXPECT_EQ((*list)[2].path, "img.png");
++  list = ListVaultDir(root_, "sub");
++  ASSERT_TRUE(list);
++  ASSERT_EQ(list->size(), 1u);
++  EXPECT_EQ((*list)[0].path, "sub/b.md");
++  EXPECT_FALSE(ListVaultDir(root_, "a.md"));
++  EXPECT_FALSE(ListVaultDir(root_, "missing"));
++}
++
++TEST_F(VaultReaderWinTest, RejectsMalformedAndWindowsOnlyNames) {
++  for (const char* p :
++       {"../outdir/secret.md", "sub/../a.md", "/a.md", "sub\\b.md",
++        "..\\outdir\\secret.md", "C:/a.md", "a.md:ads", "a.md::$DATA",
++        "sub:x/b.md", "a.md.", "a.md ", "sub./b.md", "sub /b.md", "CON",
++        "con.md", "NUL.md", "nul .md", "Aux.md", "prn.md", "COM1.md",
++        "lpt9.md", "COM\xC2\xB9.md", "conin$.md", "a<b.md", "a|b.md",
++        "a?.md", "a*.md", "a\"b.md", "a\x01.md"}) {
++    EXPECT_FALSE(ResolveInVault(root_, p)) << p;
++    EXPECT_FALSE(ReadVaultNote(root_, p)) << p;
++    EXPECT_FALSE(ListVaultDir(root_, p)) << p;
++  }
++  // Names that only look reserved are fine.
++  ASSERT_TRUE(base::WriteFile(root_.Append(L"console.md"), "c"));
++  ASSERT_TRUE(base::WriteFile(root_.Append(L"com10.md"), "c"));
++  EXPECT_EQ(ReadVaultNote(root_, "console.md"), "c");
++  EXPECT_EQ(ReadVaultNote(root_, "com10.md"), "c");
++}
++
++TEST_F(VaultReaderWinTest, RootMustBeALocalDrivePath) {
++  EXPECT_FALSE(ListVaultDir(base::FilePath(L"relative"), ""));
++  EXPECT_FALSE(
++      ListVaultDir(base::FilePath(L"\\\\?\\" + root_.value()), ""));
++  EXPECT_FALSE(ListVaultDir(base::FilePath(L"\\\\.\\" + root_.value()), ""));
++  // Administrative share of the same folder: UNC is refused.
++  const std::wstring& v = root_.value();
++  ASSERT_GE(v.size(), 3u);
++  const base::FilePath unc(std::wstring(L"\\\\localhost\\") + v[0] + L"$" +
++                           v.substr(2));
++  EXPECT_FALSE(ListVaultDir(unc, ""));
++  EXPECT_FALSE(ReadVaultNote(unc, "a.md"));
++  // Trailing separator on the root is accepted.
++  EXPECT_EQ(ReadVaultNote(base::FilePath(v + L"\\"), "a.md"), "# a");
++}
++
++TEST_F(VaultReaderWinTest, RefusesJunctionInAnyComponent) {
++  const base::FilePath link = root_.Append(L"link");
++  ASSERT_TRUE(base::CreateDirectory(link));
++  auto reparse = base::test::FilePathReparsePoint::Create(
++      link, outer_.GetPath().Append(L"outdir"));
++  ASSERT_TRUE(reparse);
++  EXPECT_FALSE(ReadVaultNote(root_, "link/secret.md"));
++  EXPECT_FALSE(ListVaultDir(root_, "link"));
++  EXPECT_FALSE(ResolveInVault(root_, "link"));
++  // Not listed either.
++  std::optional<std::vector<VaultEntry>> list = ListVaultDir(root_, "");
++  ASSERT_TRUE(list);
++  for (const VaultEntry& e : *list) {
++    EXPECT_NE(e.path, "link");
++  }
++  for (const SearchHit& h : SearchVault(root_, "secret").hits) {
++    EXPECT_NE(h.path, "link/secret.md");
++  }
++}
++
++TEST_F(VaultReaderWinTest, RootItselfMayBeAJunction) {
++  // The root is the user's choice: a junction there is followed once.
++  const base::FilePath alias = outer_.GetPath().Append(L"alias");
++  ASSERT_TRUE(base::CreateDirectory(alias));
++  auto reparse = base::test::FilePathReparsePoint::Create(alias, root_);
++  ASSERT_TRUE(reparse);
++  EXPECT_EQ(ReadVaultNote(alias, "sub/b.md"), "b");
++}
++
++TEST_F(VaultReaderWinTest, RefusesShortNameAlias) {
++  const base::FilePath dir = root_.Append(L"Long Folder Name");
++  ASSERT_TRUE(base::CreateDirectory(dir));
++  ASSERT_TRUE(base::WriteFile(dir.Append(L"note.md"), "n"));
++  wchar_t buf[MAX_PATH];
++  const DWORD n = ::GetShortPathNameW(dir.value().c_str(), buf, MAX_PATH);
++  ASSERT_GT(n, 0u);
++  const std::wstring short_leaf =
++      base::FilePath(std::wstring(buf, n)).BaseName().value();
++  EXPECT_EQ(ReadVaultNote(root_, "Long Folder Name/note.md"), "n");
++  if (short_leaf == L"Long Folder Name") {
++    GTEST_SKIP() << "8.3 names disabled on this volume";
++  }
++  EXPECT_FALSE(
++      ReadVaultNote(root_, base::WideToUTF8(short_leaf) + "/note.md"));
++  EXPECT_FALSE(ListVaultDir(root_, base::WideToUTF8(short_leaf)));
++}
++
++TEST_F(VaultReaderWinTest, CaseInsensitiveLikeTheFileSystem) {
++  EXPECT_EQ(ReadVaultNote(root_, "SUB/B.MD"), "b");
++}
++
++TEST_F(VaultReaderWinTest, OnlyRegularFiles) {
++  EXPECT_FALSE(ReadVaultNote(root_, "sub"));  // a directory named like x
++  ASSERT_TRUE(base::CreateDirectory(root_.Append(L"dir.md")));
++  EXPECT_FALSE(ReadVaultNote(root_, "dir.md"));
++  EXPECT_FALSE(ReadVaultNote(root_, "x.txt"));  // not a note
++}
++
++TEST_F(VaultReaderWinTest, SearchFindAndImages) {
++  SearchResult r = SearchVault(root_, "B");
++  ASSERT_FALSE(r.hits.empty());
++  EXPECT_EQ(FindVaultFileByName(root_, "IMG.PNG"), "img.png");
++  std::optional<ImageContent> image = ReadVaultImage(root_, "img.png");
++  ASSERT_TRUE(image);
++  EXPECT_EQ(image->mime, "image/png");
++  EXPECT_EQ(image->bytes, "png");
++  EXPECT_FALSE(ReadVaultImage(root_, "a.md"));
++  EXPECT_FALSE(ReadVaultImage(root_, "../outdir/secret.md"));
++}
++
++}  // namespace
++}  // namespace aerographene::notes
+--- a/chrome/browser/themes/aerographene_theme_repo.cc
++++ b/chrome/browser/themes/aerographene_theme_repo.cc
+@@ -119,6 +119,119 @@
+   } while (::FindNextFileW(find, &data));
+   ::FindClose(find);
+ }
++
++// D3c: confinement of the repository on Windows.
++//
++// A theme folder name must also be a name Win32 opens back unchanged: no
++// ':' (alternate data streams), none of <>:"/\|?*, no trailing dot or space
++// (Win32 strips them) and no reserved device name (CON, NUL, COM1, LPT1...,
++// with or without extension). Same rules as the notes vault reader.
++bool IsSafeWinComponent(std::wstring_view name) {
++  if (name.empty() || name == L"." || name == L"..") {
++    return false;
++  }
++  for (wchar_t c : name) {
++    if (c < 0x20 || c == L'<' || c == L'>' || c == L':' || c == L'"' ||
++        c == L'/' || c == L'\\' || c == L'|' || c == L'?' || c == L'*') {
++      return false;
++    }
++  }
++  if (name.back() == L'.' || name.back() == L' ') {
++    return false;
++  }
++  std::wstring_view stem = name.substr(0, name.find(L'.'));
++  while (!stem.empty() && stem.back() == L' ') {
++    stem.remove_suffix(1);
++  }
++  for (const wchar_t* r :
++       {L"CON", L"PRN", L"AUX", L"NUL", L"CONIN$", L"CONOUT$", L"CLOCK$"}) {
++    if (base::EqualsCaseInsensitiveASCII(stem, r)) {
++      return false;
++    }
++  }
++  if (stem.size() == 4) {
++    const std::wstring_view head = stem.substr(0, 3);
++    const wchar_t d = stem[3];
++    if ((base::EqualsCaseInsensitiveASCII(head, L"COM") ||
++         base::EqualsCaseInsensitiveASCII(head, L"LPT")) &&
++        ((d >= L'0' && d <= L'9') || d == 0x00B9 || d == 0x00B2 ||
++         d == 0x00B3)) {
++      return false;
++    }
++  }
++  return true;
++}
++
++// The repository must be on a local drive path ("X:\..."): no UNC share,
++// no "\\?\" or "\\.\" prefix.
++bool IsLocalDrivePath(const base::FilePath& path) {
++  const std::wstring& v = path.value();
++  return v.size() >= 3 && base::IsAsciiAlpha(v[0]) && v[1] == L':' &&
++         v[2] == L'\\';
++}
++
++// Last component of the normalized final path of `h`: long name, case on
++// disk. An 8.3 alias opened as "THEME~1" comes back as its long name.
++std::optional<std::wstring> FinalLeaf(HANDLE h) {
++  std::wstring path(MAX_PATH, L'\0');
++  DWORD n = ::GetFinalPathNameByHandleW(
++      h, path.data(), static_cast<DWORD>(path.size()),
++      FILE_NAME_NORMALIZED | VOLUME_NAME_NONE);
++  if (n >= path.size()) {
++    path.resize(n);
++    n = ::GetFinalPathNameByHandleW(h, path.data(),
++                                    static_cast<DWORD>(path.size()),
++                                    FILE_NAME_NORMALIZED | VOLUME_NAME_NONE);
++  }
++  if (n == 0 || n >= path.size()) {
++    return std::nullopt;
++  }
++  path.resize(n);
++  const size_t slash = path.rfind(L'\\');
++  return slash == std::wstring::npos ? path : path.substr(slash + 1);
++}
++
++// Opens `path` itself (FILE_FLAG_OPEN_REPARSE_POINT: a symlink or junction
++// is opened, not followed) and checks it is a local disk object of the given
++// kind, not a reparse point, whose name on disk equals `want` without case
++// (`want` empty: name not checked, for the repository directory). Directory
++// handles are kept without FILE_SHARE_DELETE, so while held nothing checked
++// can be renamed, deleted or swapped for a link.
++base::win::ScopedHandle OpenConfined(const base::FilePath& path,
++                                     std::wstring_view want,
++                                     bool directory) {
++  const DWORD share =
++      FILE_SHARE_READ | FILE_SHARE_WRITE | (directory ? 0 : FILE_SHARE_DELETE);
++  base::win::ScopedHandle h(::CreateFileW(
++      path.value().c_str(), GENERIC_READ, share, nullptr, OPEN_EXISTING,
++      FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
++  BY_HANDLE_FILE_INFORMATION info;
++  if (!h.is_valid() || ::GetFileType(h.get()) != FILE_TYPE_DISK ||
++      !::GetFileInformationByHandle(h.get(), &info) ||
++      (info.dwFileAttributes &
++       (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DEVICE)) ||
++      !!(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != directory) {
++    return base::win::ScopedHandle();
++  }
++  if (!want.empty()) {
++    std::optional<std::wstring> leaf = FinalLeaf(h.get());
++    if (!leaf ||
++        ::CompareStringOrdinal(leaf->data(), static_cast<int>(leaf->size()),
++                               want.data(), static_cast<int>(want.size()),
++                               /*bIgnoreCase=*/TRUE) != CSTR_EQUAL) {
++      return base::win::ScopedHandle();
++    }
++  }
++  return h;
++}
++
++// The repository directory itself: local drive path, not a reparse point.
++base::win::ScopedHandle OpenRepoDir(const base::FilePath& dir) {
++  if (!IsLocalDrivePath(dir)) {
++    return base::win::ScopedHandle();
++  }
++  return OpenConfined(dir, std::wstring_view(), /*directory=*/true);
++}
+ #endif  // BUILDFLAG(IS_WIN)
+ 
+ // NFC, so "é" typed composed or decomposed is the same theme name. Input
+@@ -225,39 +338,19 @@
+ }
+ 
+ #if BUILDFLAG(IS_WIN)
+-// Plain Win32 read of a small file, the equivalent of the POSIX branch below:
+-// avoids base::File (UI thread blocking assertions); GetFileType keeps a
+-// pipe, console or other device in place of theme.json from blocking the UI
+-// thread (refused before any read, like O_NONBLOCK + S_ISREG); the attributes
+-// must be a plain file (not a directory, not a reparse point: the link itself
+-// is opened with FILE_FLAG_OPEN_REPARSE_POINT and refused, stricter than the
+-// POSIX branch); size capped at kMaxThemeFileBytes before and while reading.
+-// Full confinement of the repository on Windows is D3c.
+-std::optional<std::string> ReadSmallFile(const base::FilePath& path) {
+-  base::win::ScopedHandle file(::CreateFileW(
+-      path.value().c_str(), GENERIC_READ,
+-      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+-      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+-      nullptr));
+-  if (!file.is_valid() || ::GetFileType(file.get()) != FILE_TYPE_DISK) {
+-    return std::nullopt;
+-  }
+-  // The link itself was opened (FILE_FLAG_OPEN_REPARSE_POINT): a symlink or
+-  // junction in place of the file, or a directory, is refused.
+-  BY_HANDLE_FILE_INFORMATION info;
+-  if (!::GetFileInformationByHandle(file.get(), &info) ||
+-      (info.dwFileAttributes &
+-       (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY))) {
+-    return std::nullopt;
+-  }
+-  if (info.nFileSizeHigh != 0 || info.nFileSizeLow > kMaxThemeFileBytes) {
+-    return std::nullopt;
+-  }
++// Plain Win32 read of a small open file, the equivalent of the POSIX branch
++// below: avoids base::File (UI thread blocking assertions). The caller opened
++// it with OpenConfined: GetFileType keeps a pipe, console or other device in
++// place of theme.json from blocking the UI thread (refused before any read,
++// like O_NONBLOCK + S_ISREG), it is a plain file (not a directory, not a
++// reparse point, stricter than the POSIX branch); size capped at
++// kMaxThemeFileBytes before and while reading.
++std::optional<std::string> ReadSmallHandle(HANDLE file) {
+   std::string data;
+   char buf[4096];
+   while (true) {
+     DWORD n = 0;
+-    if (!::ReadFile(file.get(), buf, sizeof(buf), &n, nullptr)) {
++    if (!::ReadFile(file, buf, sizeof(buf), &n, nullptr)) {
+       return std::nullopt;
+     }
+     if (n == 0) {
+@@ -269,6 +362,35 @@
+     }
+   }
+ }
++
++// themes\<folder>\theme.json with every component confined (OpenConfined):
++// the repository, the folder and the file are held open while reading, none
++// may be a reparse point or an 8.3/case alias of another name.
++std::optional<std::string> ReadRepoThemeFile(const base::FilePath& dir,
++                                             const std::wstring& folder) {
++  if (!IsSafeWinComponent(folder)) {
++    return std::nullopt;
++  }
++  base::win::ScopedHandle repo = OpenRepoDir(dir);
++  if (!repo.is_valid()) {
++    return std::nullopt;
++  }
++  const base::FilePath folder_path = dir.Append(folder);
++  base::win::ScopedHandle theme_dir =
++      OpenConfined(folder_path, folder, /*directory=*/true);
++  if (!theme_dir.is_valid()) {
++    return std::nullopt;
++  }
++  const std::wstring file_name = base::ASCIIToWide(kThemeFileName);
++  base::win::ScopedHandle file = OpenConfined(
++      folder_path.Append(file_name), file_name, /*directory=*/false);
++  BY_HANDLE_FILE_INFORMATION info;
++  if (!file.is_valid() || !::GetFileInformationByHandle(file.get(), &info) ||
++      info.nFileSizeHigh != 0 || info.nFileSizeLow > kMaxThemeFileBytes) {
++    return std::nullopt;
++  }
++  return ReadSmallHandle(file.get());
++}
+ #else
+ // Reads an open fd of a regular file, capped at kMaxThemeFileBytes.
+ std::optional<std::string> ReadSmallFd(int fd) {
+@@ -317,7 +439,14 @@
+   const std::u16string key = FoldName(name);
+   std::optional<std::string> found;
+ #if BUILDFLAG(IS_WIN)
++  if (!OpenRepoDir(dir).is_valid()) {
++    return std::nullopt;
++  }
+   ForEachEntry(dir, [&](const WIN32_FIND_DATAW& entry) {
++    if (!(entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
++        (entry.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
++      return true;  // not a plain folder (a junction is never followed)
++    }
+     const std::string folder = base::WideToUTF8(entry.cFileName);
+     if (IsValidThemeName(folder) && FoldName(folder) == key) {
+       found = folder;
+@@ -348,8 +477,12 @@
+   if (!IsValidThemeName(folder) || IsReservedThemeName(folder)) {
+     return std::nullopt;
+   }
++#if BUILDFLAG(IS_WIN)
++  std::optional<std::string> json = ReadRepoThemeFile(dir, NativeName(folder));
++#else
+   std::optional<std::string> json =
+       ReadSmallFile(dir.Append(NativeName(folder)).AppendASCII(kThemeFileName));
++#endif
+   ThemeData theme;
+   if (!json || ParseThemeJson(*json, &theme) != ThemeParseResult::kOk ||
+       theme.name != NormalizeName(folder)) {
+@@ -360,6 +493,21 @@
+ 
+ std::vector<ThemeInfo> ScanRepo(base::FilePath dir) {
+   std::vector<ThemeInfo> found;
++#if BUILDFLAG(IS_WIN)
++  // Plain folders only: a junction or symlink is never followed.
++  if (OpenRepoDir(dir).is_valid()) {
++    ForEachEntry(dir, [&](const WIN32_FIND_DATAW& entry) {
++      if ((entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
++          !(entry.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
++        if (std::optional<ThemeData> theme =
++                LoadRepoTheme(dir, base::WideToUTF8(entry.cFileName))) {
++          found.push_back({std::move(*theme), /*builtin=*/false});
++        }
++      }
++      return true;
++    });
++  }
++#else
+   base::FileEnumerator enumerator(dir, /*recursive=*/false,
+                                   base::FileEnumerator::DIRECTORIES);
+   for (base::FilePath path = enumerator.Next(); !path.empty();
+@@ -369,6 +517,7 @@
+       found.push_back({std::move(*theme), /*builtin=*/false});
+     }
+   }
++#endif  // BUILDFLAG(IS_WIN)
+   std::sort(found.begin(), found.end(),
+             [](const ThemeInfo& a, const ThemeInfo& b) {
+               const std::u16string fa = FoldName(a.theme.name);
+@@ -397,6 +546,30 @@
+   }
+   const std::u16string key = FoldName(name);
+   base::FilePath existing;
++#if BUILDFLAG(IS_WIN)
++  // The repository must be a plain local folder, held (no FILE_SHARE_DELETE)
++  // until the install ends; a junction or symlink with the theme's name is
++  // refused instead of being moved aside and deleted.
++  base::win::ScopedHandle repo = OpenRepoDir(dir);
++  if (!repo.is_valid() || !IsSafeWinComponent(NativeName(name))) {
++    return InstallResult::kIoError;
++  }
++  bool existing_is_link = false;
++  ForEachEntry(dir, [&](const WIN32_FIND_DATAW& entry) {
++    const std::string folder = base::WideToUTF8(entry.cFileName);
++    if (IsValidThemeName(folder) && FoldName(folder) == key) {
++      existing = dir.Append(entry.cFileName);
++      existing_is_link =
++          (entry.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) ||
++          !(entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY);
++      return false;
++    }
++    return true;
++  });
++  if (existing_is_link) {
++    return InstallResult::kIoError;
++  }
++#else
+   {
+     base::FileEnumerator enumerator(dir, /*recursive=*/false,
+                                     base::FileEnumerator::DIRECTORIES);
+@@ -409,6 +582,7 @@
+       }
+     }
+   }
++#endif  // BUILDFLAG(IS_WIN)
+   if (!existing.empty() && !replace) {
+     return InstallResult::kConflict;
+   }
+@@ -507,9 +681,15 @@
+ }
+ 
+ bool IsValidThemeName(std::string_view name) {
+-  return !name.empty() && name.size() <= kMaxThemeNameBytes &&
+-         base::IsStringUTF8(name) && name[0] != '.' &&
+-         !HasControlOrSeparator(name, /*allow_slash=*/false);
++  const bool valid = !name.empty() && name.size() <= kMaxThemeNameBytes &&
++                     base::IsStringUTF8(name) && name[0] != '.' &&
++                     !HasControlOrSeparator(name, /*allow_slash=*/false);
++#if BUILDFLAG(IS_WIN)
++  // D3c: also a folder name Win32 opens back unchanged.
++  return valid && IsSafeWinComponent(base::UTF8ToWide(name));
++#else
++  return valid;
++#endif
+ }
+ 
+ bool IsReservedThemeName(std::string_view name) {
+--- a/chrome/browser/themes/aerographene_theme_repo_unittest.cc
++++ b/chrome/browser/themes/aerographene_theme_repo_unittest.cc
+@@ -20,6 +20,13 @@
+ #include <unistd.h>
+ #endif
+ 
++#if BUILDFLAG(IS_WIN)
++#include <windows.h>
++
++#include "base/strings/utf_string_conversions.h"
++#include "base/test/file_path_reparse_point_win.h"
++#endif
++
+ namespace aerographene {
+ namespace {
+ 
+@@ -198,7 +205,10 @@
+   }
+   EXPECT_EQ(ResolveTheme("meu tema").theme.radius, 0);
+   // Replaced in place: one folder, no staging or backup folder left.
++#if !BUILDFLAG(IS_WIN)
++  // (Windows: the file system ignores case, so the old spelling resolves.)
+   EXPECT_FALSE(base::PathExists(dir_.GetPath().AppendASCII("Meu Tema")));
++#endif
+   int folders = 0;
+   base::FileEnumerator enumerator(dir_.GetPath(), /*recursive=*/false,
+                                   base::FileEnumerator::DIRECTORIES);
+@@ -244,8 +254,8 @@
+ 
+ #if BUILDFLAG(IS_POSIX)
+   // A symlink named like a staging folder, pointing outside the repository,
+-  // is neither followed nor removed; its target stays intact. (Windows: the
+-  // junction case is tested with the confinement work, D3c.)
++  // is neither followed nor removed; its target stays intact. (Windows: see
++  // WindowsStagingJunctionKept.)
+   base::ScopedTempDir outside;
+   ASSERT_TRUE(outside.CreateUniqueTempDir());
+   ASSERT_TRUE(base::WriteFile(outside.GetPath().Append("keep.txt"), "x"));
+@@ -272,5 +282,107 @@
+   RemoveStaleStagingFolders(root.AppendASCII("nao-existe"), base::Minutes(1));
+ }
+ 
++#if BUILDFLAG(IS_WIN)
++// D3c: confinement of the repository on Windows.
++
++TEST_F(AerographeneThemeRepoTest, WindowsNameRules) {
++  for (const char* name :
++       {"CON", "con", "NUL.txt", "nul .x", "Aux", "PRN", "COM1", "lpt9.json",
++        "COM\xC2\xB9", "CONIN$", "a:b", "tema:$DATA", "tema.", "tema ",
++        "a<b", "a>b", "a|b", "a?b", "a*b", "a\"b"}) {
++    EXPECT_FALSE(IsValidThemeName(name)) << name;
++  }
++  EXPECT_TRUE(IsValidThemeName("console"));
++  EXPECT_TRUE(IsValidThemeName("COM10"));
++  EXPECT_TRUE(IsValidThemeName("Meu Tema"));
++  ThemeData theme;
++  EXPECT_EQ(ParseThemeJson(R"({"name":"CON"})", &theme),
++            ThemeParseResult::kInvalidName);
++  base::test::TestFuture<InstallResult, std::string> future;
++  InstallTheme(R"({"name":"nul"})", false, future.GetCallback());
++  EXPECT_EQ(future.Get<0>(), InstallResult::kInvalid);
++}
++
++TEST_F(AerographeneThemeRepoTest, WindowsJunctionFolderIsNotFollowed) {
++  base::ScopedTempDir outside;
++  ASSERT_TRUE(outside.CreateUniqueTempDir());
++  const base::FilePath target = outside.GetPath().AppendASCII("Fora");
++  ASSERT_TRUE(base::CreateDirectory(target));
++  ASSERT_TRUE(base::WriteFile(target.AppendASCII(kThemeFileName),
++                              R"({"name":"Fora"})"));
++  const base::FilePath link = dir_.GetPath().AppendASCII("Fora");
++  ASSERT_TRUE(base::CreateDirectory(link));
++  auto reparse = base::test::FilePathReparsePoint::Create(link, target);
++  ASSERT_TRUE(reparse);
++
++  EXPECT_EQ(ResolveTheme("Fora").theme.name, "default");
++  base::test::TestFuture<std::vector<ThemeInfo>> list;
++  ListThemes(list.GetCallback());
++  EXPECT_EQ(list.Get().size(), 2u);  // builtins only
++  // Replacing a junction with the theme's name is refused; the target stays.
++  base::test::TestFuture<InstallResult, std::string> install;
++  InstallTheme(R"({"name":"fora"})", true, install.GetCallback());
++  EXPECT_EQ(install.Get<0>(), InstallResult::kIoError);
++  EXPECT_TRUE(base::PathExists(target.AppendASCII(kThemeFileName)));
++}
++
++TEST_F(AerographeneThemeRepoTest, WindowsJunctionRepositoryIsRefused) {
++  WriteTheme("Meu Tema", kMinimal);
++  base::ScopedTempDir other;
++  ASSERT_TRUE(other.CreateUniqueTempDir());
++  const base::FilePath alias = other.GetPath().AppendASCII("themes");
++  ASSERT_TRUE(base::CreateDirectory(alias));
++  auto reparse =
++      base::test::FilePathReparsePoint::Create(alias, dir_.GetPath());
++  ASSERT_TRUE(reparse);
++  SetThemeRepoDirForTesting(alias);
++  EXPECT_EQ(ResolveTheme("Meu Tema").theme.name, "default");
++  base::test::TestFuture<InstallResult, std::string> install;
++  InstallTheme(R"({"name":"Outro"})", false, install.GetCallback());
++  EXPECT_EQ(install.Get<0>(), InstallResult::kIoError);
++  EXPECT_FALSE(base::PathExists(dir_.GetPath().AppendASCII("Outro")));
++}
++
++TEST_F(AerographeneThemeRepoTest, WindowsUncAndDevicePathsAreRefused) {
++  WriteTheme("Meu Tema", kMinimal);
++  const std::wstring& v = dir_.GetPath().value();
++  for (const std::wstring& path :
++       {L"\\\\?\\" + v, L"\\\\.\\" + v,
++        std::wstring(L"\\\\localhost\\") + v[0] + L"$" + v.substr(2)}) {
++    SetThemeRepoDirForTesting(base::FilePath(path));
++    EXPECT_EQ(ResolveTheme("Meu Tema").theme.name, "default");
++  }
++}
++
++TEST_F(AerographeneThemeRepoTest, WindowsShortNameAliasIsRefused) {
++  WriteTheme("Tema Comprido Longo", R"({"name":"Tema Comprido Longo"})");
++  EXPECT_EQ(ResolveTheme("Tema Comprido Longo").theme.name,
++            "Tema Comprido Longo");
++  const base::FilePath dir = dir_.GetPath().AppendASCII("Tema Comprido Longo");
++  wchar_t buf[MAX_PATH];
++  const DWORD n = ::GetShortPathNameW(dir.value().c_str(), buf, MAX_PATH);
++  ASSERT_GT(n, 0u);
++  const std::wstring leaf =
++      base::FilePath(std::wstring(buf, n)).BaseName().value();
++  if (leaf == dir.BaseName().value()) {
++    GTEST_SKIP() << "8.3 names disabled on this volume";
++  }
++  EXPECT_EQ(ResolveTheme(base::WideToUTF8(leaf)).theme.name, "default");
++}
++
++TEST_F(AerographeneThemeRepoTest, WindowsStagingJunctionKept) {
++  base::ScopedTempDir outside;
++  ASSERT_TRUE(outside.CreateUniqueTempDir());
++  ASSERT_TRUE(base::WriteFile(outside.GetPath().AppendASCII("keep.txt"), "x"));
++  const base::FilePath link = dir_.GetPath().AppendASCII(".install-link");
++  ASSERT_TRUE(base::CreateDirectory(link));
++  auto reparse =
++      base::test::FilePathReparsePoint::Create(link, outside.GetPath());
++  ASSERT_TRUE(reparse);
++  RemoveStaleStagingFolders(dir_.GetPath(), base::TimeDelta());
++  EXPECT_TRUE(base::PathExists(outside.GetPath().AppendASCII("keep.txt")));
++}
++#endif  // BUILDFLAG(IS_WIN)
++
+ }  // namespace
+ }  // namespace aerographene
+--- a/chrome/test/BUILD.gn
++++ b/chrome/test/BUILD.gn
+@@ -6960,6 +6960,11 @@
+     # aerographene: terminal over ConPTY (D3e).
+     deps += [ "//chrome/browser/ui/webui/aero_terminal:unit_tests" ]
+   }
++
++  if (is_win) {
++    # aerographene D3c: confined notes vault reader.
++    deps += [ "//chrome/browser/ui/webui/aero_notes:unit_tests" ]
++  }
+ 
+   if (is_chromeos) {
+     sources += [

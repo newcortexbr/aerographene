@@ -1,0 +1,464 @@
+aerographene: notas — rolagem por painel e interface estilo Obsidian (v0.3, fatia F2).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/notes-b6.patch (e, por ele, a cadeia notes-*).
+Só recursos da página chrome://notes (html/css/js); sem mudança no backend.
+Corrige a página que estourava a janela (grid sem minmax(0,1fr)): árvore, editor
+e resultados da busca rolam cada um no seu painel. Cabeçalho com breadcrumb e
+estado (salvo/alterado/conflito), cabeçalho da vault com ações, estados vazios,
+contagem de palavras, atalhos visíveis, lateral redimensionável (duplo clique
+restaura). "+ pasta" fica desabilitado: o backend só cria notas.
+
+diff --git a/chrome/browser/resources/aero_notes/notes.css b/chrome/browser/resources/aero_notes/notes.css
+index 71286cd..c8b24d6 100644
+--- a/chrome/browser/resources/aero_notes/notes.css
++++ b/chrome/browser/resources/aero_notes/notes.css
+@@ -6,6 +6,7 @@
+   --line: #262a3a;
+   --accent: #b69cff;
+   --vault-w: 260px;
++  --mono: "JetBrains Mono", "DejaVu Sans Mono", ui-monospace, monospace;
+ }
+ @media (prefers-color-scheme: light) {
+   :root {
+@@ -26,13 +27,15 @@ body {
+ }
+ .app {
+   display: grid;
+-  grid-template-columns: var(--vault-w) 4px 1fr;
++  grid-template-columns: var(--vault-w) 5px minmax(0, 1fr);
++  grid-template-rows: minmax(0, 1fr);
+   height: 100%;
+ }
+ .vault {
+   background: var(--panel);
+   display: flex;
+   flex-direction: column;
++  min-height: 0;
+   min-width: 0;
+ }
+ .vault-head, .note-head {
+@@ -54,13 +57,13 @@ body {
+ .vault-pick {
+   background: none;
+   border: 1px solid var(--line);
+-  border-radius: 4px;
++  border-radius: 0;
+   color: var(--text2);
+   font: inherit;
+   font-size: 12px;
+   padding: 2px 8px;
+ }
+-.tree { flex: 1; overflow: auto; padding: 8px 0; }
++.tree { flex: 1; min-height: 0; overflow: auto; padding: 8px 0; }
+ .empty, .hint { color: var(--text2); padding: 8px 12px; }
+ .splitter {
+   background: var(--line);
+@@ -70,16 +73,16 @@ body {
+   background: var(--accent);
+   outline: none;
+ }
+-.note { display: flex; flex-direction: column; min-width: 0; }
++.note { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+ .note-title { color: var(--text2); }
+ .editor {
+   flex: 1;
+-  margin: 0 auto;
+-  max-width: 820px;
++  min-height: 0;
+   overflow: auto;
+   padding: 32px 24px;
+   width: 100%;
+ }
++.editor > * { margin-left: auto; margin-right: auto; max-width: 820px; }
+ .note-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ .note-state { color: var(--text2); font-size: 12px; }
+ .note-state.dirty { color: var(--accent); }
+@@ -99,14 +102,15 @@ body {
+ .banner input {
+   background: var(--bg);
+   border: 1px solid var(--line);
+-  border-radius: 4px;
++  border-radius: 0;
+   color: var(--text);
+   flex: 1 1 260px;
+   font: inherit;
+   padding: 2px 6px;
+ }
+ .banner .danger { border-color: #e06c75; color: #e06c75; }
+-.node.active { background: var(--line); color: var(--text); }
++.node.active { background: var(--line); box-shadow: inset 2px 0 0 var(--accent); color: var(--text); }
++.node.active.file { font-weight: 600; }
+ /* live preview: raw line in edit, the rest rendered */
+ .chunk .ln.blank { min-height: 1.5em; }
+ .chunk .ln.raw {
+@@ -114,7 +118,7 @@ body {
+   min-height: 1.5em;
+   white-space: pre-wrap;
+ }
+-.chunk.fence.editing { background: var(--panel); border-radius: 4px; }
++.chunk.fence.editing { background: var(--panel); border-radius: 0; }
+ .ln-input {
+   background: transparent;
+   border: 0;
+@@ -140,10 +144,10 @@ body {
+ .search { padding: 6px 8px; }
+ .search input {
+   width: 100%; box-sizing: border-box; font: inherit; padding: 4px 8px;
+-  border: 1px solid var(--border, #8884); border-radius: 6px;
++  border: 1px solid var(--line); border-radius: 0;
+   background: transparent; color: inherit;
+ }
+-.results { overflow: auto; flex: 1; }
++.results { overflow: auto; flex: 1; min-height: 0; }
+ .results[hidden], .tree[hidden] { display: none; }
+ .hit { padding: 4px 12px; cursor: pointer; }
+ .hit:hover, .hit:focus-visible { background: #8882; outline: none; }
+@@ -156,3 +160,52 @@ body {
+ .md img.vault-img { max-width: 100%; height: auto; }
+ .img-missing { opacity: 0.6; font-style: italic; }
+ .vault-name.nowatch::after { content: " (sem observar arquivos)"; opacity: 0.6; font-size: 0.8em; }
++
++/* F2: rolagem por painel e interface (quadrada, contornos, rótulos mono) */
++.vault, .note-head, .vault-actions, .vault-foot, .note-foot { border-color: var(--line); }
++.vault { border-right: 1px solid var(--line); }
++.lbl, kbd, .crumbs, .note-state, .note-foot, .vault-foot, .vault-pick, .empty-title {
++  font-family: var(--mono);
++  font-size: 11px;
++  letter-spacing: 0.02em;
++}
++.lbl { color: var(--text2); text-transform: uppercase; }
++.vault-name { font-family: var(--mono); font-size: 12px; }
++.vault-head { height: 36px; }
++.vault-actions { border-bottom: 1px solid var(--line); display: flex; gap: 6px; padding: 6px 8px; }
++.vault-actions .vault-pick { flex: 1; padding: 3px 6px; }
++.vault-pick:focus-visible, .search input:focus-visible, .banner input:focus-visible {
++  border-color: var(--accent);
++  outline: 1px solid var(--accent);
++}
++.search input { font-family: var(--mono); font-size: 12px; }
++.vault-foot, .note-foot {
++  border-top: 1px solid var(--line);
++  color: var(--text2);
++  display: flex;
++  flex-wrap: wrap;
++  gap: 4px 12px;
++  padding: 6px 12px;
++}
++.note-foot { justify-content: flex-end; }
++kbd {
++  background: var(--bg);
++  border: 1px solid var(--line);
++  color: var(--text);
++  padding: 0 4px;
++}
++.note-head { height: 36px; }
++.crumbs { align-items: center; color: var(--text2); display: flex; flex: none; max-width: 40%; overflow: hidden; white-space: nowrap; }
++.crumbs:empty { display: none; }
++.crumb { overflow: hidden; text-overflow: ellipsis; }
++.sep { color: var(--accent); padding: 0 4px; }
++.note-title { color: var(--text); font-family: var(--mono); font-size: 12px; }
++.note-state { border: 1px solid var(--line); padding: 0 6px; }
++.note-state:empty { display: none; }
++.note-state.conflict { border-color: #e06c75; color: #e06c75; }
++.empty-state { border: 1px solid var(--line); margin-top: 8vh; padding: 16px 20px; }
++.empty-state p { color: var(--text2); margin: 6px 0; }
++.empty-state .empty-title { color: var(--accent); text-transform: uppercase; }
++.splitter { transition: background 0.1s; }
++.node:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
++.node.dir { font-family: var(--mono); font-size: 12px; }
+diff --git a/chrome/browser/resources/aero_notes/notes.html b/chrome/browser/resources/aero_notes/notes.html
+index e77a2ff..4262fe9 100644
+--- a/chrome/browser/resources/aero_notes/notes.html
++++ b/chrome/browser/resources/aero_notes/notes.html
+@@ -11,26 +11,39 @@
+ <div class="app" id="app">
+   <aside class="vault" id="vault" aria-label="vault">
+     <header class="vault-head">
++      <span class="lbl">vault</span>
+       <span class="vault-name" id="vaultName">vault</span>
+       <button class="vault-pick" id="vaultPick" type="button" disabled
+           title="escolher pasta (ainda não disponível)">escolher pasta</button>
+-      <button class="vault-pick" id="btnNew" type="button" disabled
+-          title="nova nota">+ nota</button>
+     </header>
++    <div class="vault-actions" role="toolbar" aria-label="ações da vault">
++      <button class="vault-pick" id="btnNew" type="button" disabled
++          title="nova nota (Ctrl+N)">+ nota</button>
++      <button class="vault-pick" id="btnNewDir" type="button" disabled
++          title="nova pasta: ainda não disponível (o backend só cria notas)">+ pasta</button>
++      <button class="vault-pick" id="btnFind" type="button" disabled
++          title="buscar na vault (Ctrl+K)">buscar</button>
++    </div>
+     <div class="search">
+       <input id="search" type="search" disabled spellcheck="false"
+-          placeholder="buscar na vault (nome e conteúdo)"
++          placeholder="buscar na vault"
+           aria-label="buscar na vault">
+     </div>
+     <nav class="results" id="results" aria-label="resultados da busca" hidden></nav>
+     <nav class="tree" id="tree" role="tree" aria-label="arquivos da vault">
+       <p class="empty">nenhuma vault escolhida</p>
+     </nav>
++    <footer class="vault-foot" id="vaultFoot">
++      <span><kbd>Ctrl+S</kbd> salvar</span>
++      <span><kbd>Ctrl+N</kbd> nova nota</span>
++      <span><kbd>Ctrl+K</kbd> buscar</span>
++    </footer>
+   </aside>
+   <div class="splitter" id="splitter" role="separator"
+       aria-orientation="vertical" aria-label="redimensionar vault" tabindex="0"></div>
+   <main class="note" id="note">
+     <header class="note-head">
++      <span class="crumbs" id="crumbs" aria-label="caminho da nota"></span>
+       <span class="note-title" id="noteTitle">sem nota aberta</span>
+       <span class="note-state" id="noteState" role="status"></span>
+       <button class="vault-pick" id="btnSave" type="button" disabled
+@@ -43,6 +56,9 @@
+       <p class="hint">Pick a vault folder to start.</p>
+       <button class="vault-pick empty-pick" id="emptyPick" type="button">Choose folder</button>
+     </div>
++    <footer class="note-foot">
++      <span id="noteStats"></span>
++    </footer>
+   </main>
+ </div>
+ </body>
+diff --git a/chrome/browser/resources/aero_notes/notes.js b/chrome/browser/resources/aero_notes/notes.js
+index 246d277..d4c5efb 100644
+--- a/chrome/browser/resources/aero_notes/notes.js
++++ b/chrome/browser/resources/aero_notes/notes.js
+@@ -37,6 +37,7 @@ function initSplitter() {
+     }
+     splitter.classList.remove('dragging');
+   };
++  splitter.addEventListener('dblclick', () => setVaultWidth(260));
+   splitter.addEventListener('pointerup', stop);
+   splitter.addEventListener('pointercancel', stop);
+   splitter.addEventListener('keydown', (e) => {
+@@ -96,6 +97,9 @@ const emptyNodes = Array.from(editor.childNodes);
+ const noteState = document.getElementById('noteState');
+ const banner = document.getElementById('banner');
+ const btnNew = document.getElementById('btnNew');
++const btnFind = document.getElementById('btnFind');
++const crumbs = document.getElementById('crumbs');
++const noteStats = document.getElementById('noteStats');
+ const search = document.getElementById('search');
+ const results = document.getElementById('results');
+ const btnSave = document.getElementById('btnSave');
+@@ -110,6 +114,7 @@ let vaultTitle = '';
+ let needCheck = false;  // external-change check postponed (saving / banner)
+ let dismissedMtime = -1;  // disk version the user already answered about
+ let goneNotified = '';
++let conflict = false;  // a save hit a disk change and is not resolved yet
+ 
+ const STATUS_TEXT = {
+   conflict: 'o arquivo mudou no disco',
+@@ -195,15 +200,69 @@ async function fillDir(container, path, depth) {
+     });
+   }
+   if (!entries.length) {
+-    message(container, 'vazio');
++    message(container, depth ? 'vazio' :
++        'vault sem notas. Crie uma com "+ nota" ou Ctrl+N.');
+   }
+   await Promise.all(nested);
++  updateStats();
++}
++
++// Breadcrumb: the note's folders (the file name is #noteTitle).
++function setCrumbs(path) {
++  crumbs.replaceChildren();
++  const dirs = path ? path.split('/').slice(0, -1) : [];
++  for (const d of dirs) {
++    const s = document.createElement('span');
++    s.className = 'crumb';
++    s.textContent = d;
++    const sep = document.createElement('span');
++    sep.className = 'sep';
++    sep.textContent = '/';
++    crumbs.append(s, sep);
++  }
++}
++
++// Status bar: words/characters of the open note, else visible note count.
++function updateStats() {
++  if (current && doc) {
++    const text = doc.getText();
++    const words = text.split(/\s+/).filter(Boolean).length;
++    noteStats.textContent = `${words} palavras · ${text.length} caracteres`;
++  } else if (vaultTitle) {
++    const n = tree.querySelectorAll('.node.file').length;
++    noteStats.textContent = `${n} notas visíveis`;
++  } else {
++    noteStats.textContent = '';
++  }
++}
++
++// Empty state with the useful shortcuts (DOM only, no innerHTML).
++function emptyState(title) {
++  const box = document.createElement('div');
++  box.className = 'empty-state';
++  const h = document.createElement('p');
++  h.className = 'empty-title';
++  h.textContent = title;
++  box.append(h);
++  for (const [key, text] of [['Ctrl+N', 'criar uma nota'],
++                             ['Ctrl+K', 'buscar na vault'],
++                             ['Ctrl+S', 'salvar a nota aberta']]) {
++    const row = document.createElement('p');
++    const kbd = document.createElement('kbd');
++    kbd.textContent = key;
++    row.append(kbd, ` ${text}`);
++    box.append(row);
++  }
++  return box;
+ }
+ 
+ function updateState() {
+   const dirty = !!doc && doc.isDirty();
+-  noteState.textContent = !current ? '' : dirty ? '● alterado' : 'salvo';
+-  noteState.classList.toggle('dirty', dirty);
++  noteState.textContent = !current ? '' :
++      conflict ? '! conflito' : dirty ? '● alterado' : 'salvo';
++  noteState.classList.toggle('dirty', dirty && !conflict);
++  noteState.classList.toggle('conflict', !!current && conflict);
++  updateStats();
+   btnSave.disabled = !current || !dirty;
+   btnRename.disabled = !current;
+   btnDelete.disabled = !current;
+@@ -318,7 +377,9 @@ function showNote(path, text, fileMtime) {
+   mtime = fileMtime;
+   goneNotified = '';
+   dismissedMtime = -1;
++  conflict = false;
+   noteTitle.textContent = baseName(path);
++  setCrumbs(path);
+   for (const n of tree.querySelectorAll('.node.active')) {
+     n.classList.remove('active');
+   }
+@@ -344,11 +405,13 @@ function showNote(path, text, fileMtime) {
+ function clearNote() {
+   current = '';
+   doc = null;
++  conflict = false;
+   noteTitle.textContent = 'sem nota aberta';
+-  const hint = document.createElement('p');
+-  hint.className = 'hint';
+-  hint.textContent = 'Select a note from the vault tree.';
+-  editor.replaceChildren(hint);
++  setCrumbs('');
++  for (const n of tree.querySelectorAll('.node.active')) {
++    n.classList.remove('active');
++  }
++  editor.replaceChildren(emptyState('nenhuma nota aberta'));
+   updateState();
+ }
+ 
+@@ -389,6 +452,9 @@ async function saveNow(overwrite) {
+       }
+     }
+     banner.hidden = true;
++    if (path === current) {
++      conflict = false;
++    }
+     updateState();
+     return true;
+   }
+@@ -426,6 +492,10 @@ function conflictCopyName(path) {
+ }
+ 
+ async function resolveConflict(path, text) {
++  if (path === current) {
++    conflict = true;
++    updateState();
++  }
+   const a = await ask(
+       `${baseName(path)} mudou no disco depois de aberta. ` +
+           'O seu texto continua no editor; nada foi gravado.',
+@@ -462,6 +532,7 @@ async function refreshTree() {
+   const top = tree.scrollTop;
+   tree.replaceChildren(...fresh.childNodes);
+   tree.scrollTop = top;
++  updateStats();
+ }
+ 
+ async function newNote() {
+@@ -525,6 +596,7 @@ async function renameNote() {
+   // unsaved text stays in the editor.
+   current = to;
+   noteTitle.textContent = baseName(to);
++  setCrumbs(to);
+   await refreshTree();
+   updateState();
+ }
+@@ -555,6 +627,7 @@ async function deleteNote() {
+ }
+ 
+ btnNew.addEventListener('click', newNote);
++btnFind.addEventListener('click', focusSearch);
+ btnSave.addEventListener('click', () => save());
+ btnRename.addEventListener('click', renameNote);
+ btnDelete.addEventListener('click', deleteNote);
+@@ -838,37 +911,53 @@ async function startWatch() {
+   vaultName.classList.toggle('nowatch', !ok);
+ }
+ 
+-window.addEventListener('keydown', (e) => {
+-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'f' &&
+-      !search.disabled) {
+-    e.preventDefault();
++function focusSearch() {
++  if (!search.disabled) {
+     search.focus();
+     search.select();
+   }
++}
++
++// Ctrl+K / Ctrl+Shift+F: search. Ctrl+N: new note (the browser may reserve
++// it for a new window; the button works either way).
++window.addEventListener('keydown', (e) => {
++  if (!(e.ctrlKey || e.metaKey) || search.disabled) {
++    return;
++  }
++  const k = e.key.toLowerCase();
++  if ((k === 'k' && !e.shiftKey) || (k === 'f' && e.shiftKey)) {
++    e.preventDefault();
++    focusSearch();
++  } else if (k === 'n' && !e.shiftKey && !btnNew.disabled) {
++    e.preventDefault();
++    newNote();
++  }
+ });
+ 
+ function showVault(info) {
+   if (!info || !info.path) {
+     vaultName.textContent = 'vault';
+     btnNew.disabled = true;
++    btnFind.disabled = true;
++    vaultTitle = '';
++    updateStats();
+     document.title = 'o: notas';
+     search.disabled = true;
+     message(tree, 'nenhuma vault escolhida');
+     editor.replaceChildren(...emptyNodes);
+     return;
+   }
+-  const hint = document.createElement('p');
+-  hint.className = 'hint';
+-  hint.textContent = 'Select a note from the vault tree.';
+   if (!current) {
+-    editor.replaceChildren(hint);
++    editor.replaceChildren(emptyState('nenhuma nota aberta'));
+   }
+   vaultName.textContent = info.name || info.path;
+   vaultName.title = info.path;
+   // Tab title: always the vault, never the open file.
+   vaultTitle = info.name || info.path;
+   document.title = `o: ${vaultTitle}`;
++  updateStats();
+   btnNew.disabled = false;
++  btnFind.disabled = false;
+   search.disabled = false;
+   search.value = '';
+   results.hidden = true;

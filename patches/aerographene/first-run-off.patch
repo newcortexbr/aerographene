@@ -1,0 +1,52 @@
+# aerographene: sem first-run nativo do Chromium (FRE do seletor de perfil), também com --force-first-run.
+# Substitui o hunk de first_run_service.cc de helium/core/onboarding-page.patch (Helium, GPL-3.0), que saiu da série.
+# Perfil novo abre aerographene://setup (onboarding-setup.patch) uma vez, no lugar da nova aba:
+# StartupBrowserCreatorImpl::DetermineStartupTabs, só perfil novo (IsNewProfile), sem URL na linha
+# de comando, sem --no-first-run, nunca depois de concluído (aerographene.onboarding_completed)
+# e nunca em anônimo/convidado. Depende de onboarding-setup.patch.
+#
+--- a/chrome/browser/ui/startup/first_run_service.cc
++++ b/chrome/browser/ui/startup/first_run_service.cc
+@@ -48,16 +48,9 @@
+ }
+ 
+ bool IsFirstRunEligibleProcess() {
+-  if (!first_run::IsChromeFirstRun()) {
+-    return false;
+-  }
+-
+-  // TODO(crbug.com/40232971): `IsChromeFirstRun()` should be a sufficient check
+-  // for Dice platforms. We currently keep this because some tests add
+-  // `--force-first-run` while keeping `--no-first-run`. We should updated the
+-  // affected tests to handle correctly the FRE opening instead of a tab.
+-  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
+-      switches::kNoFirstRun);
++  // aerographene: no native first-run experience (profile picker FRE), also
++  // for forced first-run launches; a new profile opens the new tab page.
++  return false;
+ }
+ 
+ void SetFirstRunFinished(ProfilePicker::FirstRunFinishReason reason) {
+--- a/chrome/browser/ui/startup/startup_browser_creator_impl.cc
++++ b/chrome/browser/ui/startup/startup_browser_creator_impl.cc
+@@ -748,6 +748,20 @@
+             launch_result};
+   }
+ 
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
++  // aerographene: a new profile (space) opens the first-run page once, instead
++  // of the new tab page. Not for URLs given on the command line, not with
++  // --no-first-run (tests, benchmarks) and never again once the page was
++  // finished or skipped (pref). Incognito and guest returned above.
++  if (launch_result == LaunchResult::kNormally && profile_->IsNewProfile() &&
++      !command_line_->HasSwitch(switches::kNoFirstRun) &&
++      !profile_->GetPrefs()->GetBoolean(
++          prefs::kAerographeneOnboardingCompleted)) {
++    return {StartupTabs({StartupTab(GURL(chrome::kChromeUISetupURL))}),
++            LaunchResult::kWithGivenUrls};
++  }
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
++
+   // A trigger on a profile may indicate that we should show a tab which
+   // offers to reset the user's settings.  When this appears, it is first, and
+   // may be shown alongside command-line tabs.

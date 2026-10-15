@@ -1,4 +1,4 @@
-# aerographene: patch portado sem alteração do conteúdo do diff.
+# aerographene: rebaseado sem keyboard-shortcuts e browser-window-context-menu: IDs de layout no lugar do bloco ChromeOS; submenu de layout em bloco próprio no menu da janela (sem o item de personalizar).
 # Origem: https://github.com/imputnet/helium (tag 0.18.3, Chromium 154.0.8037.97)
 # Commit: 57a40ad82583d21787cff0500150539ce54c5960
 # Caminho original: patches/helium/ui/layout/context-menu.patch
@@ -6,19 +6,20 @@
 #
 --- a/chrome/app/chrome_command_ids.h
 +++ b/chrome/app/chrome_command_ids.h
-@@ -113,15 +113,12 @@
+@@ -111,15 +111,13 @@
+ #define IDC_WEB_APP_MENU_APP_INFO       34074
+ #define IDC_WEB_APP_UPGRADE_DIALOG      34075
  
- // Helium commands
- #define IDC_COPY_OR_INSPECT_SHORTCUT    34080
--
 -#if BUILDFLAG(IS_CHROMEOS)
 -// Move window to other user commands
+-#define IDC_VISIT_DESKTOP_OF_LRU_USER_2 34080
 -#define IDC_VISIT_DESKTOP_OF_LRU_USER_3 34081
 -#define IDC_VISIT_DESKTOP_OF_LRU_USER_4 34082
 -#define IDC_VISIT_DESKTOP_OF_LRU_USER_5 34083
 -#define IDC_VISIT_DESKTOP_OF_LRU_USER_NEXT IDC_VISIT_DESKTOP_OF_LRU_USER_2
 -#define IDC_VISIT_DESKTOP_OF_LRU_USER_LAST IDC_VISIT_DESKTOP_OF_LRU_USER_5
 -#endif
++// Helium commands
 +#define IDC_BROWSER_LAYOUT_MENU         34081
 +#define IDC_BROWSER_LAYOUT_CLASSIC      34082
 +#define IDC_BROWSER_LAYOUT_COMPACT      34083
@@ -30,7 +31,7 @@
  #define IDC_ADD_NEW_TAB_TO_GROUP      34100
 --- a/chrome/app/generated_resources.grd
 +++ b/chrome/app/generated_resources.grd
-@@ -10603,6 +10603,51 @@ Keep your key file in a safe place. You
+@@ -10463,6 +10463,51 @@ Keep your key file in a safe place. You will need it to create new versions of y
          Use the split view menu to switch between side by side and stacked layouts.
        </message>
  
@@ -92,7 +93,7 @@
  #include "chrome/browser/ui/tabs/tab_enums.h"
  #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
  #include "chrome/browser/ui/tabs/tab_strip_user_gesture_details.h"
-@@ -300,6 +301,8 @@ void ToggleContextualTasksSidePanelZeroS
+@@ -300,6 +301,8 @@ void ToggleContextualTasksSidePanelZeroState(BrowserWindowInterface* browser);
  void ToggleVerticalTabs(BrowserWindowInterface* browser);
  void ToggleVerticalTabsExpandOnHover(BrowserWindowInterface* browser);
  void ToggleCollapseVerticalTabs(BrowserWindowInterface* browser);
@@ -111,7 +112,7 @@
  #include "chrome/browser/ui/intent_picker_tab_helper.h"
  #include "chrome/browser/ui/lens/lens_search_controller.h"
  #include "chrome/browser/ui/location_bar/location_bar.h"
-@@ -2622,6 +2623,20 @@ void ToggleCollapseVerticalTabs(BrowserW
+@@ -2607,6 +2608,20 @@ void ToggleCollapseVerticalTabs(BrowserWindowInterface* browser) {
    controller->RequestCollapse(collapse);
  }
  
@@ -134,7 +135,7 @@
        browser->GetTabStripModel()->GetActiveWebContents();
 --- a/chrome/browser/ui/browser_command_controller.cc
 +++ b/chrome/browser/ui/browser_command_controller.cc
-@@ -863,6 +863,21 @@ void BrowserCommandController::HandleCom
+@@ -855,6 +855,21 @@ void BrowserCommandController::HandleCommandWithDisposition(
      case IDC_NAME_WINDOW:
        PromptToNameWindow(browser_);
        break;
@@ -156,7 +157,7 @@
  
  #if BUILDFLAG(IS_CHROMEOS)
      case IDC_TAKE_SCREENSHOT:
-@@ -1772,6 +1787,15 @@ void BrowserCommandController::InitComma
+@@ -1743,6 +1758,15 @@ void BrowserCommandController::InitCommandState() {
    command_updater_->UpdateCommandEnabled(IDC_SHOW_SEARCH_TOOLS, true);
    command_updater_->UpdateCommandEnabled(IDC_SHOW_AI_MODE_OMNIBOX_BUTTON, true);
  
@@ -206,7 +207,7 @@
  #include "chrome/browser/ui/toolbar/app_menu_model.h"
  #include "chrome/browser/ui/ui_features.h"
  #include "chrome/browser/ui/web_applications/app_browser_controller.h"
-@@ -76,14 +76,6 @@ void AddItemWithIconMaybe(ui::SimpleMenu
+@@ -76,14 +76,6 @@ void AddItemWithIconMaybe(ui::SimpleMenuModel* model,
  
  }  // namespace
  
@@ -221,10 +222,13 @@
  SystemMenuModelBuilder::SystemMenuModelBuilder(
      ui::AcceleratorProvider* provider,
      BrowserWindowInterface* browser)
-@@ -177,6 +169,29 @@ void SystemMenuModelBuilder::BuildSystem
- 
-   if (!browser()->GetProfile()->IsOffTheRecord()) {
-     model->AddSeparator(ui::NORMAL_SEPARATOR);
+@@ -174,6 +166,33 @@ void SystemMenuModelBuilder::BuildSystemMenuForBrowserWindow(
+   AddItemWithIconMaybe(model, IDC_NAME_WINDOW, IDS_NAME_WINDOW,
+                        kNameWindowOldIcon);
+ #endif  // BUILDFLAG(IS_MAC)
++
++  if (!browser()->GetProfile()->IsOffTheRecord()) {
++    model->AddSeparator(ui::NORMAL_SEPARATOR);
 +
 +    browser_layout_menu_contents_ =
 +        std::make_unique<ui::SimpleMenuModel>(&menu_delegate_);
@@ -247,11 +251,12 @@
 +    model->AddSubMenuWithStringId(IDC_BROWSER_LAYOUT_MENU,
 +                                  IDS_BROWSER_LAYOUT_MENU,
 +                                  browser_layout_menu_contents_.get());
++  }
 +
-     model->AddItemWithStringId(IDC_SHOW_CUSTOMIZE_CHROME_SIDE_PANEL,
-                                IDS_SHOW_CUSTOMIZE_CHROME_SIDE_PANEL);
-   }
-@@ -195,72 +210,6 @@ void SystemMenuModelBuilder::BuildSystem
+   model->AddSeparator(ui::NORMAL_SEPARATOR);
+   model->AddItemWithStringId(IDC_TAB_SEARCH_TOGGLE_PIN,
+                              IDS_TAB_STRIP_PIN_TAB_SEARCH);
+@@ -188,72 +207,6 @@ void SystemMenuModelBuilder::BuildSystemMenuForBrowserWindow(
    }
  #endif  // BUILDFLAG(IS_WIN)
  
@@ -334,7 +339,7 @@
  #include "chrome/browser/ui/tabs/features.h"
  #include "chrome/browser/ui/tabs/tab_strip_prefs.h"
  #include "chrome/browser/ui/tabs/vertical_tab_strip_metrics.h"
-@@ -58,6 +59,34 @@ bool SystemMenuModelDelegate::IsCommandI
+@@ -58,6 +59,34 @@ bool SystemMenuModelDelegate::IsCommandIdChecked(int command_id) const {
      return !prefs->GetBoolean(prefs::kUseCustomChromeFrame);
    }
  #endif
@@ -369,7 +374,7 @@
    return false;
  }
  
-@@ -121,6 +150,13 @@ bool SystemMenuModelDelegate::IsCommandI
+@@ -121,6 +150,13 @@ bool SystemMenuModelDelegate::IsCommandIdVisible(int command_id) const {
      }
      return false;
    }

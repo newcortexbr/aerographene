@@ -1,0 +1,1592 @@
+aerographene: terminal — Windows com ConPTY e Job Object (v0.3, fatia D3e).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/terminal-c6b.patch (e toda a série do terminal).
+Propósito: liga chrome://terminal no Windows (10 1809+ e 11).
+TerminalSession ganha terminal_session_win.cc: CreatePseudoConsole com dois
+pipes nomeados overlapped, CreateProcessW com
+PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, processo e filhos num Job Object com
+JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, ambiente mínimo e nenhum handle herdado
+além da console; shell pwsh -> powershell -> %ComSpec% -> System32\cmd.exe
+(só caminhos absolutos existentes). ReadSome/read_event/write_event/
+process_handle substituem master_fd; TerminalHost usa base::win::ObjectWatcher
+(saída, escrita, fim do processo). Resumo lista discos fixos. Guardas
+IS_LINUX passam a IS_LINUX || IS_WIN em BUILD.gn, grd, configs e omnibox
+(t:). Testes: terminal_session_win_unittest.cc em chrome/test:unit_tests.
+Linux inalterado.
+
+diff --git a/chrome/browser/browser_resources.grd b/chrome/browser/browser_resources.grd
+index fa65c9f..b624684 100644
+--- a/chrome/browser/browser_resources.grd
++++ b/chrome/browser/browser_resources.grd
+@@ -114,7 +114,7 @@
+         <include name="IDR_AERO_NOTES_MARKDOWN_JS" file="resources\aero_notes\markdown.js" type="BINDATA" />
+         <include name="IDR_AERO_NOTES_EDITOR_JS" file="resources\aero_notes\editor.js" type="BINDATA" />
+       </if>
+-      <if expr="is_linux">
++      <if expr="is_linux or is_win">
+         <include name="IDR_AERO_TERMINAL_HTML" file="resources\aero_terminal\terminal.html" type="BINDATA" />
+         <include name="IDR_AERO_TERMINAL_CSS" file="resources\aero_terminal\terminal.css" type="BINDATA" />
+         <include name="IDR_AERO_TERMINAL_JS" file="resources\aero_terminal\terminal.js" type="BINDATA" />
+diff --git a/chrome/browser/ui/omnibox/BUILD.gn b/chrome/browser/ui/omnibox/BUILD.gn
+index 2b7f272..3d0a79d 100644
+--- a/chrome/browser/ui/omnibox/BUILD.gn
++++ b/chrome/browser/ui/omnibox/BUILD.gn
+@@ -212,7 +212,7 @@ source_set("impl") {
+       "//ui/views/controls/webview",
+       "//url",
+     ]
+-    if (is_linux) {
++    if (is_linux || is_win) {
+       # aerographene: "t: <command>" one-shot channel (fatia C6).
+       deps += [
+         "//chrome/browser/ui/webui/aero_terminal:launch",
+diff --git a/chrome/browser/ui/omnibox/chrome_omnibox_client.cc b/chrome/browser/ui/omnibox/chrome_omnibox_client.cc
+index 6c638c4..d8ebbe9 100644
+--- a/chrome/browser/ui/omnibox/chrome_omnibox_client.cc
++++ b/chrome/browser/ui/omnibox/chrome_omnibox_client.cc
+@@ -133,7 +133,7 @@
+ #include "ui/gfx/vector_icon_types.h"
+ #include "url/gurl.h"
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
+ #include "chrome/browser/ui/webui/aero_terminal/terminal_launch_watcher.h"
+ #endif
+ 
+@@ -1002,7 +1002,7 @@ void ChromeOmniboxClient::OnAutocompleteAccept(
+ 
+   if (browser_) {
+     auto navigation = chrome::OpenCurrentURL(browser_);
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
+     // Bound to the navigation loading chrome://terminal/?new=1; its
+     // TerminalHandler takes it once (terminal_launch.h). C6b: it only runs
+     // by itself (Enter) when OmniboxEditModel saw it typed; pasted, dropped
+diff --git a/chrome/browser/ui/webui/BUILD.gn b/chrome/browser/ui/webui/BUILD.gn
+index bc5e646..6da29b3 100644
+--- a/chrome/browser/ui/webui/BUILD.gn
++++ b/chrome/browser/ui/webui/BUILD.gn
+@@ -113,7 +113,7 @@ source_set("configs") {
+     deps += [ "//chrome/browser/ui/webui/aero_notes" ]
+   }
+ 
+-  if (is_linux) {
++  if (is_linux || is_win) {
+     deps += [ "//chrome/browser/ui/webui/aero_terminal" ]
+   }
+ 
+diff --git a/chrome/browser/ui/webui/aero_terminal/BUILD.gn b/chrome/browser/ui/webui/aero_terminal/BUILD.gn
+index 6aa2636..f4ea4e6 100644
+--- a/chrome/browser/ui/webui/aero_terminal/BUILD.gn
++++ b/chrome/browser/ui/webui/aero_terminal/BUILD.gn
+@@ -1,7 +1,7 @@
+ # Copyright 2026 The aerographene Authors
+ # Use of this source code is governed by the GPL-3.0 license.
+ 
+-assert(is_linux)
++assert(is_linux || is_win)
+ 
+ source_set("aero_terminal") {
+   sources = [
+@@ -66,12 +66,14 @@ source_set("launch_watcher") {
+   ]
+ }
+ 
+-# pty session (fatia C2), used by TerminalHost (C3).
++# pty session (fatia C2), used by TerminalHost (C3). Windows: ConPTY (D3e).
+ source_set("session") {
+-  sources = [
+-    "terminal_session.cc",
+-    "terminal_session.h",
+-  ]
++  sources = [ "terminal_session.h" ]
++  if (is_win) {
++    sources += [ "terminal_session_win.cc" ]
++  } else {
++    sources += [ "terminal_session.cc" ]
++  }
+   public_deps = [ "//base" ]
+ }
+ 
+@@ -91,10 +93,16 @@ source_set("unit_tests") {
+   testonly = true
+   sources = [
+     "terminal_access_unittest.cc",
+-    "terminal_host_unittest.cc",
+     "terminal_launch_unittest.cc",
+-    "terminal_session_unittest.cc",
+   ]
++  if (is_win) {
++    sources += [ "terminal_session_win_unittest.cc" ]
++  } else {
++    sources += [
++      "terminal_host_unittest.cc",
++      "terminal_session_unittest.cc",
++    ]
++  }
+   deps = [
+     ":access",
+     ":host",
+diff --git a/chrome/browser/ui/webui/aero_terminal/aero_terminal_ui.h b/chrome/browser/ui/webui/aero_terminal/aero_terminal_ui.h
+index a4b0a7a..0af8df4 100644
+--- a/chrome/browser/ui/webui/aero_terminal/aero_terminal_ui.h
++++ b/chrome/browser/ui/webui/aero_terminal/aero_terminal_ui.h
+@@ -18,7 +18,8 @@ class AeroTerminalUI;
+ 
+ // chrome://terminal (shown as aerographene://terminal). Only the config
+ // lives in the WebUIConfigMap; the controller and its data source are created
+-// when a tab navigates to the page, so nothing runs at startup. Linux only.
++// when a tab navigates to the page, so nothing runs at startup. Linux and
++// Windows (ConPTY, D3e).
+ class AeroTerminalUIConfig
+     : public content::DefaultWebUIConfig<AeroTerminalUI> {
+  public:
+diff --git a/chrome/browser/ui/webui/aero_terminal/terminal_handler.cc b/chrome/browser/ui/webui/aero_terminal/terminal_handler.cc
+index 6714657..3b8b4e7 100644
+--- a/chrome/browser/ui/webui/aero_terminal/terminal_handler.cc
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_handler.cc
+@@ -14,6 +14,7 @@
+ #include "base/task/bind_post_task.h"
+ #include "base/task/thread_pool.h"
+ #include "base/version_info/version_info.h"
++#include "build/build_config.h"
+ #include "chrome/browser/ui/webui/aero_terminal/terminal_access.h"
+ #include "chrome/browser/ui/webui/aero_terminal/terminal_launch.h"
+ #include "chrome/common/aero_version.h"
+@@ -27,6 +28,12 @@
+ #include "url/gurl.h"
+ #include "url/origin.h"
+ 
++#if BUILDFLAG(IS_WIN)
++#include <windows.h>
++
++#include <vector>
++#endif
++
+ namespace aerographene {
+ 
+ namespace {
+@@ -50,15 +57,34 @@ base::DictValue CollectSystemInfo() {
+   info.Set("ram", static_cast<double>(
+                       base::SysInfo::AmountOfTotalPhysicalMemory().InBytes()));
+   base::ListValue disks;
++#if BUILDFLAG(IS_WIN)
++  // Fixed drives (C:\, D:\ ...); removable, network and optical are left
++  // out (slow or asleep). The page shows at most four.
++  std::vector<base::FilePath> roots;
++  wchar_t drives[512];
++  const DWORD len = ::GetLogicalDriveStringsW(std::size(drives), drives);
++  for (const wchar_t* d = drives; len > 0 && len < std::size(drives) && *d;
++       d += wcslen(d) + 1) {
++    if (::GetDriveTypeW(d) == DRIVE_FIXED) {
++      roots.emplace_back(d);
++    }
++  }
++  for (const base::FilePath& path : roots) {
++#else
+   for (const base::FilePath& path :
+        {base::FilePath("/"), base::GetHomeDir()}) {
++#endif
+     std::optional<int64_t> total = base::SysInfo::AmountOfTotalDiskSpace(path);
+     std::optional<int64_t> free = base::SysInfo::AmountOfFreeDiskSpace(path);
+     if (!total || !free || *total <= 0) {
+       continue;
+     }
+     base::DictValue disk;
++#if BUILDFLAG(IS_WIN)
++    disk.Set("path", path.AsUTF8Unsafe());
++#else
+     disk.Set("path", path.value());
++#endif
+     disk.Set("total", static_cast<double>(*total));
+     disk.Set("free", static_cast<double>(*free));
+     disks.Append(std::move(disk));
+diff --git a/chrome/browser/ui/webui/aero_terminal/terminal_host.cc b/chrome/browser/ui/webui/aero_terminal/terminal_host.cc
+index f179c30..41c1614 100644
+--- a/chrome/browser/ui/webui/aero_terminal/terminal_host.cc
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_host.cc
+@@ -3,16 +3,22 @@
+ 
+ #include "chrome/browser/ui/webui/aero_terminal/terminal_host.h"
+ 
+-#include <errno.h>
+-#include <unistd.h>
+-
+ #include <algorithm>
+ #include <atomic>
+ #include <optional>
+ #include <utility>
+ 
+ #include "base/functional/bind.h"
++#include "build/build_config.h"
++
++#if BUILDFLAG(IS_WIN)
++#include "base/task/sequenced_task_runner.h"
++#else
++#include <errno.h>
++#include <unistd.h>
++
+ #include "base/posix/eintr_wrapper.h"
++#endif
+ 
+ namespace aerographene {
+ 
+@@ -37,6 +43,9 @@ TerminalHost::Entry::~Entry() {
+   // Stop watching before the session closes the fd.
+   read_watch.reset();
+   write_watch.reset();
++#if BUILDFLAG(IS_WIN)
++  exit_watch.reset();
++#endif
+   session.reset();
+   if (counted) {
+     g_live_sessions.fetch_sub(1);
+@@ -76,11 +85,106 @@ bool TerminalHost::Open(int32_t id, uint16_t cols, uint16_t rows) {
+   if (!entry->session) {
+     return false;  // ~Entry gives the slot back
+   }
++#if BUILDFLAG(IS_WIN)
++  Entry& e = *entry;
++  sessions_[id] = std::move(entry);
++  e.exit_watch = std::make_unique<Watch>(base::BindRepeating(
++      &TerminalHost::OnProcessExited, base::Unretained(this), id));
++  e.exit_watch->Start(e.session->process_handle());
++  WatchReadable(id, e);
++#else
+   WatchReadable(id, *entry);
+   sessions_[id] = std::move(entry);
++#endif
+   return true;
+ }
+ 
++#if BUILDFLAG(IS_WIN)
++
++TerminalHost::Watch::Watch(base::RepeatingClosure on_signaled)
++    : on_signaled_(std::move(on_signaled)) {}
++TerminalHost::Watch::~Watch() = default;
++
++bool TerminalHost::Watch::Start(HANDLE object) {
++  watcher_.StopWatching();
++  return watcher_.StartWatchingOnce(object, this);
++}
++
++void TerminalHost::Watch::OnObjectSignaled(HANDLE object) {
++  // The callee may destroy `this` (pause, exit): run a copy.
++  base::RepeatingClosure cb = on_signaled_;
++  cb.Run();
++}
++
++// Hands out every finished read, then leaves one read pending and watches
++// its event. Paused (read_watch reset, like on Linux) once
++// kMaxUnackedOutput is reached; Ack() calls this again.
++void TerminalHost::WatchReadable(int32_t id, Entry& entry) {
++  if (!entry.read_watch) {
++    entry.read_watch = std::make_unique<Watch>(base::BindRepeating(
++        &TerminalHost::OnReadable, base::Unretained(this), id));
++  }
++  while (entry.unacked < kMaxUnackedOutput) {
++    std::string buf;
++    switch (entry.session->ReadSome(&buf, kReadChunk)) {
++      case TerminalSession::ReadResult::kData:
++        entry.unacked += buf.size();
++        on_output_.Run(id, std::move(buf));
++        continue;
++      case TerminalSession::ReadResult::kPending:
++        entry.read_watch->Start(entry.session->read_event());
++        return;
++      case TerminalSession::ReadResult::kClosed:
++        // The console is gone; the process watch reports the exit.
++        entry.read_watch.reset();
++        return;
++    }
++  }
++  // The page is behind: stop until it acknowledges.
++  entry.read_watch.reset();
++}
++
++void TerminalHost::OnReadable(int32_t id) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  auto it = sessions_.find(id);
++  if (it != sessions_.end()) {
++    WatchReadable(id, *it->second);
++  }
++}
++
++void TerminalHost::OnProcessExited(int32_t id) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  auto it = sessions_.find(id);
++  if (it == sessions_.end() || it->second->exiting) {
++    return;
++  }
++  // The console may still be rendering the shell's last output.
++  it->second->exiting = true;
++  base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
++      FROM_HERE,
++      base::BindOnce(&TerminalHost::FinishExit, weak_factory_.GetWeakPtr(),
++                     id),
++      base::Milliseconds(100));
++}
++
++void TerminalHost::FinishExit(int32_t id) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  auto it = sessions_.find(id);
++  if (it == sessions_.end()) {
++    return;  // closed meanwhile
++  }
++  Entry& entry = *it->second;
++  entry.read_watch.reset();
++  entry.write_watch.reset();
++  entry.exit_watch.reset();
++  const int code =
++      entry.session->Terminate(base::Milliseconds(0)).value_or(-1);
++  sessions_.erase(it);
++  on_exit_.Run(id, code);
++}
++
++#else  // BUILDFLAG(IS_WIN)
++
+ void TerminalHost::WatchReadable(int32_t id, Entry& entry) {
+   entry.read_watch = base::FileDescriptorWatcher::WatchReadable(
+       entry.session->master_fd(),
+@@ -88,6 +192,8 @@ void TerminalHost::WatchReadable(int32_t id, Entry& entry) {
+                           id));
+ }
+ 
++#endif  // BUILDFLAG(IS_WIN)
++
+ bool TerminalHost::Write(int32_t id, std::string bytes) {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+   auto it = sessions_.find(id);
+@@ -112,6 +218,17 @@ void TerminalHost::Flush(int32_t id, Entry& entry) {
+     return;
+   }
+   entry.pending.erase(0, *n);
++#if BUILDFLAG(IS_WIN)
++  // A write is (or may still be) pending: its event says when to go on.
++  if (entry.pending.empty()) {
++    return;
++  }
++  if (!entry.write_watch) {
++    entry.write_watch = std::make_unique<Watch>(base::BindRepeating(
++        &TerminalHost::OnWritable, base::Unretained(this), id));
++  }
++  entry.write_watch->Start(entry.session->write_event());
++#else
+   if (entry.pending.empty()) {
+     entry.write_watch.reset();
+   } else if (!entry.write_watch) {
+@@ -120,6 +237,7 @@ void TerminalHost::Flush(int32_t id, Entry& entry) {
+         base::BindRepeating(&TerminalHost::OnWritable, base::Unretained(this),
+                             id));
+   }
++#endif  // BUILDFLAG(IS_WIN)
+ }
+ 
+ void TerminalHost::OnWritable(int32_t id) {
+@@ -163,6 +281,7 @@ void TerminalHost::Ack(int32_t id, size_t bytes) {
+   }
+ }
+ 
++#if !BUILDFLAG(IS_WIN)
+ void TerminalHost::OnReadable(int32_t id) {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+   auto it = sessions_.find(id);
+@@ -195,4 +314,6 @@ void TerminalHost::OnReadable(int32_t id) {
+   on_exit_.Run(id, code);
+ }
+ 
++#endif  // !BUILDFLAG(IS_WIN)
++
+ }  // namespace aerographene
+diff --git a/chrome/browser/ui/webui/aero_terminal/terminal_host.h b/chrome/browser/ui/webui/aero_terminal/terminal_host.h
+index b82c4f1..c8b1563 100644
+--- a/chrome/browser/ui/webui/aero_terminal/terminal_host.h
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_host.h
+@@ -11,11 +11,18 @@
+ #include <memory>
+ #include <string>
+ 
+-#include "base/files/file_descriptor_watcher_posix.h"
+ #include "base/functional/callback.h"
+ #include "base/sequence_checker.h"
++#include "build/build_config.h"
+ #include "chrome/browser/ui/webui/aero_terminal/terminal_session.h"
+ 
++#if BUILDFLAG(IS_WIN)
++#include "base/memory/weak_ptr.h"
++#include "base/win/object_watcher.h"
++#else
++#include "base/files/file_descriptor_watcher_posix.h"
++#endif
++
+ namespace aerographene {
+ 
+ // Owns the pty sessions of one chrome://terminal tab. Lives on a blocking
+@@ -29,6 +36,10 @@ namespace aerographene {
+ // then blocks on its own writes) until the page acknowledges. `on_exit` runs
+ // once per session when the slave side closes. Both callbacks must post to
+ // the UI sequence themselves.
++// Windows (D3e): the same contract over ConPTY. Readable/writable become the
++// overlapped events of TerminalSession, watched with base::win::ObjectWatcher;
++// the session ends when the shell process exits (ConPTY has no EIO), after a
++// short drain of the output already produced.
+ class TerminalHost {
+  public:
+   using OutputCallback =
+@@ -66,12 +77,34 @@ class TerminalHost {
+   static size_t LiveSessionsForTesting();
+ 
+  private:
++#if BUILDFLAG(IS_WIN)
++  // One-shot ObjectWatcher calling back into the host with the session id.
++  class Watch : public base::win::ObjectWatcher::Delegate {
++   public:
++    explicit Watch(base::RepeatingClosure on_signaled);
++    ~Watch() override;
++    bool Start(HANDLE object);
++    void OnObjectSignaled(HANDLE object) override;
++
++   private:
++    base::RepeatingClosure on_signaled_;
++    base::win::ObjectWatcher watcher_;
++  };
++#endif
++
+   struct Entry {
+     Entry();
+     ~Entry();
+     std::unique_ptr<TerminalSession> session;
++#if BUILDFLAG(IS_WIN)
++    std::unique_ptr<Watch> read_watch;
++    std::unique_ptr<Watch> write_watch;
++    std::unique_ptr<Watch> exit_watch;
++    bool exiting = false;  // shell gone, draining before on_exit
++#else
+     std::unique_ptr<base::FileDescriptorWatcher::Controller> read_watch;
+     std::unique_ptr<base::FileDescriptorWatcher::Controller> write_watch;
++#endif
+     std::string pending;  // input not yet written to the pty
+     size_t unacked = 0;   // output handed out and not acknowledged
+     bool counted = false;  // holds a slot of kMaxSessionsGlobal
+@@ -81,11 +114,18 @@ class TerminalHost {
+   void OnReadable(int32_t id);
+   void OnWritable(int32_t id);
+   void Flush(int32_t id, Entry& entry);
++#if BUILDFLAG(IS_WIN)
++  void OnProcessExited(int32_t id);
++  void FinishExit(int32_t id);
++#endif
+ 
+   OutputCallback on_output_;
+   ExitCallback on_exit_;
+   std::map<int32_t, std::unique_ptr<Entry>> sessions_;
+   SEQUENCE_CHECKER(sequence_checker_);
++#if BUILDFLAG(IS_WIN)
++  base::WeakPtrFactory<TerminalHost> weak_factory_{this};
++#endif
+ };
+ 
+ }  // namespace aerographene
+diff --git a/chrome/browser/ui/webui/aero_terminal/terminal_session.h b/chrome/browser/ui/webui/aero_terminal/terminal_session.h
+index b3975fd..2c71456 100644
+--- a/chrome/browser/ui/webui/aero_terminal/terminal_session.h
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_session.h
+@@ -13,18 +13,31 @@
+ #include <vector>
+ 
+ #include "base/files/file_path.h"
+-#include "base/files/scoped_file.h"
+ #include "base/process/process.h"
+ #include "base/time/time.h"
++#include "build/build_config.h"
++
++#if BUILDFLAG(IS_WIN)
++#include <windows.h>
++
++#include "base/win/scoped_handle.h"
++#else
++#include "base/files/scoped_file.h"
++#endif
+ 
+ namespace aerographene {
+ 
+-// One local shell attached to a pseudo terminal (Linux only). The browser
+-// owns the master side; the child is a session leader with the slave as its
+-// controlling terminal, in its own process group, with a clean environment.
+-// Start() and Terminate() block (open, waitpid) and must run on a MayBlock
+-// sequence; I/O on the master never blocks. Driven by TerminalHost
+-// (fatia C3).
++// One local shell attached to a pseudo terminal. The browser owns the
++// master side; the child gets a clean environment and never inherits a
++// browser fd/handle. Start() and Terminate() block (open, waitpid) and must
++// run on a MayBlock sequence; I/O on the master never blocks. Driven by
++// TerminalHost (fatia C3).
++// Linux: posix_openpt; the child is a session leader with the slave as its
++// controlling terminal, in its own process group.
++// Windows (D3e): ConPTY (CreatePseudoConsole, Windows 10 1809+); the child
++// and everything it starts live in a Job Object with KILL_ON_JOB_CLOSE, the
++// "process group" of this platform. I/O uses two overlapped named pipes and
++// is asynchronous: see read_event()/ReadSome() and write_event().
+ class TerminalSession {
+  public:
+   struct Options {
+@@ -49,7 +62,14 @@ class TerminalSession {
+   // Returns nullptr when the pty or the child cannot be created.
+   static std::unique_ptr<TerminalSession> Start(const Options& options);
+ 
+-  // Shell from the passwd entry, then $SHELL, then /bin/sh.
++#if BUILDFLAG(IS_WIN)
++  // pwsh.exe (PATH, then %ProgramFiles%\PowerShell\7), then Windows
++  // PowerShell (System32), then %ComSpec%, then System32\cmd.exe. Only
++  // absolute paths of existing files; empty when none exists.
++  static base::FilePath DefaultShellPath();
++#endif
++  // Shell from the passwd entry, then $SHELL, then /bin/sh (Windows: UTF-8
++  // of DefaultShellPath()).
+   static std::string DefaultShell();
+ 
+   TerminalSession(const TerminalSession&) = delete;
+@@ -58,36 +78,88 @@ class TerminalSession {
+   // Kills the process group (see Terminate()).
+   ~TerminalSession();
+ 
++#if BUILDFLAG(IS_WIN)
++  enum class ReadResult { kData, kPending, kClosed };
++  // Takes the bytes of a finished read (kData, at most `max` per call; call
++  // again for the rest), or starts an overlapped read and returns kPending:
++  // wait for read_event() and call again. kClosed: pipe broken or after
++  // Terminate(). Never blocks.
++  ReadResult ReadSome(std::string* out, size_t max);
++  // Signaled when a pending read finishes.
++  HANDLE read_event() const { return read_event_.get(); }
++  // Signaled when the write started by WriteSome() finishes; wait for it
++  // when WriteSome() returned fewer bytes than offered.
++  HANDLE write_event() const { return write_event_.get(); }
++  // Signaled when the shell exits (the session is then over; ConPTY keeps
++  // the output pipe open, so there is no EOF like EIO on Linux).
++  HANDLE process_handle() const { return process_.Handle(); }
++#else
+   // Master side of the pty (O_CLOEXEC | O_NONBLOCK). Readers and writers
+   // should watch it with base::FileDescriptorWatcher; EIO means the slave
+   // side is closed.
+   int master_fd() const { return master_.get(); }
++#endif
+   base::ProcessId pid() const { return process_.Pid(); }
+ 
+   // Writes as many bytes as the pty accepts now, never blocking (a program
+   // that does not read its input fills the pty buffer). Returns the number
+   // written (0 when the buffer is full: wait for writability), or nullopt on
+-  // error or after Terminate().
++  // error or after Terminate(). Windows: copies up to kWriteChunk bytes into
++  // one overlapped write; 0 while the previous one is still pending.
+   std::optional<size_t> WriteSome(std::string_view bytes);
+ 
+   // TIOCSWINSZ on the master (the kernel sends SIGWINCH to the foreground
+-  // group). False for out-of-range sizes or ioctl failure.
++  // group); Windows: ResizePseudoConsole. False for out-of-range sizes or
++  // failure.
+   bool Resize(uint16_t cols, uint16_t rows);
+ 
+   // Name of the foreground process of the pty (tcgetpgrp + /proc/<pgid>/comm),
+   // printable ASCII only, at most 15 chars; empty when unknown. Shown only in
+-  // the window tooltip, never in the tab title.
++  // the window tooltip, never in the tab title. Windows: image name of the
++  // newest process of the job (QueryInformationJobObject), without ".exe".
+   std::string ForegroundProcessName() const;
+ 
+   // Sends SIGHUP to the whole process group, waits up to `grace` for the
+   // leader, then SIGKILLs the group and reaps the leader. Idempotent.
+   // Returns the leader's exit code when it was reaped.
++  // Windows: waits up to `grace` only if the shell is already exiting, then
++  // TerminateJobObject (the whole tree, also what broke out of the console),
++  // cancels and drains the overlapped I/O, closes the pipes and then the
++  // pseudo console (in this order ClosePseudoConsole cannot wait on a full
++  // output pipe), and closes the job.
+   std::optional<int> Terminate(base::TimeDelta grace = base::Seconds(1));
+ 
++#if BUILDFLAG(IS_WIN)
++  static constexpr size_t kReadChunk = 16 * 1024;
++  static constexpr size_t kWriteChunk = 64 * 1024;
++#endif
++
+  private:
++#if BUILDFLAG(IS_WIN)
++  struct Handles;
++  explicit TerminalSession(Handles handles);
++  // Waits for (or cancels) the pending overlapped I/O so its buffers can go.
++  void CancelIo();
++
++  base::win::ScopedHandle job_;
++  base::win::ScopedHandle in_pipe_;   // we write the shell's input
++  base::win::ScopedHandle out_pipe_;  // we read the console output
++  base::win::ScopedHandle read_event_;
++  base::win::ScopedHandle write_event_;
++  void* pseudo_console_ = nullptr;  // HPCON
++  OVERLAPPED read_ov_ = {};
++  OVERLAPPED write_ov_ = {};
++  std::string read_buf_;
++  std::string write_buf_;
++  size_t read_have_ = 0;   // bytes of read_buf_ ready to hand out
++  size_t read_taken_ = 0;  // ... of which already handed out
++  bool read_pending_ = false;
++  bool write_pending_ = false;
++#else
+   TerminalSession(base::ScopedFD master, base::Process process);
+ 
+   base::ScopedFD master_;
++#endif
+   base::Process process_;
+   bool terminated_ = false;
+ };
+diff --git a/chrome/browser/ui/webui/aero_terminal/terminal_session_win.cc b/chrome/browser/ui/webui/aero_terminal/terminal_session_win.cc
+new file mode 100644
+index 0000000..baff3c0
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_session_win.cc
+@@ -0,0 +1,543 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++// Windows side of TerminalSession (fatia D3e): ConPTY.
++
++#include "chrome/browser/ui/webui/aero_terminal/terminal_session.h"
++
++#include <windows.h>
++
++#include <stdint.h>
++
++#include <algorithm>
++#include <memory>
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "base/command_line.h"
++#include "base/containers/heap_array.h"
++#include "base/environment.h"
++#include "base/files/file_util.h"
++#include "base/logging.h"
++#include "base/memory/ptr_util.h"
++#include "base/path_service.h"
++#include "base/process/environment_internal.h"
++#include "base/rand_util.h"
++#include "base/strings/strcat_win.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/string_split.h"
++#include "base/strings/string_util.h"
++#include "base/strings/utf_string_conversions.h"
++#include "base/threading/platform_thread.h"
++
++namespace aerographene {
++
++namespace {
++
++// Resolved at run time: the browser must still start on a Windows without
++// ConPTY (the terminal then just fails to open).
++using CreatePseudoConsoleFn = HRESULT(WINAPI*)(COORD, HANDLE, HANDLE, DWORD,
++                                               HPCON*);
++using ResizePseudoConsoleFn = HRESULT(WINAPI*)(HPCON, COORD);
++using ClosePseudoConsoleFn = void(WINAPI*)(HPCON);
++
++struct ConPtyApi {
++  CreatePseudoConsoleFn create = nullptr;
++  ResizePseudoConsoleFn resize = nullptr;
++  ClosePseudoConsoleFn close = nullptr;
++};
++
++const ConPtyApi& Api() {
++  static const ConPtyApi api = [] {
++    ConPtyApi a;
++    if (HMODULE k = ::GetModuleHandleW(L"kernel32.dll")) {
++      a.create = reinterpret_cast<CreatePseudoConsoleFn>(
++          ::GetProcAddress(k, "CreatePseudoConsole"));
++      a.resize = reinterpret_cast<ResizePseudoConsoleFn>(
++          ::GetProcAddress(k, "ResizePseudoConsole"));
++      a.close = reinterpret_cast<ClosePseudoConsoleFn>(
++          ::GetProcAddress(k, "ClosePseudoConsole"));
++    }
++    if (!a.create || !a.resize || !a.close) {
++      a = ConPtyApi();
++    }
++    return a;
++  }();
++  return api;
++}
++
++// The console asks for the cursor position (DSR) and keeps what is already
++// on screen: the page prints the banner before the shell starts.
++constexpr DWORD kInheritCursor = 0x1;  // PSEUDOCONSOLE_INHERIT_CURSOR
++
++bool ValidSize(uint16_t cols, uint16_t rows) {
++  return cols > 0 && rows > 0 && cols <= TerminalSession::kMaxCols &&
++         rows <= TerminalSession::kMaxRows;
++}
++
++COORD Size(uint16_t cols, uint16_t rows) {
++  return {static_cast<SHORT>(cols), static_cast<SHORT>(rows)};
++}
++
++bool IsFile(const base::FilePath& p) {
++  return p.IsAbsolute() && base::PathExists(p) && !base::DirectoryExists(p);
++}
++
++// One overlapped pipe: the browser end (overlapped, never inheritable) and
++// the end handed to CreatePseudoConsole (synchronous, closed right after;
++// conhost keeps its own duplicate). Random name, single instance, local
++// clients only, default DACL (this user, SYSTEM, administrators).
++bool CreateOverlappedPipe(bool browser_writes,
++                          base::win::ScopedHandle* browser_end,
++                          base::win::ScopedHandle* console_end) {
++  const std::wstring name = base::StrCat(
++      {L"\\\\.\\pipe\\aerographene-terminal-",
++       base::NumberToWString(::GetCurrentProcessId()), L"-",
++       base::NumberToWString(base::RandUint64())});
++  const DWORD open_mode =
++      (browser_writes ? PIPE_ACCESS_OUTBOUND : PIPE_ACCESS_INBOUND) |
++      FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE;
++  browser_end->Set(::CreateNamedPipeW(
++      name.c_str(), open_mode,
++      PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT |
++          PIPE_REJECT_REMOTE_CLIENTS,
++      1, 64 * 1024, 64 * 1024, 0, nullptr));
++  if (!browser_end->is_valid()) {
++    PLOG(ERROR) << "CreateNamedPipeW";
++    return false;
++  }
++  console_end->Set(::CreateFileW(
++      name.c_str(), browser_writes ? GENERIC_READ : GENERIC_WRITE, 0, nullptr,
++      OPEN_EXISTING, 0, nullptr));
++  if (!console_end->is_valid()) {
++    PLOG(ERROR) << "CreateFileW pipe";
++    return false;
++  }
++  return true;
++}
++
++// Environment of the shell: what Windows programs need to work, no browser
++// specific variable. Values from the browser's environment.
++base::NativeEnvironmentString ShellEnvironment(const base::FilePath& shell,
++                                               const base::FilePath& home) {
++  static constexpr const wchar_t* kKeep[] = {
++      L"ALLUSERSPROFILE",   L"APPDATA",
++      L"CommonProgramFiles", L"CommonProgramFiles(x86)",
++      L"CommonProgramW6432", L"COMPUTERNAME",
++      L"ComSpec",           L"HOMEDRIVE",
++      L"HOMEPATH",          L"LOCALAPPDATA",
++      L"NUMBER_OF_PROCESSORS", L"OS",
++      L"Path",              L"PATHEXT",
++      L"PROCESSOR_ARCHITECTURE", L"PROCESSOR_IDENTIFIER",
++      L"PROCESSOR_LEVEL",   L"PROCESSOR_REVISION",
++      L"ProgramData",       L"ProgramFiles",
++      L"ProgramFiles(x86)", L"ProgramW6432",
++      L"PUBLIC",            L"SystemDrive",
++      L"SystemRoot",        L"TEMP",
++      L"TMP",               L"USERDOMAIN",
++      L"USERNAME",          L"windir",
++  };
++  base::EnvironmentMap env;
++  for (const wchar_t* name : kKeep) {
++    const DWORD n = ::GetEnvironmentVariableW(name, nullptr, 0);
++    if (n == 0) {
++      continue;
++    }
++    std::wstring value(n, L'\0');
++    const DWORD got = ::GetEnvironmentVariableW(name, value.data(), n);
++    if (got == 0 || got >= n) {
++      continue;
++    }
++    value.resize(got);
++    env[name] = value;
++  }
++  env[L"USERPROFILE"] = home.value();
++  env[L"TERM"] = L"xterm-256color";
++  env[L"COLORTERM"] = L"truecolor";
++  env[L"SHELL"] = shell.value();
++  // AlterEnvironment over an empty block: only `env` remains, sorted, as
++  // CreateProcessW wants it.
++  static constexpr wchar_t kEmpty[] = {L'\0', L'\0'};
++  return base::internal::AlterEnvironment(base::span<const wchar_t>(kEmpty),
++                                          env);
++}
++
++}  // namespace
++
++struct TerminalSession::Handles {
++  base::win::ScopedHandle job;
++  base::win::ScopedHandle in_pipe;
++  base::win::ScopedHandle out_pipe;
++  HPCON pseudo_console = nullptr;
++  base::Process process;
++};
++
++TerminalSession::Options::Options() = default;
++TerminalSession::Options::Options(const Options&) = default;
++TerminalSession::Options& TerminalSession::Options::operator=(
++    const Options&) = default;
++TerminalSession::Options::~Options() = default;
++
++// static
++base::FilePath TerminalSession::DefaultShellPath() {
++  std::unique_ptr<base::Environment> env = base::Environment::Create();
++  // PowerShell 7 from PATH (absolute entries only: never the current
++  // directory), then its default install directory.
++  if (std::optional<std::string> path = env->GetVar("PATH")) {
++    for (const std::string& dir : base::SplitString(
++             *path, ";", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
++      const base::FilePath p =
++          base::FilePath(base::UTF8ToWide(dir)).Append(L"pwsh.exe");
++      if (IsFile(p)) {
++        return p;
++      }
++    }
++  }
++  base::FilePath dir;
++  if (base::PathService::Get(base::DIR_PROGRAM_FILES, &dir)) {
++    const base::FilePath p = dir.Append(L"PowerShell\\7\\pwsh.exe");
++    if (IsFile(p)) {
++      return p;
++    }
++  }
++  base::FilePath system;
++  if (base::PathService::Get(base::DIR_SYSTEM, &system)) {
++    const base::FilePath p =
++        system.Append(L"WindowsPowerShell\\v1.0\\powershell.exe");
++    if (IsFile(p)) {
++      return p;
++    }
++  }
++  if (std::optional<std::string> comspec = env->GetVar("ComSpec")) {
++    const base::FilePath p(base::UTF8ToWide(*comspec));
++    if (IsFile(p)) {
++      return p;
++    }
++  }
++  if (!system.empty() && IsFile(system.Append(L"cmd.exe"))) {
++    return system.Append(L"cmd.exe");
++  }
++  return base::FilePath();
++}
++
++// static
++std::string TerminalSession::DefaultShell() {
++  return DefaultShellPath().AsUTF8Unsafe();
++}
++
++// static
++std::unique_ptr<TerminalSession> TerminalSession::Start(
++    const Options& options) {
++  if (!ValidSize(options.cols, options.rows)) {
++    return nullptr;
++  }
++  const ConPtyApi& api = Api();
++  if (!api.create) {
++    LOG(ERROR) << "ConPTY unavailable (Windows 10 1809+)";
++    return nullptr;
++  }
++
++  std::vector<std::wstring> argv;
++  for (const std::string& a : options.argv) {
++    argv.push_back(base::UTF8ToWide(a));
++  }
++  const base::FilePath shell = DefaultShellPath();
++  if (argv.empty()) {
++    if (shell.empty()) {
++      LOG(ERROR) << "no shell";
++      return nullptr;
++    }
++    argv.push_back(shell.value());
++  }
++  // Quoted the way CreateProcessW/CommandLineToArgvW parse it.
++  base::CommandLine command{base::FilePath(argv[0])};
++  for (size_t i = 1; i < argv.size(); ++i) {
++    command.AppendArgNative(argv[i]);
++  }
++  std::wstring command_line = command.GetCommandLineString();
++
++  base::FilePath home;
++  base::PathService::Get(base::DIR_HOME, &home);  // %USERPROFILE%
++  const base::FilePath cwd = options.cwd.empty() ? home : options.cwd;
++
++  Handles h;
++  // KILL_ON_JOB_CLOSE: closing the job (TerminalSession gone, browser
++  // crashed or killed) kills the shell and everything it started. No
++  // BREAKAWAY_OK, so children cannot leave it.
++  h.job.Set(::CreateJobObjectW(nullptr, nullptr));
++  if (!h.job.is_valid()) {
++    PLOG(ERROR) << "CreateJobObjectW";
++    return nullptr;
++  }
++  JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {};
++  limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
++  if (!::SetInformationJobObject(h.job.get(), JobObjectExtendedLimitInformation,
++                                 &limits, sizeof(limits))) {
++    PLOG(ERROR) << "SetInformationJobObject";
++    return nullptr;
++  }
++
++  base::win::ScopedHandle console_in, console_out;
++  if (!CreateOverlappedPipe(/*browser_writes=*/true, &h.in_pipe,
++                            &console_in) ||
++      !CreateOverlappedPipe(/*browser_writes=*/false, &h.out_pipe,
++                            &console_out)) {
++    return nullptr;
++  }
++  HRESULT hr = api.create(Size(options.cols, options.rows), console_in.get(),
++                          console_out.get(), kInheritCursor,
++                          &h.pseudo_console);
++  // conhost duplicated them; ours would keep the pipes open forever.
++  console_in.Close();
++  console_out.Close();
++  if (FAILED(hr)) {
++    LOG(ERROR) << "CreatePseudoConsole: " << std::hex << hr;
++    return nullptr;
++  }
++  // From here the pseudo console must be closed on every failure path.
++  auto close_console = [&h, &api] {
++    h.in_pipe.Close();
++    h.out_pipe.Close();
++    api.close(h.pseudo_console);
++    h.pseudo_console = nullptr;
++  };
++
++  SIZE_T attr_size = 0;
++  ::InitializeProcThreadAttributeList(nullptr, 1, 0, &attr_size);
++  auto attr_storage = base::HeapArray<uint8_t>::WithSize(attr_size);
++  auto* attrs =
++      reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attr_storage.data());
++  if (!::InitializeProcThreadAttributeList(attrs, 1, 0, &attr_size)) {
++    PLOG(ERROR) << "InitializeProcThreadAttributeList";
++    close_console();
++    return nullptr;
++  }
++  if (!::UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
++                                   h.pseudo_console, sizeof(HPCON), nullptr,
++                                   nullptr)) {
++    PLOG(ERROR) << "PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE";
++    ::DeleteProcThreadAttributeList(attrs);
++    close_console();
++    return nullptr;
++  }
++
++  STARTUPINFOEXW si = {};
++  si.StartupInfo.cb = sizeof(si);
++  // Zeroed STARTUPINFOEX without STARTF_USESTDHANDLES, as in the Microsoft
++  // "Creating a Pseudoconsole session" sample: the standard handles come from
++  // the pseudo console attribute only.
++  si.lpAttributeList = attrs;
++
++  base::NativeEnvironmentString env = ShellEnvironment(
++      shell.empty() ? base::FilePath(argv[0]) : shell, home);
++  PROCESS_INFORMATION pi = {};
++  // bInheritHandles = FALSE: no browser handle reaches the shell (item 7).
++  // Suspended until it is in the job, so nothing it starts escapes.
++  const BOOL ok = ::CreateProcessW(
++      nullptr, command_line.data(), nullptr, nullptr, /*bInheritHandles=*/FALSE,
++      EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT |
++          CREATE_SUSPENDED,
++      env.data(), cwd.empty() ? nullptr : cwd.value().c_str(),
++      &si.StartupInfo, &pi);
++  ::DeleteProcThreadAttributeList(attrs);
++  if (!ok) {
++    PLOG(ERROR) << "CreateProcessW";
++    close_console();
++    return nullptr;
++  }
++  base::win::ScopedHandle thread(pi.hThread);
++  h.process = base::Process(pi.hProcess);
++  if (!::AssignProcessToJobObject(h.job.get(), pi.hProcess)) {
++    PLOG(ERROR) << "AssignProcessToJobObject";
++    ::TerminateProcess(pi.hProcess, 1);
++    close_console();
++    return nullptr;
++  }
++  ::ResumeThread(thread.get());
++  return base::WrapUnique(new TerminalSession(std::move(h)));
++}
++
++TerminalSession::TerminalSession(Handles handles)
++    : job_(std::move(handles.job)),
++      in_pipe_(std::move(handles.in_pipe)),
++      out_pipe_(std::move(handles.out_pipe)),
++      read_event_(::CreateEventW(nullptr, TRUE, FALSE, nullptr)),
++      write_event_(::CreateEventW(nullptr, TRUE, FALSE, nullptr)),
++      pseudo_console_(handles.pseudo_console),
++      process_(std::move(handles.process)) {
++  read_ov_.hEvent = read_event_.get();
++  write_ov_.hEvent = write_event_.get();
++  read_buf_.resize(kReadChunk);
++}
++
++TerminalSession::~TerminalSession() {
++  Terminate(base::Milliseconds(200));
++}
++
++TerminalSession::ReadResult TerminalSession::ReadSome(std::string* out,
++                                                      size_t max) {
++  if (terminated_) {
++    return ReadResult::kClosed;
++  }
++  if (read_pending_) {
++    DWORD n = 0;
++    if (!::GetOverlappedResult(out_pipe_.get(), &read_ov_, &n, FALSE)) {
++      if (::GetLastError() == ERROR_IO_INCOMPLETE) {
++        return ReadResult::kPending;
++      }
++      read_pending_ = false;
++      return ReadResult::kClosed;  // ERROR_BROKEN_PIPE: console gone
++    }
++    read_pending_ = false;
++    read_have_ = n;
++    read_taken_ = 0;
++  }
++  if (read_taken_ < read_have_) {
++    const size_t n = std::min(max, read_have_ - read_taken_);
++    out->assign(read_buf_.data() + read_taken_, n);
++    read_taken_ += n;
++    return ReadResult::kData;
++  }
++  ::ResetEvent(read_event_.get());
++  read_have_ = read_taken_ = 0;
++  if (!::ReadFile(out_pipe_.get(), read_buf_.data(),
++                  static_cast<DWORD>(read_buf_.size()), nullptr, &read_ov_) &&
++      ::GetLastError() != ERROR_IO_PENDING) {
++    return ReadResult::kClosed;
++  }
++  // Finished at once or not: the event is (or will be) signaled either way.
++  read_pending_ = true;
++  return ReadResult::kPending;
++}
++
++std::optional<size_t> TerminalSession::WriteSome(std::string_view bytes) {
++  if (terminated_) {
++    return std::nullopt;
++  }
++  if (write_pending_) {
++    DWORD n = 0;
++    if (!::GetOverlappedResult(in_pipe_.get(), &write_ov_, &n, FALSE)) {
++      if (::GetLastError() == ERROR_IO_INCOMPLETE) {
++        return 0;
++      }
++      write_pending_ = false;
++      return std::nullopt;
++    }
++    write_pending_ = false;
++  }
++  if (bytes.empty()) {
++    return 0;
++  }
++  // The buffer must outlive the overlapped write.
++  write_buf_.assign(bytes.substr(0, kWriteChunk));
++  ::ResetEvent(write_event_.get());
++  if (!::WriteFile(in_pipe_.get(), write_buf_.data(),
++                   static_cast<DWORD>(write_buf_.size()), nullptr,
++                   &write_ov_) &&
++      ::GetLastError() != ERROR_IO_PENDING) {
++    return std::nullopt;
++  }
++  write_pending_ = true;
++  return write_buf_.size();
++}
++
++bool TerminalSession::Resize(uint16_t cols, uint16_t rows) {
++  if (terminated_ || !ValidSize(cols, rows)) {
++    return false;
++  }
++  return SUCCEEDED(Api().resize(static_cast<HPCON>(pseudo_console_),
++                                Size(cols, rows)));
++}
++
++std::string TerminalSession::ForegroundProcessName() const {
++  if (terminated_) {
++    return std::string();
++  }
++  // Up to 64 pids; the list is in creation order, the last is the newest.
++  struct {
++    JOBOBJECT_BASIC_PROCESS_ID_LIST list;
++    ULONG_PTR more[63];
++  } ids = {};
++  if (!::QueryInformationJobObject(job_.get(), JobObjectBasicProcessIdList,
++                                   &ids, sizeof(ids), nullptr) &&
++      ::GetLastError() != ERROR_MORE_DATA) {
++    return std::string();
++  }
++  const DWORD count = std::min<DWORD>(ids.list.NumberOfProcessIdsInList, 64);
++  if (count == 0) {
++    return std::string();
++  }
++  const ULONG_PTR* pids = ids.list.ProcessIdList;
++  base::win::ScopedHandle p(::OpenProcess(
++      PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
++      static_cast<DWORD>(pids[count - 1])));
++  if (!p.is_valid()) {
++    return std::string();
++  }
++  wchar_t path[MAX_PATH];
++  DWORD size = MAX_PATH;
++  if (!::QueryFullProcessImageNameW(p.get(), 0, path, &size)) {
++    return std::string();
++  }
++  std::wstring name =
++      base::FilePath(std::wstring(path, size)).BaseName().value();
++  if (base::EndsWith(name, L".exe", base::CompareCase::INSENSITIVE_ASCII)) {
++    name.resize(name.size() - 4);
++  }
++  std::string out;
++  for (wchar_t c : name) {
++    if (out.size() == 15) {
++      break;
++    }
++    out.push_back(c >= 0x20 && c <= 0x7e ? static_cast<char>(c) : '?');
++  }
++  return out;
++}
++
++void TerminalSession::CancelIo() {
++  DWORD n = 0;
++  if (read_pending_) {
++    ::CancelIoEx(out_pipe_.get(), &read_ov_);
++    ::GetOverlappedResult(out_pipe_.get(), &read_ov_, &n, TRUE);
++    read_pending_ = false;
++  }
++  if (write_pending_) {
++    ::CancelIoEx(in_pipe_.get(), &write_ov_);
++    ::GetOverlappedResult(in_pipe_.get(), &write_ov_, &n, TRUE);
++    write_pending_ = false;
++  }
++}
++
++std::optional<int> TerminalSession::Terminate(base::TimeDelta grace) {
++  (void)grace;
++  if (terminated_) {
++    return std::nullopt;
++  }
++  terminated_ = true;
++  // No SIGHUP on Windows: the graceful path (ClosePseudoConsole's
++  // CTRL_CLOSE_EVENT) can hold the caller for seconds on Windows 10, so kill
++  // the whole job first; nothing is waited for politely.
++  ::TerminateJobObject(job_.get(), 1);
++  // Bounded: a process stuck in the kernel must not hang shutdown.
++  ::WaitForSingleObject(process_.Handle(), 2000);
++  CancelIo();
++  // Pipes first: with our read end closed, ClosePseudoConsole never waits for
++  // the console to flush into a full output pipe.
++  in_pipe_.Close();
++  out_pipe_.Close();
++  if (pseudo_console_) {
++    Api().close(static_cast<HPCON>(pseudo_console_));
++    pseudo_console_ = nullptr;
++  }
++  std::optional<int> result;
++  DWORD code = 0;
++  if (::WaitForSingleObject(process_.Handle(), 0) == WAIT_OBJECT_0 &&
++      ::GetExitCodeProcess(process_.Handle(), &code)) {
++    result = static_cast<int>(code);
++  }
++  job_.Close();  // KILL_ON_JOB_CLOSE: anything left dies here
++  return result;
++}
++
++}  // namespace aerographene
+diff --git a/chrome/browser/ui/webui/aero_terminal/terminal_session_win_unittest.cc b/chrome/browser/ui/webui/aero_terminal/terminal_session_win_unittest.cc
+new file mode 100644
+index 0000000..10f7938
+--- /dev/null
++++ b/chrome/browser/ui/webui/aero_terminal/terminal_session_win_unittest.cc
+@@ -0,0 +1,352 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++// TerminalSession and TerminalHost over ConPTY (fatia D3e). Windows 10 1809+.
++
++#include <windows.h>
++
++#include <tlhelp32.h>
++
++#include <map>
++#include <memory>
++#include <optional>
++#include <string>
++#include <vector>
++
++#include "base/files/file_path.h"
++#include "base/functional/bind.h"
++#include "base/message_loop/message_pump_type.h"
++#include "base/run_loop.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/task/single_thread_task_executor.h"
++#include "base/threading/platform_thread.h"
++#include "base/time/time.h"
++#include "base/timer/timer.h"
++#include "base/win/scoped_handle.h"
++#include "chrome/browser/ui/webui/aero_terminal/terminal_host.h"
++#include "chrome/browser/ui/webui/aero_terminal/terminal_session.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace aerographene {
++namespace {
++
++constexpr char kDsr[] = "\x1b[6n";       // PSEUDOCONSOLE_INHERIT_CURSOR asks
++constexpr char kDsrReply[] = "\x1b[1;1R";  // what xterm.js answers
++
++std::string Cmd() {
++  wchar_t sys[MAX_PATH];
++  const UINT n = ::GetSystemDirectoryW(sys, MAX_PATH);
++  return base::FilePath(std::wstring(sys, n)).Append(L"cmd.exe").AsUTF8Unsafe();
++}
++
++std::unique_ptr<TerminalSession> StartCmd(const std::string& script,
++                                          uint16_t cols = 80,
++                                          uint16_t rows = 24) {
++  TerminalSession::Options o;
++  o.argv = {Cmd(), "/d", "/c", script};
++  o.cols = cols;
++  o.rows = rows;
++  return TerminalSession::Start(o);
++}
++
++// Reads (polling the overlapped read) until `needle` shows up, the console
++// goes away, or timeout. Answers the console's cursor query like xterm.js.
++std::string ReadUntil(TerminalSession& s, std::string_view needle,
++                      base::TimeDelta timeout = base::Seconds(10)) {
++  std::string out;
++  bool answered = false;
++  const base::TimeTicks deadline = base::TimeTicks::Now() + timeout;
++  while (out.find(needle) == std::string::npos &&
++         base::TimeTicks::Now() < deadline) {
++    std::string buf;
++    const TerminalSession::ReadResult r =
++        s.ReadSome(&buf, TerminalSession::kReadChunk);
++    if (r == TerminalSession::ReadResult::kClosed) {
++      break;
++    }
++    if (r == TerminalSession::ReadResult::kPending) {
++      ::WaitForSingleObject(s.read_event(), 50);
++      continue;
++    }
++    out += buf;
++    if (!answered && out.find(kDsr) != std::string::npos) {
++      answered = true;
++      s.WriteSome(kDsrReply);
++    }
++  }
++  return out;
++}
++
++bool ProcessAlive(DWORD pid) {
++  base::win::ScopedHandle p(
++      ::OpenProcess(SYNCHRONIZE, FALSE, pid));
++  return p.is_valid() && ::WaitForSingleObject(p.get(), 0) == WAIT_TIMEOUT;
++}
++
++// Children of `parent` (by the toolhelp snapshot).
++std::vector<DWORD> ChildrenOf(DWORD parent) {
++  std::vector<DWORD> out;
++  base::win::ScopedHandle snap(::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
++  PROCESSENTRY32W e = {sizeof(e)};
++  for (BOOL ok = ::Process32FirstW(snap.get(), &e); ok;
++       ok = ::Process32NextW(snap.get(), &e)) {
++    if (e.th32ParentProcessID == parent) {
++      out.push_back(e.th32ProcessID);
++    }
++  }
++  return out;
++}
++
++TEST(TerminalSessionWinTest, EchoOk) {
++  auto s = StartCmd("echo ok");
++  ASSERT_TRUE(s);
++  EXPECT_NE(ReadUntil(*s, "ok").find("ok"), std::string::npos);
++  ::WaitForSingleObject(s->process_handle(), 5000);
++  EXPECT_EQ(s->Terminate(base::Seconds(1)), 0);
++}
++
++TEST(TerminalSessionWinTest, DefaultShellIsAbsoluteAndExists) {
++  const base::FilePath shell = TerminalSession::DefaultShellPath();
++  ASSERT_FALSE(shell.empty());
++  EXPECT_TRUE(shell.IsAbsolute());
++  const std::wstring name = shell.BaseName().value();
++  EXPECT_TRUE(name == L"pwsh.exe" || name == L"powershell.exe" ||
++              _wcsicmp(name.c_str(), L"cmd.exe") == 0)
++      << shell;
++}
++
++TEST(TerminalSessionWinTest, InitialSizeAndResize) {
++  // `mode con` prints the console size; cmd waits on `pause` meanwhile.
++  auto s = StartCmd("mode con & pause >nul & mode con & echo done", 100, 30);
++  ASSERT_TRUE(s);
++  std::string out = ReadUntil(*s, "Columns");
++  out += ReadUntil(*s, "100");
++  EXPECT_NE(out.find("100"), std::string::npos) << out;
++  EXPECT_TRUE(s->Resize(120, 40));
++  s->WriteSome("x");
++  EXPECT_NE(ReadUntil(*s, "120").find("120"), std::string::npos);
++  s->Terminate();
++}
++
++TEST(TerminalSessionWinTest, RejectsBadSizes) {
++  EXPECT_FALSE(StartCmd("echo", 0, 24));
++  EXPECT_FALSE(StartCmd("echo", 80, 0));
++  EXPECT_FALSE(StartCmd("echo", TerminalSession::kMaxCols + 1, 24));
++  auto s = StartCmd("pause >nul");
++  ASSERT_TRUE(s);
++  EXPECT_FALSE(s->Resize(0, 10));
++  EXPECT_FALSE(s->Resize(10, TerminalSession::kMaxRows + 1));
++  s->Terminate();
++}
++
++TEST(TerminalSessionWinTest, CleanEnvironment) {
++  ::SetEnvironmentVariableW(L"AERO_SECRET_TEST", L"leak");
++  auto s = StartCmd("echo [%AERO_SECRET_TEST%][%TERM%][%USERPROFILE%] & cd");
++  ::SetEnvironmentVariableW(L"AERO_SECRET_TEST", nullptr);
++  ASSERT_TRUE(s);
++  std::string out = ReadUntil(*s, "]");
++  out += ReadUntil(*s, ":\\");
++  // cmd leaves an unset %VAR% as is.
++  EXPECT_NE(out.find("[%AERO_SECRET_TEST%]"), std::string::npos) << out;
++  EXPECT_NE(out.find("[xterm-256color]"), std::string::npos) << out;
++  s->Terminate();
++}
++
++TEST(TerminalSessionWinTest, TerminateKillsWholeJob) {
++  // A grandchild started by the shell (`start /b`) must die with the session.
++  auto s = StartCmd("start /b ping -n 600 127.0.0.1 >nul & pause >nul");
++  ASSERT_TRUE(s);
++  const DWORD shell = s->pid();
++  std::vector<DWORD> kids;
++  for (int i = 0; i < 100 && kids.empty(); ++i) {
++    base::PlatformThread::Sleep(base::Milliseconds(50));
++    kids = ChildrenOf(shell);
++  }
++  ASSERT_FALSE(kids.empty());
++  s->Terminate(base::Milliseconds(100));
++  EXPECT_FALSE(ProcessAlive(shell));
++  for (DWORD k : kids) {
++    EXPECT_FALSE(ProcessAlive(k)) << k;
++  }
++}
++
++TEST(TerminalSessionWinTest, DestructorKillsJob) {
++  auto s = StartCmd("pause >nul");
++  ASSERT_TRUE(s);
++  const DWORD pid = s->pid();
++  s.reset();
++  EXPECT_FALSE(ProcessAlive(pid));
++}
++
++TEST(TerminalSessionWinTest, WriteNeverBlocks) {
++  // Nothing reads the input: WriteSome() must keep returning (0 once a
++  // write is pending), never hang.
++  auto s = StartCmd("ping -n 600 127.0.0.1 >nul");
++  ASSERT_TRUE(s);
++  const std::string chunk(TerminalSession::kWriteChunk, 'x');
++  const base::TimeTicks start = base::TimeTicks::Now();
++  size_t zeros = 0;
++  for (int i = 0; i < 64; ++i) {
++    std::optional<size_t> n = s->WriteSome(chunk);
++    ASSERT_TRUE(n);
++    zeros += *n == 0;
++  }
++  EXPECT_GT(zeros, 0u);
++  EXPECT_LT(base::TimeTicks::Now() - start, base::Seconds(2));
++  s->Terminate();
++}
++
++TEST(TerminalSessionWinTest, TerminateIsIdempotentAndBlocksIo) {
++  auto s = StartCmd("pause >nul");
++  ASSERT_TRUE(s);
++  s->Terminate();
++  EXPECT_FALSE(s->Terminate().has_value());
++  EXPECT_FALSE(s->WriteSome("x"));
++  EXPECT_FALSE(s->Resize(80, 24));
++  std::string buf;
++  EXPECT_EQ(s->ReadSome(&buf, 16), TerminalSession::ReadResult::kClosed);
++  EXPECT_TRUE(s->ForegroundProcessName().empty());
++}
++
++TEST(TerminalSessionWinTest, ForegroundProcessName) {
++  auto s = StartCmd("ping -n 600 127.0.0.1 >nul");
++  ASSERT_TRUE(s);
++  std::string name;
++  for (int i = 0; i < 100 && name != "PING"; ++i) {
++    base::PlatformThread::Sleep(base::Milliseconds(50));
++    name = s->ForegroundProcessName();
++    for (char& c : name) {
++      c = static_cast<char>(toupper(c));
++    }
++  }
++  EXPECT_EQ(name, "PING");
++  s->Terminate();
++}
++
++// TerminalHost on a plain loop: ObjectWatcher needs only a sequence.
++class TerminalHostWinTest : public testing::Test {
++ protected:
++  TerminalHostWinTest() : executor_(base::MessagePumpType::IO) {}
++
++  void SetUp() override {
++    host_ = std::make_unique<TerminalHost>(
++        base::BindRepeating(&TerminalHostWinTest::OnOutput,
++                            base::Unretained(this)),
++        base::BindRepeating(&TerminalHostWinTest::OnExit,
++                            base::Unretained(this)));
++  }
++
++  void OnOutput(int32_t id, std::string bytes) {
++    output_[id] += bytes;
++    if (bytes.find(kDsr) != std::string::npos) {
++      host_->Write(id, kDsrReply);
++    }
++    if (auto_ack_) {
++      host_->Ack(id, bytes.size());
++    }
++    if (quit_ && !needle_.empty() &&
++        output_[id].find(needle_) != std::string::npos) {
++      std::move(quit_).Run();
++    }
++  }
++  void OnExit(int32_t id, int code) {
++    exits_[id] = code;
++    if (quit_ && needle_.empty()) {
++      std::move(quit_).Run();
++    }
++  }
++
++  bool RunUntil(std::string needle) {
++    needle_ = std::move(needle);
++    base::RunLoop loop;
++    quit_ = loop.QuitClosure();
++    base::OneShotTimer timeout;
++    timed_out_ = false;
++    timeout.Start(FROM_HERE, base::Seconds(20),
++                  base::BindOnce(
++                      [](bool* t, base::OnceClosure q) {
++                        *t = true;
++                        std::move(q).Run();
++                      },
++                      &timed_out_, loop.QuitClosure()));
++    loop.Run();
++    quit_.Reset();
++    return !timed_out_;
++  }
++
++  void RunFor(base::TimeDelta delay) {
++    base::RunLoop loop;
++    base::OneShotTimer t;
++    t.Start(FROM_HERE, delay, loop.QuitClosure());
++    loop.Run();
++  }
++
++  base::SingleThreadTaskExecutor executor_;
++  std::unique_ptr<TerminalHost> host_;
++  std::map<int32_t, std::string> output_;
++  std::map<int32_t, int> exits_;
++  std::string needle_;
++  base::OnceClosure quit_;
++  bool timed_out_ = false;
++  bool auto_ack_ = true;
++};
++
++TEST_F(TerminalHostWinTest, EchoesThroughShell) {
++  ASSERT_TRUE(host_->Open(1, 80, 24));
++  // Same text in pwsh, powershell and cmd; the quotes keep the echo of the
++  // typed line from matching.
++  host_->Write(1, "echo aero\"\"42\r");
++  EXPECT_TRUE(RunUntil("aero42")) << output_[1];
++}
++
++TEST_F(TerminalHostWinTest, ExitIsReported) {
++  ASSERT_TRUE(host_->Open(1, 80, 24));
++  host_->Write(1, "exit\r");
++  EXPECT_TRUE(RunUntil(std::string())) << output_[1];
++  EXPECT_TRUE(exits_.contains(1));
++}
++
++TEST_F(TerminalHostWinTest, LimitsAndDuplicates) {
++  ASSERT_TRUE(host_->Open(1, 80, 24));
++  EXPECT_FALSE(host_->Open(1, 80, 24));
++  EXPECT_FALSE(host_->Open(2, 0, 24));
++  EXPECT_FALSE(host_->Write(99, "x"));
++}
++
++TEST_F(TerminalHostWinTest, PasteIntoBusyShellNeverBlocks) {
++  auto_ack_ = false;
++  ASSERT_TRUE(host_->Open(1, 80, 24));
++  host_->Write(1, "ping -n 600 127.0.0.1\r");
++  const std::string chunk(256 * 1024, 'x');
++  const base::TimeTicks start = base::TimeTicks::Now();
++  int refused = 0;
++  for (int i = 0; i < 8; ++i) {
++    refused += !host_->Write(1, chunk);
++  }
++  EXPECT_GT(refused, 0);
++  EXPECT_LT(base::TimeTicks::Now() - start, base::Seconds(2));
++  host_->Close(1);
++}
++
++TEST_F(TerminalHostWinTest, DestructionKillsSessions) {
++  ASSERT_TRUE(host_->Open(1, 80, 24));
++  host_->Write(1, "ping -n 600 127.0.0.1\r");
++  RunFor(base::Seconds(2));
++  host_.reset();
++  // Nothing of ours may still be running ping.
++  base::win::ScopedHandle snap(::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
++  PROCESSENTRY32W e = {sizeof(e)};
++  for (BOOL ok = ::Process32FirstW(snap.get(), &e); ok;
++       ok = ::Process32NextW(snap.get(), &e)) {
++    if (_wcsicmp(e.szExeFile, L"PING.EXE") == 0) {
++      // Another ping on the machine would be a false failure; ours had
++      // our shell as parent, which is gone.
++      EXPECT_FALSE(ProcessAlive(e.th32ParentProcessID) &&
++                   e.th32ParentProcessID != 0)
++          << e.th32ProcessID;
++    }
++  }
++}
++
++}  // namespace
++}  // namespace aerographene
+diff --git a/chrome/browser/ui/webui/chrome_web_ui_configs.cc b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
+index 3a2359a..7c02351 100644
+--- a/chrome/browser/ui/webui/chrome_web_ui_configs.cc
++++ b/chrome/browser/ui/webui/chrome_web_ui_configs.cc
+@@ -242,9 +242,9 @@
+ #include "chrome/browser/ui/webui/aero_notes/aero_notes_ui.h"
+ #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
+ #include "chrome/browser/ui/webui/aero_terminal/aero_terminal_ui.h"
+-#endif  // BUILDFLAG(IS_LINUX)
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+     BUILDFLAG(IS_CHROMEOS)
+@@ -331,9 +331,9 @@ void RegisterChromeWebUIConfigs() {
+   // aerographene: config only; the page is built when a tab opens it.
+   map.AddWebUIConfig(std::make_unique<AeroNotesUIConfig>());
+ #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
+   map.AddWebUIConfig(std::make_unique<AeroTerminalUIConfig>());
+-#endif  // BUILDFLAG(IS_LINUX)
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
+ #if BUILDFLAG(ENABLE_WEBUI_NTP)
+   map.AddWebUIConfig(std::make_unique<NewTabPageUIConfig>());
+ #endif  // BUILDFLAG(ENABLE_WEBUI_NTP)
+diff --git a/chrome/test/BUILD.gn b/chrome/test/BUILD.gn
+index d832578..d2fda89 100644
+--- a/chrome/test/BUILD.gn
++++ b/chrome/test/BUILD.gn
+@@ -6956,6 +6956,11 @@ test("unit_tests") {
+     ]
+   }
+ 
++  if (is_win) {
++    # aerographene: terminal over ConPTY (D3e).
++    deps += [ "//chrome/browser/ui/webui/aero_terminal:unit_tests" ]
++  }
++
+   if (is_chromeos) {
+     sources += [
+       "../browser/shell_integration_chromeos_unittest.cc",

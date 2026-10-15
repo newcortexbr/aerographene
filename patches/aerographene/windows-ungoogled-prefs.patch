@@ -1,0 +1,34 @@
+aerographene: compilar no Windows sem as prefs que o ungoogled remove (remove-unused-preferences-fields).
+
+Origem do 1º hunk: ungoogled-chromium-windows, patches/ungoogled-chromium/windows/
+windows-fix-remove-unused-preferences-fields.patch (tag 154.0.8037.97-1.1), licença BSD-3-Clause
+(The ungoogled-chromium Authors). 2º hunk aerographene (GPL-3.0): kSignedInWithCredentialProvider
+não existe mais; a checagem de primeiro login via GCPW sai (só age com GCPW instalado).
+
+--- a/chrome/browser/policy/configuration_policy_handler_list_factory.cc
++++ b/chrome/browser/policy/configuration_policy_handler_list_factory.cc
+@@ -1911,9 +1911,6 @@ const PolicyToPreferenceMapEntry kSimple
+   { key::kRendererAppContainerEnabled,
+     prefs::kRendererAppContainerEnabled,
+     base::Value::Type::BOOLEAN },
+-  { key::kBoundSessionCredentialsEnabled,
+-    prefs::kBoundSessionCredentialsEnabled,
+-    base::Value::Type::BOOLEAN },
+   { key::kBrowserLegacyExtensionPointsBlocked,
+     prefs::kBlockBrowserLegacyExtensionPoints,
+     base::Value::Type::BOOLEAN },
+--- a/chrome/browser/signin/signin_util_win.cc
++++ b/chrome/browser/signin/signin_util_win.cc
+@@ -346,12 +346,6 @@
+ }
+ 
+ void SigninWithCredentialProviderIfPossible(Profile* profile) {
+-  // This flow is used for first time signin through credential provider. Any
+-  // subsequent signin for the credential provider user needs to go through
+-  // reauth flow.
+-  if (profile->GetPrefs()->GetBoolean(prefs::kSignedInWithCredentialProvider))
+-    return;
+-
+   std::wstring cred_provider_gaia_id;
+   std::wstring cred_provider_email;
+ 

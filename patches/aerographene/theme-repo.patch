@@ -24,6 +24,15 @@ processo) apaga, numa tarefa BEST_EFFORT/MayBlock, as pastas ".install-*"
 órfãs do repositório (sobras de queda entre a escrita e o rename): só
 diretórios reais com mtime de 60 s ou mais; symlinks nunca são seguidos nem
 removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
+D3b (Windows): repositório em %LOCALAPPDATA%\aerographene\themes; POSIX
+mantido sob #if; no Windows a leitura é Win32 (CreateFileW com
+FILE_FLAG_OPEN_REPARSE_POINT, só FILE_TYPE_DISK, sem reparse point nem
+diretório, cap 64 KiB; sem base::File pelo mesmo motivo
+da thread de UI), listagem por FindFirstFileExW (atributos da própria
+entrada, como lstat: reparse point ".install-*" nunca é seguido nem
+removido), rename por MoveFileExW sem REPLACE_EXISTING. Nomes reservados,
+ADS, 8.3 e confinamento contra reparse points no repositório ficam para a
+D3c.
 
 --- /dev/null
 +++ b/chrome/browser/themes/aerographene_theme_repo.h
@@ -59,14 +68,14 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +// Names are stored and compared in NFC; comparisons also ignore case.
 +bool IsValidThemeName(std::string_view name);
 +
-+// "default" and "pixelized" (case-insensitive) belong to the built-in themes.
++// the 8 built-in theme names (case-insensitive) are reserved.
 +bool IsReservedThemeName(std::string_view name);
 +
 +enum class ThemeParseResult {
 +  kOk,
 +  kInvalidJson,   // not JSON, not an object, or larger than the cap
 +  kInvalidName,   // "name" missing or not IsValidThemeName
-+  kReservedName,  // "name" is default/pixelized
++  kReservedName,  // "name" is a built-in name
 +  kInvalidField,  // a field has the wrong type, range or value
 +};
 +
@@ -105,7 +114,7 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +  bool builtin = false;
 +};
 +
-+// Lists "default", "pixelized", then valid repository themes sorted by name.
++// Lists the built-in themes, then valid repository themes sorted by name.
 +// Scans on a thread-pool task (MayBlock); `callback` runs on the calling
 +// sequence. Broken folders are skipped.
 +using ListThemesCallback = base::OnceCallback<void(std::vector<ThemeInfo>)>;
@@ -114,7 +123,7 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +enum class InstallResult {
 +  kInstalled,
 +  kInvalid,   // ParseThemeJson failed
-+  kReserved,  // name is default/pixelized
++  kReserved,  // name is a built-in name
 +  kConflict,  // same name (case-insensitive) exists and replace == false
 +  kIoError,
 +};
@@ -147,17 +156,11 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +#endif  // CHROME_BROWSER_THEMES_AEROGRAPHENE_THEME_REPO_H_
 --- /dev/null
 +++ b/chrome/browser/themes/aerographene_theme_repo.cc
-@@ -0,0 +1,554 @@
+@@ -0,0 +1,706 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
 +#include "chrome/browser/themes/aerographene_theme_repo.h"
-+
-+#include <dirent.h>
-+#include <fcntl.h>
-+#include <stdio.h>
-+#include <sys/stat.h>
-+#include <unistd.h>
 +
 +#include <algorithm>
 +#include <atomic>
@@ -173,9 +176,7 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +#include "base/i18n/case_conversion.h"
 +#include "base/json/json_reader.h"
 +#include "base/location.h"
-+#include "base/nix/xdg_util.h"
 +#include "base/no_destructor.h"
-+#include "base/posix/eintr_wrapper.h"
 +#include "base/strings/string_util.h"
 +#include "base/strings/utf_string_conversions.h"
 +#include "base/task/sequenced_task_runner.h"
@@ -186,6 +187,26 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +#include "third_party/icu/source/common/unicode/normalizer2.h"
 +#include "third_party/icu/source/common/unicode/unistr.h"
 +
++#include "build/build_config.h"
++
++#if BUILDFLAG(IS_WIN)
++#include <windows.h>
++
++#include "base/base_paths.h"
++#include "base/functional/function_ref.h"
++#include "base/path_service.h"
++#include "base/win/scoped_handle.h"
++#else
++#include <dirent.h>
++#include <fcntl.h>
++#include <stdio.h>
++#include <sys/stat.h>
++#include <unistd.h>
++
++#include "base/nix/xdg_util.h"
++#include "base/posix/eintr_wrapper.h"
++#endif  // BUILDFLAG(IS_WIN)
++
 +namespace aerographene {
 +
 +namespace {
@@ -194,7 +215,8 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +constexpr int kMinFontSize = 8;
 +constexpr int kMaxFontSize = 32;
 +// Hidden staging folders of InstallTheme (also "<staging>.old" backups).
-+constexpr char kStagingPrefix[] = ".install-";
++constexpr base::FilePath::CharType kStagingPrefix[] =
++    FILE_PATH_LITERAL(".install-");
 +// An install takes milliseconds; anything older is an orphan.
 +constexpr base::TimeDelta kStagingMinAge = base::Seconds(60);
 +
@@ -202,6 +224,61 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +  static base::NoDestructor<base::FilePath> dir;
 +  return *dir;
 +}
++
++// Theme folder name <-> path component. POSIX keeps the raw bytes (no locale
++// conversion); Windows converts UTF-16 <-> UTF-8.
++std::string FolderName(const base::FilePath& path) {
++#if BUILDFLAG(IS_WIN)
++  return base::WideToUTF8(path.BaseName().value());
++#else
++  return path.BaseName().value();
++#endif
++}
++
++base::FilePath::StringType NativeName(std::string_view name) {
++#if BUILDFLAG(IS_WIN)
++  return base::UTF8ToWide(name);
++#else
++  return std::string(name);
++#endif
++}
++
++// rename(2) on POSIX; MoveFileExW without MOVEFILE_REPLACE_EXISTING or
++// MOVEFILE_COPY_ALLOWED on Windows (same-volume rename, no copy).
++bool RenamePath(const base::FilePath& from, const base::FilePath& to) {
++#if BUILDFLAG(IS_WIN)
++  return ::MoveFileExW(from.value().c_str(), to.value().c_str(), 0) != 0;
++#else
++  return rename(from.value().c_str(), to.value().c_str()) == 0;
++#endif
++}
++
++#if BUILDFLAG(IS_WIN)
++// Entries of `dir` (not "." or ".."), from FindFirstFileExW. Like lstat, the
++// attributes describe a symlink or junction itself
++// (FILE_ATTRIBUTE_REPARSE_POINT), never its target. No base::FileEnumerator:
++// same UI-thread reason as ReadSmallFile. `visit` returns false to stop.
++void ForEachEntry(const base::FilePath& dir,
++                  base::FunctionRef<bool(const WIN32_FIND_DATAW&)> visit) {
++  WIN32_FIND_DATAW data;
++  HANDLE find = ::FindFirstFileExW(
++      dir.Append(FILE_PATH_LITERAL("*")).value().c_str(), FindExInfoBasic,
++      &data, FindExSearchNameMatch, nullptr, 0);
++  if (find == INVALID_HANDLE_VALUE) {
++    return;
++  }
++  do {
++    const std::wstring_view name(data.cFileName);
++    if (name == L"." || name == L"..") {
++      continue;
++    }
++    if (!visit(data)) {
++      break;
++    }
++  } while (::FindNextFileW(find, &data));
++  ::FindClose(find);
++}
++#endif  // BUILDFLAG(IS_WIN)
 +
 +// NFC, so "é" typed composed or decomposed is the same theme name. Input
 +// that ICU cannot normalize is returned unchanged.
@@ -306,6 +383,52 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +  return true;
 +}
 +
++#if BUILDFLAG(IS_WIN)
++// Plain Win32 read of a small file, the equivalent of the POSIX branch below:
++// avoids base::File (UI thread blocking assertions); GetFileType keeps a
++// pipe, console or other device in place of theme.json from blocking the UI
++// thread (refused before any read, like O_NONBLOCK + S_ISREG); the attributes
++// must be a plain file (not a directory, not a reparse point: the link itself
++// is opened with FILE_FLAG_OPEN_REPARSE_POINT and refused, stricter than the
++// POSIX branch); size capped at kMaxThemeFileBytes before and while reading.
++// Full confinement of the repository on Windows is D3c.
++std::optional<std::string> ReadSmallFile(const base::FilePath& path) {
++  base::win::ScopedHandle file(::CreateFileW(
++      path.value().c_str(), GENERIC_READ,
++      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
++      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
++      nullptr));
++  if (!file.is_valid() || ::GetFileType(file.get()) != FILE_TYPE_DISK) {
++    return std::nullopt;
++  }
++  // The link itself was opened (FILE_FLAG_OPEN_REPARSE_POINT): a symlink or
++  // junction in place of the file, or a directory, is refused.
++  BY_HANDLE_FILE_INFORMATION info;
++  if (!::GetFileInformationByHandle(file.get(), &info) ||
++      (info.dwFileAttributes &
++       (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY))) {
++    return std::nullopt;
++  }
++  if (info.nFileSizeHigh != 0 || info.nFileSizeLow > kMaxThemeFileBytes) {
++    return std::nullopt;
++  }
++  std::string data;
++  char buf[4096];
++  while (true) {
++    DWORD n = 0;
++    if (!::ReadFile(file.get(), buf, sizeof(buf), &n, nullptr)) {
++      return std::nullopt;
++    }
++    if (n == 0) {
++      return data;
++    }
++    data.append(buf, n);
++    if (data.size() > kMaxThemeFileBytes) {
++      return std::nullopt;
++    }
++  }
++}
++#else
 +// Reads an open fd of a regular file, capped at kMaxThemeFileBytes.
 +std::optional<std::string> ReadSmallFd(int fd) {
 +  struct stat st;
@@ -343,18 +466,29 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +  IGNORE_EINTR(close(fd));
 +  return data;
 +}
++#endif  // BUILDFLAG(IS_WIN)
 +
 +// Folder of `dir` whose name matches `name` without case/normalization
-+// differences, POSIX only (UI thread safe like ReadSmallFile). Covers a pref
++// differences, no base::FileEnumerator (UI thread safe like ReadSmallFile). Covers a pref
 +// left with the old spelling after a replace that changed the case.
 +std::optional<std::string> FindFolderFolded(const base::FilePath& dir,
 +                                            std::string_view name) {
++  const std::u16string key = FoldName(name);
++  std::optional<std::string> found;
++#if BUILDFLAG(IS_WIN)
++  ForEachEntry(dir, [&](const WIN32_FIND_DATAW& entry) {
++    const std::string folder = base::WideToUTF8(entry.cFileName);
++    if (IsValidThemeName(folder) && FoldName(folder) == key) {
++      found = folder;
++      return false;
++    }
++    return true;
++  });
++#else
 +  DIR* d = opendir(dir.value().c_str());
 +  if (!d) {
 +    return std::nullopt;
 +  }
-+  const std::u16string key = FoldName(name);
-+  std::optional<std::string> found;
 +  while (const dirent* entry = readdir(d)) {
 +    const std::string_view folder(entry->d_name);
 +    if (IsValidThemeName(folder) && FoldName(folder) == key) {
@@ -363,6 +497,7 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +    }
 +  }
 +  closedir(d);
++#endif  // BUILDFLAG(IS_WIN)
 +  return found;
 +}
 +
@@ -373,7 +508,7 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +    return std::nullopt;
 +  }
 +  std::optional<std::string> json =
-+      ReadSmallFile(dir.Append(folder).Append(kThemeFileName));
++      ReadSmallFile(dir.Append(NativeName(folder)).AppendASCII(kThemeFileName));
 +  ThemeData theme;
 +  if (!json || ParseThemeJson(*json, &theme) != ThemeParseResult::kOk ||
 +      theme.name != NormalizeName(folder)) {
@@ -389,7 +524,7 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +  for (base::FilePath path = enumerator.Next(); !path.empty();
 +       path = enumerator.Next()) {
 +    if (std::optional<ThemeData> theme =
-+            LoadRepoTheme(dir, path.BaseName().value())) {
++            LoadRepoTheme(dir, FolderName(path))) {
 +      found.push_back({std::move(*theme), /*builtin=*/false});
 +    }
 +  }
@@ -426,7 +561,7 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +                                    base::FileEnumerator::DIRECTORIES);
 +    for (base::FilePath path = enumerator.Next(); !path.empty();
 +         path = enumerator.Next()) {
-+      const std::string folder = path.BaseName().value();
++      const std::string folder = FolderName(path);
 +      if (IsValidThemeName(folder) && FoldName(folder) == key) {
 +        existing = path;
 +        break;
@@ -445,23 +580,23 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +    return InstallResult::kIoError;
 +  }
 +  if (!base::ImportantFileWriter::WriteFileAtomically(
-+          staging.Append(kThemeFileName), json)) {
++          staging.AppendASCII(kThemeFileName), json)) {
 +    base::DeletePathRecursively(staging);
 +    return InstallResult::kIoError;
 +  }
 +  base::FilePath backup;
 +  if (!existing.empty()) {
-+    backup = staging.AddExtension("old");
-+    if (rename(existing.value().c_str(), backup.value().c_str()) != 0) {
++    backup = staging.AddExtension(FILE_PATH_LITERAL("old"));
++    if (!RenamePath(existing, backup)) {
 +      base::DeletePathRecursively(staging);
 +      return InstallResult::kIoError;
 +    }
 +  }
 +  // `name` passed IsValidThemeName: a single path component.
-+  const base::FilePath target = dir.Append(name);
-+  if (rename(staging.value().c_str(), target.value().c_str()) != 0) {
++  const base::FilePath target = dir.Append(NativeName(name));
++  if (!RenamePath(staging, target)) {
 +    if (!backup.empty()) {
-+      rename(backup.value().c_str(), existing.value().c_str());
++      RenamePath(backup, existing);
 +    }
 +    base::DeletePathRecursively(staging);
 +    return InstallResult::kIoError;
@@ -476,12 +611,27 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +
 +void RemoveStaleStagingFolders(const base::FilePath& dir,
 +                               base::TimeDelta min_age) {
++  std::vector<base::FilePath> stale;
++#if BUILDFLAG(IS_WIN)
++  const base::Time cutoff = base::Time::Now() - min_age;
++  ForEachEntry(dir, [&](const WIN32_FIND_DATAW& entry) {
++    // Attributes of the entry itself (lstat): a symlink or junction named
++    // ".install-*" is a reparse point and is skipped, never followed.
++    const std::wstring_view name(entry.cFileName);
++    if (name.starts_with(kStagingPrefix) &&
++        (entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
++        !(entry.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
++        base::Time::FromFileTime(entry.ftLastWriteTime) <= cutoff) {
++      stale.push_back(dir.Append(name));
++    }
++    return true;
++  });
++#else
 +  DIR* d = opendir(dir.value().c_str());
 +  if (!d) {
 +    return;
 +  }
 +  const time_t cutoff = (base::Time::Now() - min_age).ToTimeT();
-+  std::vector<base::FilePath> stale;
 +  while (const dirent* entry = readdir(d)) {
 +    const std::string_view name(entry->d_name);
 +    if (!name.starts_with(kStagingPrefix)) {
@@ -496,6 +646,7 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +    }
 +  }
 +  closedir(d);
++#endif  // BUILDFLAG(IS_WIN)
 +  for (const base::FilePath& path : stale) {
 +    base::DeletePathRecursively(path);
 +  }
@@ -623,11 +774,21 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +  if (!RepoDirOverride().empty()) {
 +    return RepoDirOverride();
 +  }
++#if BUILDFLAG(IS_WIN)
++  // %LOCALAPPDATA%\aerographene\themes (Windows data layout: D3d).
++  base::FilePath dir;
++  if (!base::PathService::Get(base::DIR_LOCAL_APP_DATA, &dir)) {
++    return base::FilePath();
++  }
++  return dir.Append(FILE_PATH_LITERAL("aerographene"))
++      .Append(FILE_PATH_LITERAL("themes"));
++#else
 +  std::unique_ptr<base::Environment> env = base::Environment::Create();
 +  return base::nix::GetXDGDirectory(env.get(), base::nix::kXdgConfigHomeEnvVar,
 +                                    base::nix::kDotConfigDir)
 +      .Append("aerographene")
 +      .Append("themes");
++#endif  // BUILDFLAG(IS_WIN)
 +}
 +
 +void SetThemeRepoDirForTesting(const base::FilePath& dir) {
@@ -704,14 +865,11 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +}  // namespace aerographene
 --- /dev/null
 +++ b/chrome/browser/themes/aerographene_theme_repo_unittest.cc
-@@ -0,0 +1,266 @@
+@@ -0,0 +1,276 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
 +#include "chrome/browser/themes/aerographene_theme_repo.h"
-+
-+#include <sys/stat.h>
-+#include <unistd.h>
 +
 +#include <string>
 +#include <vector>
@@ -722,7 +880,13 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +#include "base/time/time.h"
 +#include "base/test/task_environment.h"
 +#include "base/test/test_future.h"
++#include "build/build_config.h"
 +#include "testing/gtest/include/gtest/gtest.h"
++
++#if BUILDFLAG(IS_POSIX)
++#include <sys/stat.h>
++#include <unistd.h>
++#endif
 +
 +namespace aerographene {
 +namespace {
@@ -738,9 +902,9 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +  void TearDown() override { SetThemeRepoDirForTesting(base::FilePath()); }
 +
 +  void WriteTheme(const std::string& folder, const std::string& json) {
-+    const base::FilePath path = dir_.GetPath().Append(folder);
++    const base::FilePath path = dir_.GetPath().AppendASCII(folder);
 +    ASSERT_TRUE(base::CreateDirectory(path));
-+    ASSERT_TRUE(base::WriteFile(path.Append(kThemeFileName), json));
++    ASSERT_TRUE(base::WriteFile(path.AppendASCII(kThemeFileName), json));
 +  }
 +
 +  base::test::TaskEnvironment task_environment_;
@@ -860,7 +1024,7 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +TEST_F(AerographeneThemeRepoTest, ReadSkipsNonRegularFile) {
 +  // A directory named theme.json is not read (fstat S_ISREG).
 +  ASSERT_TRUE(base::CreateDirectory(
-+      dir_.GetPath().Append("pasta").Append(kThemeFileName)));
++      dir_.GetPath().AppendASCII("pasta").AppendASCII(kThemeFileName)));
 +  EXPECT_EQ(ResolveTheme("pasta").theme.name, "default");
 +}
 +
@@ -902,7 +1066,7 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +  }
 +  EXPECT_EQ(ResolveTheme("meu tema").theme.radius, 0);
 +  // Replaced in place: one folder, no staging or backup folder left.
-+  EXPECT_FALSE(base::PathExists(dir_.GetPath().Append("Meu Tema")));
++  EXPECT_FALSE(base::PathExists(dir_.GetPath().AppendASCII("Meu Tema")));
 +  int folders = 0;
 +  base::FileEnumerator enumerator(dir_.GetPath(), /*recursive=*/false,
 +                                  base::FileEnumerator::DIRECTORIES);
@@ -931,9 +1095,9 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +  const base::FilePath root = dir_.GetPath();
 +  const base::Time old_time = base::Time::Now() - base::Minutes(10);
 +  auto make_dir = [&](const std::string& name, bool old) {
-+    const base::FilePath path = root.Append(name);
++    const base::FilePath path = root.AppendASCII(name);
 +    ASSERT_TRUE(base::CreateDirectory(path));
-+    ASSERT_TRUE(base::WriteFile(path.Append(kThemeFileName), kMinimal));
++    ASSERT_TRUE(base::WriteFile(path.AppendASCII(kThemeFileName), kMinimal));
 +    if (old) {
 +      ASSERT_TRUE(base::TouchFile(path, old_time, old_time));
 +    }
@@ -943,30 +1107,37 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +  make_dir(".install-fresh", /*old=*/false);
 +  make_dir(".outro-oculto", /*old=*/true);
 +  WriteTheme("Meu Tema", kMinimal);
-+  ASSERT_TRUE(base::TouchFile(root.Append("Meu Tema"), old_time, old_time));
++  ASSERT_TRUE(
++      base::TouchFile(root.AppendASCII("Meu Tema"), old_time, old_time));
 +
++#if BUILDFLAG(IS_POSIX)
 +  // A symlink named like a staging folder, pointing outside the repository,
-+  // is neither followed nor removed; its target stays intact.
++  // is neither followed nor removed; its target stays intact. (Windows: the
++  // junction case is tested with the confinement work, D3c.)
 +  base::ScopedTempDir outside;
 +  ASSERT_TRUE(outside.CreateUniqueTempDir());
 +  ASSERT_TRUE(base::WriteFile(outside.GetPath().Append("keep.txt"), "x"));
 +  ASSERT_EQ(symlink(outside.GetPath().value().c_str(),
 +                    root.Append(".install-link").value().c_str()),
 +            0);
++#endif
 +
 +  RemoveStaleStagingFolders(root, base::Minutes(1));
 +
-+  EXPECT_FALSE(base::PathExists(root.Append(".install-orphan")));
-+  EXPECT_FALSE(base::PathExists(root.Append(".install-orphan.old")));
-+  EXPECT_TRUE(base::PathExists(root.Append(".install-fresh")));
-+  EXPECT_TRUE(base::PathExists(root.Append(".outro-oculto")));
-+  EXPECT_TRUE(base::PathExists(root.Append("Meu Tema").Append(kThemeFileName)));
++  EXPECT_FALSE(base::PathExists(root.AppendASCII(".install-orphan")));
++  EXPECT_FALSE(base::PathExists(root.AppendASCII(".install-orphan.old")));
++  EXPECT_TRUE(base::PathExists(root.AppendASCII(".install-fresh")));
++  EXPECT_TRUE(base::PathExists(root.AppendASCII(".outro-oculto")));
++  EXPECT_TRUE(base::PathExists(
++      root.AppendASCII("Meu Tema").AppendASCII(kThemeFileName)));
++#if BUILDFLAG(IS_POSIX)
 +  struct stat st;
 +  EXPECT_EQ(lstat(root.Append(".install-link").value().c_str(), &st), 0);
 +  EXPECT_TRUE(S_ISLNK(st.st_mode));
 +  EXPECT_TRUE(base::PathExists(outside.GetPath().Append("keep.txt")));
++#endif
 +  // Missing repository directory: nothing to do.
-+  RemoveStaleStagingFolders(root.Append("nao-existe"), base::Minutes(1));
++  RemoveStaleStagingFolders(root.AppendASCII("nao-existe"), base::Minutes(1));
 +}
 +
 +}  // namespace
@@ -997,7 +1168,7 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
      "//chrome/app/theme:theme_resources",
      "//chrome/browser:browser_process",
      "//chrome/browser/infobars",
-@@ -61,6 +64,7 @@
+@@ -60,6 +63,7 @@
      "//components/version_info",
      "//content/public/browser",
      "//third_party/abseil-cpp:absl",
@@ -1005,7 +1176,7 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
      "//ui/color",
      "//ui/color/dynamic_color",
      "//ui/gfx",
-@@ -144,6 +148,7 @@
+@@ -147,6 +151,7 @@
      testonly = true
  
      sources = [
@@ -1023,7 +1194,7 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
  #include "chrome/browser/themes/browser_theme_pack.h"
  #include "chrome/browser/themes/custom_theme_supplier.h"
  #include "chrome/browser/themes/theme_properties.h"
-@@ -386,12 +387,22 @@
+@@ -396,12 +397,22 @@
  void ThemeService::Init() {
    theme_helper_->DCheckCalledOnValidSequence();
  
@@ -1049,7 +1220,7 @@ removidos. Deps de themes em ordem (//third_party/icu depois de abseil).
 +    // Orphaned ".install-*" staging folders: background task, once per process.
 +    aerographene::ScheduleStagingCleanup();
    }
- #if BUILDFLAG(IS_LINUX)
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
    if (profile_->IsRegularProfile()) {
 --- a/chrome/browser/ui/webui/new_tab_page_third_party/new_tab_page_third_party_ui.cc
 +++ b/chrome/browser/ui/webui/new_tab_page_third_party/new_tab_page_third_party_ui.cc

@@ -1,0 +1,637 @@
+aerographene: terminal — página do workspace C6 (cantos, sidebar, banner, foco e teclas).
+
+Origem: aerographene (original); arte braille do gatinho do dono do
+projeto. Licença: GPL-3.0.
+Depende de: aerographene/terminal-c6.patch (mensagem start) e da cadeia
+terminal-* (terminal-c5.patch para terminal.js).
+Propósito: a barra superior sai; botão no canto esquerdo abre a sidebar com
+todos os terminais (clicar centraliza e foca) e "+" no direito abre outro.
+Barra de título de cada janela só com "×" (título no tooltip e na sidebar);
+arrastar só pela barra, no conteúdo o mouse seleciona. Todo terminal começa
+com o resumo estilo fastfetch (banner.js: gatinho + versões, CPU, GPU, RAM,
+discos), escrito antes do prompt. Foco: com um terminal focado tudo vai para
+ele (Ctrl+C = ^C), Ctrl+Shift+C copia a seleção (preventDefault: o atalho do
+navegador não pega), Ctrl+Shift+V cola pelo evento paste; clicar no fundo
+tira o foco. "?new=1" pede um workspace novo ao navegador, troca a URL por
+"?w=N" (recarregar não cria outro) e digita o comando de uso único no
+primeiro terminal depois do load e de 0,5 s. Título da aba segue
+"t: workspace N". Teste: tests/terminal-page/run.sh (headless, handler
+simulado).
+
+--- a/chrome/browser/browser_resources.grd
++++ b/chrome/browser/browser_resources.grd
+@@ -119,6 +119,7 @@
+         <include name="IDR_AERO_TERMINAL_JS" file="resources\aero_terminal\terminal.js" type="BINDATA" />
+         <include name="IDR_AERO_TERMINAL_XTERM_JS" file="resources\aero_terminal\xterm.mjs" type="BINDATA" />
+         <include name="IDR_AERO_TERMINAL_XTERM_CSS" file="resources\aero_terminal\xterm.css" type="BINDATA" />
++        <include name="IDR_AERO_TERMINAL_BANNER_JS" file="resources\aero_terminal\banner.js" type="BINDATA" />
+       </if>
+       <if expr="is_chromeos">
+         <include name="IDR_CHROME_APP_MANIFEST" file="resources\chrome_app\manifest.json" type="BINDATA" />
+--- a/chrome/browser/ui/webui/aero_terminal/aero_terminal_ui.cc
++++ b/chrome/browser/ui/webui/aero_terminal/aero_terminal_ui.cc
+@@ -24,6 +24,7 @@
+       Profile::FromWebUI(web_ui), kAeroTerminalHost);
+   source->AddResourcePath("terminal.css", IDR_AERO_TERMINAL_CSS);
+   source->AddResourcePath("terminal.js", IDR_AERO_TERMINAL_JS);
++  source->AddResourcePath("banner.js", IDR_AERO_TERMINAL_BANNER_JS);
+   source->AddResourcePath("xterm.mjs", IDR_AERO_TERMINAL_XTERM_JS);
+   source->AddResourcePath("xterm.css", IDR_AERO_TERMINAL_XTERM_CSS);
+   source->SetDefaultResource(IDR_AERO_TERMINAL_HTML);
+--- a/chrome/browser/resources/aero_terminal/terminal.html
++++ b/chrome/browser/resources/aero_terminal/terminal.html
+@@ -2,30 +2,26 @@
+ <html lang="pt-BR">
+ <head>
+ <meta charset="utf-8">
+-<title>t: workspace 1</title>
++<title>t: workspace</title>
+ <meta name="color-scheme" content="dark">
+ <link rel="stylesheet" href="xterm.css">
+ <link rel="stylesheet" href="terminal.css">
+ <script type="module" src="terminal.js"></script>
+ </head>
+ <body>
+-<header class="bar">
+-  <button id="add" type="button">+ terminal</button>
+-  <span class="zoom">
+-    <button id="zoomOut" type="button" aria-label="diminuir zoom">−</button>
+-    <span id="zoom">100%</span>
+-    <button id="zoomIn" type="button" aria-label="aumentar zoom">+</button>
+-    <button id="zoomReset" type="button">1:1</button>
+-  </span>
+-  <span class="note" id="note">arraste o fundo para mover · Ctrl+roda para zoom</span>
+-</header>
+ <div class="board" id="board" aria-label="quadro de terminais">
+   <div class="world" id="world"></div>
+ </div>
++<button id="sideToggle" class="corner corner-left" type="button"
++    aria-label="terminais abertos" aria-controls="side" aria-expanded="false">☰</button>
++<button id="add" class="corner corner-right" type="button"
++    aria-label="novo terminal">+</button>
++<aside id="side" class="side" hidden aria-label="terminais abertos">
++  <ul id="sideList"></ul>
++</aside>
+ <template id="winTpl">
+   <section class="win" role="group">
+     <header class="win-head">
+-      <span class="win-title"></span>
+       <button class="win-close" type="button" aria-label="fechar">×</button>
+     </header>
+     <div class="win-body"></div>
+--- a/chrome/browser/resources/aero_terminal/terminal.css
++++ b/chrome/browser/resources/aero_terminal/terminal.css
+@@ -17,26 +17,6 @@
+   flex-direction: column;
+   font: 13px/1.4 "Noto Sans", "DejaVu Sans", system-ui, sans-serif;
+ }
+-.bar {
+-  align-items: center;
+-  border-bottom: 1px solid var(--line);
+-  display: flex;
+-  gap: 12px;
+-  height: 36px;
+-  padding: 0 12px;
+-}
+-.bar button {
+-  background: none;
+-  border: 1px solid var(--line);
+-  border-radius: 4px;
+-  color: var(--text);
+-  font: inherit;
+-  padding: 2px 10px;
+-}
+-.bar button:hover { border-color: var(--accent); }
+-.note { color: var(--text2); font-size: 12px; }
+-.zoom { align-items: center; display: flex; gap: 6px; }
+-.zoom #zoom { color: var(--text2); min-width: 4ch; text-align: center; }
+ .board {
+   background-color: var(--bg);
+   background-image:
+@@ -44,7 +24,7 @@
+       linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+   background-size: 24px 24px;
+   flex: 1;
+-  cursor: grab;
++  cursor: default;
+   overflow: hidden;
+   position: relative;
+   touch-action: none;
+@@ -75,21 +55,13 @@
+   border-bottom: 1px solid var(--line);
+   cursor: grab;
+   display: flex;
+-  height: 28px;
+-  padding: 0 4px 0 10px;
++  height: 24px;
++  justify-content: flex-end;
++  padding: 0 4px;
+   touch-action: none;
+   user-select: none;
+ }
+ .win-head:active { cursor: grabbing; }
+-.win-title {
+-  color: var(--text2);
+-  flex: 1;
+-  font-family: var(--mono);
+-  font-size: 12px;
+-  overflow: hidden;
+-  text-overflow: ellipsis;
+-  white-space: nowrap;
+-}
+ .win-close {
+   background: none;
+   border: 0;
+@@ -116,3 +88,48 @@
+   touch-action: none;
+   width: 14px;
+ }
++/* Workspace corners (C6): sidebar toggle and new terminal. */
++.corner {
++  background: var(--panel);
++  border: 1px solid var(--line);
++  border-radius: 6px;
++  color: var(--text);
++  font: 16px/1 var(--mono);
++  height: 32px;
++  position: fixed;
++  top: 10px;
++  width: 32px;
++  z-index: 100000;
++}
++.corner:hover, .corner[aria-expanded="true"] { border-color: var(--accent); }
++.corner-left { left: 10px; }
++.corner-right { right: 10px; }
++.side {
++  background: var(--panel);
++  border: 1px solid var(--line);
++  border-radius: 6px;
++  bottom: 10px;
++  left: 10px;
++  overflow: auto;
++  padding: 6px;
++  position: fixed;
++  top: 50px;
++  width: 240px;
++  z-index: 99999;
++}
++.side ul { list-style: none; padding: 0; }
++.side button {
++  background: none;
++  border: 1px solid transparent;
++  border-radius: 4px;
++  color: var(--text);
++  font: 12px var(--mono);
++  overflow: hidden;
++  padding: 4px 8px;
++  text-align: left;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++  width: 100%;
++}
++.side button:hover { border-color: var(--line); }
++.side button.current { border-color: var(--accent); }
+--- a/chrome/browser/resources/aero_terminal/terminal.js
++++ b/chrome/browser/resources/aero_terminal/terminal.js
+@@ -7,7 +7,13 @@
+ // the browser (TerminalHandler/TerminalHost). The page only sends keystrokes
+ // and sizes; the browser picks the program (the user's shell). No network,
+ // no innerHTML (Trusted Types is enforced by the WebUI CSP).
++//
++// C6: no top bar; corner buttons open the sidebar of terminals and add one.
++// Every terminal starts with the system summary (banner.js). "?new=1"
++// (command bar "t:") claims a new workspace number and may carry the
++// one-shot "t: <command>", typed into the first terminal.
+ 
++import {banner} from './banner.js';
+ import {Terminal} from './xterm.mjs';
+ 
+ const WRITE_CHUNK = 16 * 1024;  // below TerminalHandler::kMaxWriteBytes
+@@ -83,22 +89,28 @@
+ const GRID = 24;
+ const SAVE_DELAY_MS = 300;
+ 
++const COMMAND_DELAY_MS = 500;
++
+ const board = document.getElementById('board');
+ const world = document.getElementById('world');
+-const zoomLabel = document.getElementById('zoom');
+ const tpl = document.getElementById('winTpl');
++const side = document.getElementById('side');
++const sideList = document.getElementById('sideList');
++const sideToggle = document.getElementById('sideToggle');
+ let nextId = 1;
+ let topZ = 1;
+ 
+-// The workspace number comes from ?w=N (command bar "-t N"); the tab title is
+-// always "t: workspace N", never the foreground process (that only shows in
+-// the window tooltip).
+-function workspaceNumber() {
+-  const w = new URLSearchParams(location.search).get('w');
++// The workspace number: "?w=N" reopens workspace N, "?new=1" (command bar
++// "t:") asks the browser for one no other tab uses. The tab title is always
++// "t: workspace N", never the foreground process (only in the tooltip).
++const params = new URLSearchParams(location.search);
++const isNew = params.get('new') === '1';
++function requestedWorkspace() {
++  const w = params.get('w');
+   return w !== null && /^[1-9][0-9]?$/.test(w) ? Number(w) : 1;
+ }
+-const workspace = workspaceNumber();
+-document.title = `t: workspace ${workspace}`;
++let workspace = isNew ? 0 : requestedWorkspace();
++let sysInfo = null;  // from "start"; printed at the top of every terminal
+ 
+ // Pan/zoom: world is translated and scaled; window boxes are in world units.
+ const view = {x: 0, y: 0, k: 1};
+@@ -113,7 +125,6 @@
+   const g = GRID * view.k;
+   board.style.backgroundSize = `${g}px ${g}px`;
+   board.style.backgroundPosition = `${view.x}px ${view.y}px`;
+-  zoomLabel.textContent = `${Math.round(view.k * 100)}%`;
+ }
+ 
+ // Zoom keeping the world point under (cx, cy) (board coordinates) fixed.
+@@ -126,15 +137,10 @@
+   scheduleSave();
+ }
+ 
+-function zoomCentered(factor) {
+-  const r = board.getBoundingClientRect();
+-  zoomAt(view.k * factor, r.width / 2, r.height / 2);
+-}
+-
+ // Layout (window boxes + view) per workspace, in the profile's localStorage
+ // of this WebUI origin. Sessions never persist: restored windows start fresh
+ // shells. Anything malformed is ignored.
+-const STORE_KEY = `aero-terminal-layout-${workspace}`;
++let storeKey = '';
+ let saveTimer = 0;
+ 
+ function scheduleSave() {
+@@ -149,7 +155,9 @@
+       view: {x: view.x, y: view.y, k: view.k},
+       wins: [...wins].map((w) => ({x: w.box.x, y: w.box.y, w: w.box.w, h: w.box.h})),
+     };
+-    localStorage.setItem(STORE_KEY, JSON.stringify(layout));
++    if (storeKey) {
++      localStorage.setItem(storeKey, JSON.stringify(layout));
++    }
+   } catch (e) {
+     // Storage unavailable or full: the layout just does not persist.
+   }
+@@ -161,7 +169,7 @@
+ 
+ function loadLayout() {
+   try {
+-    const raw = localStorage.getItem(STORE_KEY);
++    const raw = localStorage.getItem(storeKey);
+     const l = raw && raw.length < 65536 ? JSON.parse(raw) : null;
+     if (!l || l.v !== 1 || !Array.isArray(l.wins)) {
+       return null;
+@@ -191,6 +199,84 @@
+   }
+   win.classList.add('focused');
+   win.style.zIndex = String(++topZ);
++  renderSide();
++}
++
++// Click on the empty board: no terminal keeps the keyboard.
++function unfocusAll() {
++  for (const w of board.querySelectorAll('.win.focused')) {
++    w.classList.remove('focused');
++  }
++  if (document.activeElement && document.activeElement !== document.body) {
++    document.activeElement.blur();
++  }
++  renderSide();
++}
++
++// Sidebar: every open terminal; a click centres the view on it and focuses
++// it.
++function renderSide() {
++  if (side.hidden) {
++    return;
++  }
++  const items = [];
++  for (const entry of wins) {
++    const li = document.createElement('li');
++    const b = document.createElement('button');
++    b.type = 'button';
++    b.textContent = entry.title;
++    b.title = entry.title;
++    if (entry.win.classList.contains('focused')) {
++      b.classList.add('current');
++    }
++    b.addEventListener('click', () => centreOn(entry));
++    li.append(b);
++    items.push(li);
++  }
++  sideList.replaceChildren(...items);
++}
++
++function centreOn(entry) {
++  const r = board.getBoundingClientRect();
++  view.x = Math.round(r.width / 2 - (entry.box.x + entry.box.w / 2) * view.k);
++  view.y = Math.round(r.height / 2 - (entry.box.y + entry.box.h / 2) * view.k);
++  applyView();
++  scheduleSave();
++  focusWin(entry.win);
++  entry.term.focus();
++}
++
++sideToggle.addEventListener('click', () => {
++  side.hidden = !side.hidden;
++  sideToggle.setAttribute('aria-expanded', String(!side.hidden));
++  renderSide();
++});
++
++// Keys while a terminal has focus: everything goes to it (xterm.js sends
++// Ctrl+C as ^C, i.e. SIGINT). Ctrl+Shift+C copies the selection and
++// Ctrl+Shift+V pastes (the browser's paste event, handled by xterm.js);
++// preventDefault keeps browser shortcuts (DevTools on Ctrl+Shift+C) off
++// these keys. Returns false when xterm.js must not handle the key.
++function keyHandler(term) {
++  return (e) => {
++    if (!e.ctrlKey || !e.shiftKey || e.altKey || e.metaKey) {
++      return true;
++    }
++    if (e.code === 'KeyC') {
++      if (e.type === 'keydown') {
++        const sel = term.getSelection();
++        if (sel) {
++          navigator.clipboard.writeText(sel).catch(() => {});
++        }
++      }
++      e.preventDefault();
++      return false;
++    }
++    if (e.code === 'KeyV') {
++      return false;  // default action: paste event into xterm's textarea
++    }
++    return true;
++  };
+ }
+ 
+ // Calls onMove(dx, dy) while the pointer is captured by `handle`; onEnd runs
+@@ -269,7 +355,7 @@
+       h,
+     };
+   }
+-  const entry = {box, win};
++  const entry = {box, win, title: `terminal ${id}`, term: null};
+   wins.add(entry);
+   const apply = () => {
+     win.style.left = `${box.x}px`;
+@@ -279,12 +365,14 @@
+   };
+   apply();
+ 
+-  const titleEl = win.querySelector('.win-title');
+   const headEl = win.querySelector('.win-head');
+   let procName = '';
++  // The title bar only has the close button; the title shows as its tooltip
++  // and in the sidebar.
+   const setTitle = (t) => {
+-    titleEl.textContent = t;
++    entry.title = t;
+     headEl.title = procName ? `${t} (${procName})` : t;
++    renderSide();
+   };
+   // Foreground process: asked on hover/focus, shown only as the tooltip.
+   const refreshProcess = () => {
+@@ -293,8 +381,7 @@
+     }
+     call('foreground', sessionId).then((name) => {
+       procName = typeof name === 'string' ? name : '';
+-      headEl.title = procName ? `${titleEl.textContent} (${procName})` :
+-                                titleEl.textContent;
++      headEl.title = procName ? `${entry.title} (${procName})` : entry.title;
+     });
+   };
+   headEl.addEventListener('pointerenter', refreshProcess);
+@@ -310,6 +397,8 @@
+     scrollback: 5000,
+     theme: {background: '#0b0d14'},
+   });
++  entry.term = term;
++  term.attachCustomKeyEventHandler(keyHandler(term));
+   let sessionId = null;
+   term.onTitleChange((t) => setTitle(t || `terminal ${id}`));
+   term.onData((data) => {
+@@ -360,6 +449,7 @@
+     term.dispose();
+     win.remove();
+     wins.delete(entry);
++    renderSide();
+     scheduleSave();
+   });
+ 
+@@ -369,7 +459,10 @@
+   term.open(body);
+   refit();
+   term.focus();
+-  call('open', term.cols, term.rows).then((sid) => {
++  // Summary before the shell's prompt (C6).
++  term.write(banner(sysInfo));
++  renderSide();
++  return call('open', term.cols, term.rows).then((sid) => {
+     if (sid === null) {
+       term.write('não foi possível abrir o terminal (limite de sessões?)\r\n');
+       return;
+@@ -380,6 +473,7 @@
+     }
+     sessionId = sid;
+     sessions.set(sid, {term, setTitle});
++    return sid;
+   });
+ }
+ 
+@@ -391,6 +485,7 @@
+   if ((e.button !== 0 && e.button !== 1) || !onBackground(e)) {
+     return;
+   }
++  unfocusAll();
+   pan = {x: e.clientX, y: e.clientY, vx: view.x, vy: view.y};
+   board.setPointerCapture(e.pointerId);
+   board.classList.add('panning');
+@@ -430,28 +525,65 @@
+   }
+ }, {passive: false});
+ 
+-document.getElementById('zoomIn').addEventListener(
+-    'click', () => zoomCentered(1.25));
+-document.getElementById('zoomOut').addEventListener(
+-    'click', () => zoomCentered(0.8));
+-document.getElementById('zoomReset').addEventListener('click', () => {
+-  view.x = 0;
+-  view.y = 0;
+-  view.k = 1;
+-  applyView();
+-  scheduleSave();
+-});
+ document.getElementById('add').addEventListener('click', () => addWindow());
+ 
+-const restored = loadLayout();
+-if (restored) {
+-  Object.assign(view, restored.view);
+-}
+-applyView();
+-if (restored && restored.wins.length > 0) {
+-  for (const w of restored.wins) {
+-    addWindow(w);
++// The one-shot "t: <command>": typed into the first terminal once the page
++// has loaded and at least COMMAND_DELAY_MS after navigation start, like the
++// user typing it plus Enter (the parser refused control characters).
++async function typeCommand(command, opened) {
++  if (typeof command !== 'string' || !command) {
++    return;
++  }
++  if (document.readyState !== 'complete') {
++    await new Promise((r) => window.addEventListener('load', r, {once: true}));
++  }
++  const wait = COMMAND_DELAY_MS - performance.now();
++  if (wait > 0) {
++    await new Promise((r) => setTimeout(r, wait));
++  }
++  const sid = await opened;
++  if (typeof sid === 'number' && sessions.has(sid)) {
++    chrome.send('write', [sid, `${command}\r`]);
++  }
++}
++
++async function boot() {
++  let reply = null;
++  try {
++    reply = await call('start', workspace);
++  } catch (e) {
++    reply = null;
++  }
++  if (reply && Number.isInteger(reply.workspace) && reply.workspace > 0) {
++    workspace = reply.workspace;
++  } else if (!workspace) {
++    workspace = 1;
++  }
++  sysInfo = reply ? reply.info : null;
++  document.title = `t: workspace ${workspace}`;
++  storeKey = `aero-terminal-layout-${workspace}`;
++  if (isNew) {
++    // Reloading must not claim yet another workspace (and the command was
++    // one-shot anyway).
++    history.replaceState(null, '', `?w=${workspace}`);
++  }
++  // A new workspace starts with one terminal and no saved layout.
++  const restored = isNew ? null : loadLayout();
++  if (restored) {
++    Object.assign(view, restored.view);
+   }
+-} else {
+-  addWindow();
++  applyView();
++  let first;
++  if (restored && restored.wins.length > 0) {
++    for (const w of restored.wins) {
++      const p = addWindow(w);
++      first = first || p;
++    }
++  } else {
++    first = addWindow();
++  }
++  scheduleSave();
++  await typeCommand(reply ? reply.command : null, first);
+ }
++
++boot();
+--- /dev/null
++++ b/chrome/browser/resources/aero_terminal/banner.js
+@@ -0,0 +1,90 @@
++// Copyright 2026 The aerographene Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++// Summary printed at the top of every terminal (fatia C6): the cat (braille
++// art by the aerographene owner) next to the versions, CPU, GPU, RAM and
++// disks, fastfetch style. Printed by the page itself (fastfetch need not be
++// installed); the numbers come from the browser process (TerminalHandler
++// "start"), nothing leaves the machine. Pure: returns the text for
++// xterm.js, with ANSI colours and CRLF line ends.
++
++export const CAT = [
++  '⠀⠀⠀⢠⣾⣷⣦⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀',
++  '⠀⠀⣰⣿⣿⣿⣿⣷⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀',
++  '⠀⢰⣿⣿⣿⣿⣿⣿⣷⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀',
++  '⢀⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣦⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀',
++  '⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣤⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀',
++  '⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣶⣤⣄⣀⣀⣤⣤⣶⣾⣿⣿⣿⡷',
++  '⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠁',
++  '⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠁⠀',
++  '⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠏⠀⠀⠀',
++  '⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠏⠀⠀⠀⠀',
++  '⣿⣿⣿⡇⠀⡾⠻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠁⠀⠀⠀⠀⠀',
++  '⣿⣿⣿⣧⡀⠁⣀⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀',
++  '⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡟⠉⢹⠉⠙⣿⣿⣿⣿⣿⠀⠀⠀⠀⠀⠀⠀',
++  '⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣀⠀⣀⣼⣿⣿⣿⣿⡟⠀⠀⠀⠀⠀⠀⠀',
++  '⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠋⠀⠀⠀⠀⠀⠀⠀⠀',
++  '⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠛⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀',
++  '⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠛⠀⠤⢀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀',
++  '⣿⣿⣿⣿⠿⣿⣿⣿⣿⣿⣿⣿⠿⠋⢃⠈⠢⡁⠒⠄⡀⠈⠁⠀⠀⠀⠀⠀⠀⠀',
++  '⣿⣿⠟⠁⠀⠀⠈⠉⠉⠁⠀⠀⠀⠀⠈⠆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀',
++  '⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀',
++];
++
++const ESC = '\x1b[';
++const LABEL = `${ESC}1;34m`;
++const RESET = `${ESC}0m`;
++
++function gib(bytes) {
++  return `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
++}
++
++function text(v) {
++  // Only printable text from the browser: no escape sequences.
++  return typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f-\u009f]/g, '') : '';
++}
++
++// info: {chromium, aerographene, cpu, cores, gpu, ram, disks: [{path, total,
++// free}]}; anything missing or malformed is shown as "?".
++export function infoLines(info) {
++  const i = info && typeof info === 'object' ? info : {};
++  const rows = [
++    ['aerographene', i.aerographene ? `v${text(i.aerographene)}` : '?'],
++    ['chromium', text(i.chromium) || '?'],
++    ['cpu', (text(i.cpu) || '?') +
++         (Number.isInteger(i.cores) && i.cores > 0 ? ` (${i.cores} threads)` : '')],
++    ['gpu', text(i.gpu) || '?'],
++    ['ram', typeof i.ram === 'number' && i.ram > 0 ? gib(i.ram) : '?'],
++  ];
++  const seen = new Set();
++  for (const d of Array.isArray(i.disks) ? i.disks.slice(0, 4) : []) {
++    if (!d || typeof d.total !== 'number' || typeof d.free !== 'number') {
++      continue;
++    }
++    const key = `${d.total}/${d.free}`;  // "/" and $HOME on one disk
++    if (seen.has(key)) {
++      continue;
++    }
++    seen.add(key);
++    rows.push([`disco ${text(d.path)}`,
++               `${gib(d.total - d.free)} / ${gib(d.total)}`]);
++  }
++  const out = [`${LABEL}aerographene${RESET}`, '-'.repeat(12)];
++  for (const [k, v] of rows) {
++    out.push(`${LABEL}${k}${RESET}: ${v}`);
++  }
++  return out;
++}
++
++// The cat on the left, the info on the right (from its third line).
++export function banner(info) {
++  const right = infoLines(info);
++  const lines = [];
++  const n = Math.max(CAT.length, right.length + 2);
++  for (let k = 0; k < n; k++) {
++    const left = CAT[k] ?? ' '.repeat(CAT[0].length);
++    const r = right[k - 2] ?? '';
++    lines.push(r ? `${left}   ${r}` : left);
++  }
++  return lines.join('\r\n') + '\r\n\r\n';
++}

@@ -179,6 +179,22 @@ um tema embutido novo é mais uma instância em `aerographene_theme.cc` (e o nom
 
 leia `docs/BUILD.md` antes; a build completa leva horas.
 
+## visual de `chrome://settings` (patch `settings-f5`)
+
+as configurações seguem a linguagem quadrada do aerographene, sem remover nenhuma função: cards sem sombra e com contorno de 1px, raio do tema ativo (`--aero-radius`: 4px no `default`, 0 no `pixelized`), botões e toggles quadrados, rótulos de seção (título do card e `h2`) em mono caixa alta de 11px, menu lateral compacto com o item ativo marcado por barra de 2px na borda inicial (sem pílula) e linhas de 40px em vez de 48px. As cores vêm só das variáveis do tema (`--cr-*`, `--color-*`); o CSS fica em `settings_vars.css`, `settings_shared_lit.css`, `settings_page/settings_section.css` e no `<style>` de `settings_menu.html`. Compilação do recurso e visual no navegador não verificados (só aplicação do patch e mockup estático). Atenção: `settings-oneui` (depois dele na série) sobrepõe esse visual com o estilo One UI (cards de 28px, pílulas, discos coloridos na lateral) e ignora o raio do tema; o que vale hoje é o descrito em [configurações](settings.md).
+
+## estado dos temas (15/10/2026)
+
+separando o que existe no navegador do que é só desenho:
+
+- no navegador (compilado): `default` e `pixelized`, tabelas em `aerographene_theme.cc`. `pixelized` é parte do produto final.
+- aprovados pelo dono como mockup, ainda não implementados como tema embutido (nenhum patch da série os define): metro-v2, e-ink-gb (Pixelify Sans), graphite (Doto), classical (couro), e-ink e cli/tui. Os guias e telas ficam fora do repo (pasta de design do dono). Neobrutalism e outros estudos antigos foram arquivados.
+- o tema cli desenha a moldura como uma TUI em grade de caracteres (JetBrains Mono 15px, célula 9x18, 16 cores ANSI, raio 0, sem sombra, foco em azul); a grade exata só vale na moldura e nas páginas internas, páginas web externas não alinham à grade, e não pode depender de Nerd Font.
+- wallpapers dos mockups são provisórios; os definitivos virão do dono.
+- mockup aprovado não prova funcionalidade no navegador.
+- site (branch `site`, GitHub Pages): galeria de temas com seletor; sem prints reais do navegador a galeria mostra "em breve".
+- cores ajustáveis pelo usuário: proposta em [temas tintáveis](temas-tintaveis.md), nada implementado.
+
 ## problemas comuns
 
 - nada mudou: confira se reiniciou, se o JSON é válido (`jq . theme.json`) e se `mode` é `"dark"`.
@@ -271,3 +287,6 @@ RULES FOR A GOOD THEME:
 
 EXAMPLES in repo: theming/chrome-themes/{pixelized,nebula,high-contrast}/theme.json
 ```
+- `chrome://settings`: visual do patch `aerographene/settings-f5.patch` (CSS puro: rótulos mono caixa alta, barra no item ativo do menu, densidade via `--cr-section-*` em `settings_vars.css`); forma/raio vêm de `--aero-radius`.
+- estado (15/10/2026): só `default` e `pixelized` existem no navegador; metro-v2, e-ink-gb, graphite, classical, e-ink e cli são mockups aprovados sem patch; tint (2 ou 3 cores por tema) é proposta sem código ([temas tintáveis](temas-tintaveis.md)). Não escrever que um tema "existe" por ter mockup.
+- `settings-oneui` sobrepõe o visual do `settings-f5` e ignora `--aero-radius` em settings.

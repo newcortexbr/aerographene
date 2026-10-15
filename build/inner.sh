@@ -7,16 +7,27 @@ set -euo pipefail
 . /work/portablelinux/scripts/shared.sh   # funções oficiais do portablelinux
 
 setup_paths   # _root=/work/portablelinux, _src_dir=$_root/build/src, _out_dir=$_src_dir/out/Default
+# alvo de CPU (config.sh): saída em out/${AERO_OUT} (Default = avx2, preservado; Avx1 = avx1)
+_out_dir="${_src_dir}/out/${AERO_OUT}"
 AERO_PATCHES=/aero/patches
+
+# -O3 seletivo (build/o3.py, docs/BUILD.md): off (padrão) | hot | wide | base | ui | skia | lto3 | global. Não entra no hash da série:
+# é aplicado/desfeito a cada execução, só sobre BUILD.gn/.gni de alvos escolhidos.
+AERO_O3="${AERO_O3:-off}"
+case "${AERO_O3}" in
+    ""|0|off|false) AERO_O3=off; O3_TAG="" ;;
+    hot|wide|base|ui|skia|lto3|global) O3_TAG="-o3${AERO_O3}" ;;
+    *) echo "erro: AERO_O3 inválido: ${AERO_O3} (off|hot|wide|base|ui|skia|lto3|global)" >&2; exit 1 ;;
+esac
+AERO_O3_STATE="${_src_dir}/.aero-o3"            # originais dos arquivos que o o3.py alterou
 
 AERO_STATE="${_src_dir}/.aero-applied"          # cópia da série aplicada + BUILD.gn pré-march
 DOMSUB_CACHE="${_root}/build/domsub-cache.tar.gz"  # originais da domain substitution (permite revert)
 MTIME_SNAP="${_root}/build/aero-mtimes.tsv"
 GNFILE_REL=build/config/compiler/BUILD.gn
-# helium-onboarding (deps.ini do Helium, sha256 fixado); a versão entra no hash da série porque
-# build/branding_strings.py reescreve o .grdp dele (Helium -> aerographene, traduções pt-BR)
-ob_ver=202609160835
-ob_sha=35ce782dc9534b5bff59af7937f22c90179ca9610883acb2e0d698cc6f799366
+# NeverDecaf/chromium-web-store (MIT), release fixada por versão + sha256 do .crx (fatia F4)
+cws_ver=1.5.5.4
+cws_sha=63c075b4a25b11af2c536dad191946e8d9547f92d5b6c257b2ce4138d2996f32
 
 _memmon=""
 _ccache_on=0
@@ -36,8 +47,8 @@ patch_hash() {
         cat "${AERO_PATCHES}/series"
         series_list "${AERO_PATCHES}" | while read -r p; do cat "${AERO_PATCHES}/${p}"; done
         echo "march=${MARCH}"
-        cat /aero/build/branding_strings.py /aero/build/strings_ptbr_extra.json
-        echo "onboarding=${ob_ver}"
+        cat /aero/build/branding_strings.py /aero/build/strings_ptbr_extra.json /aero/build/strings_space.json
+        echo "chromium-web-store=${cws_ver}"
     } | sha256sum | cut -d' ' -f1
 }
 
@@ -69,6 +80,8 @@ unfix_tool_downloading() {
 # Antes: mtime+sha dos arquivos afetados; no fim, restore_mtimes devolve o mtime de quem não mudou.
 # Retorna !=0 se não for possível (sem registro, sem cache de domsub, patch -R falhou): recriar.
 incremental_repatch() {
+    # antes do revert da domain substitution: base/BUILD.gn está na lista dela e o revert confere CRC
+    python3 /aero/build/o3.py --src "${_src_dir}" --state "${AERO_O3_STATE}" --restore || return 1
     [ -f "${AERO_STATE}/series" ] && [ -f "${AERO_STATE}/BUILD.gn.orig" ] || { echo "sem registro da série aplicada"; return 1; }
     [ -f "${_src_dir}/.patched.stamp" ] || return 1
     if [ -f "${_src_dir}/.domsub.stamp" ] && [ ! -f "${DOMSUB_CACHE}" ]; then
@@ -195,19 +208,34 @@ PY
     touch "${_src_dir}/.aero-ublock-${ub_ver}"  # fora de ub_dir: generate_file_list empacota tudo lá
 fi
 
-echo "== helium-onboarding ${ob_ver} (deps.ini do Helium, sha256 fixado)"
-# antes dos patches e do branding_strings.py: o .grdp dele é parte de generated_resources.grd.
-# No re-patch incremental o backup de strings-orig já restaurou o .grdp original; se a versão
-# mudou, o diretório é recriado aqui antes da troca.
-ob_dir="${_src_dir}/components/helium_onboarding"
-if [ ! -f "${ob_dir}/.aero-onboarding-${ob_ver}" ]; then
-    ob_tgz="${_root}/build/helium-onboarding-${ob_ver}.tar.gz"
-    [ -s "$ob_tgz" ] || curl -fL --retry 3 -o "$ob_tgz" \
-        "https://github.com/imputnet/helium-onboarding/releases/download/${ob_ver}/helium-onboarding-${ob_ver}.tar.gz"
-    echo "${ob_sha}  ${ob_tgz}" | sha256sum -c -
-    rm -rf "$ob_dir"; mkdir -p "$ob_dir"
-    tar -xzf "$ob_tgz" -C "$ob_dir"
-    touch "${ob_dir}/.aero-onboarding-${ob_ver}"
+echo "== chromium-web-store ${cws_ver} (release do GitHub, sha256 fixado)"
+# como o uBlock: antes dos patches (defaults-f4 cria BUILD.gn/grit em third_party/chromium_web_store)
+cws_dir="${_src_dir}/third_party/chromium_web_store"
+if [ ! -f "${_src_dir}/.aero-patches.hash" ] && [ ! -f "${_src_dir}/.aero-cws-${cws_ver}" ]; then
+    cws_crx="${_root}/build/chromium-web-store-${cws_ver}.crx"
+    [ -s "$cws_crx" ] || curl -fL --retry 3 -o "$cws_crx" \
+        "https://github.com/NeverDecaf/chromium-web-store/releases/download/v${cws_ver}/Chromium.Web.Store.crx"
+    echo "${cws_sha}  ${cws_crx}" | sha256sum -c -
+    rm -rf "$cws_dir"; mkdir -p "$cws_dir"
+    # CRX3: "Cr24", versão (4 bytes), tamanho do cabeçalho (4 bytes), cabeçalho, depois o zip
+    python3 - "$cws_crx" "$cws_dir" <<'PY'
+import sys, io, struct, zipfile, os
+crx, dest = sys.argv[1], sys.argv[2]
+d = open(crx, 'rb').read()
+assert d[:4] == b'Cr24' and struct.unpack('<I', d[4:8])[0] == 3
+hlen = struct.unpack('<I', d[8:12])[0]
+with zipfile.ZipFile(io.BytesIO(d[12 + hlen:])) as z:
+    for m in z.infolist():
+        if m.is_dir() or m.filename.startswith('/') or '..' in m.filename.split('/'):
+            continue
+        out = os.path.join(dest, m.filename)
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        with z.open(m) as s, open(out, 'wb') as f:
+            f.write(s.read())
+PY
+    curl -fL --retry 3 -o "${cws_dir}/LICENSE" \
+        "https://raw.githubusercontent.com/NeverDecaf/chromium-web-store/v${cws_ver}/LICENSE"
+    touch "${_src_dir}/.aero-cws-${cws_ver}"
 fi
 
 echo "== patches aerographene (${AERO_PATCHES}/series)"
@@ -271,6 +299,9 @@ if [ ! -f "${_src_dir}/.domsub.stamp" ]; then
 fi
 fix_tool_downloading
 restore_mtimes
+
+echo "== -O3 seletivo: ${AERO_O3}"
+python3 /aero/build/o3.py --src "${_src_dir}" --state "${AERO_O3_STATE}" --profile "${AERO_O3}"
 
 echo "== ccache"
 cc_line=""
@@ -346,9 +377,10 @@ bash /aero/build/apply_branding_assets.sh "${_src_dir}" /aero/branding
 echo "== gn gen"
 cd "${_src_dir}"
 [ -x out/Default/gn ] || ./tools/gn/bootstrap/bootstrap.py -o out/Default/gn --skip-generate-buildfiles
-./out/Default/gn gen out/Default --fail-on-unused-args
+# o gn é compartilhado: sempre em out/Default/gn (não depende do alvo)
+./out/Default/gn gen "out/${AERO_OUT}" --fail-on-unused-args
 if [ "${AEROGRAPHENE_PGO:-1}" = 1 ]; then  # valor efetivo (no merge a última definição vence)
-    pgo_eff="$(./out/Default/gn args out/Default --list=chrome_pgo_phase --short)"
+    pgo_eff="$(./out/Default/gn args "out/${AERO_OUT}" --list=chrome_pgo_phase --short)"
     [ "${pgo_eff}" = "chrome_pgo_phase = 2" ] \
         || { echo "erro: PGO pedido mas o gn resolveu '${pgo_eff}'" >&2; exit 1; }
     echo "PGO: ${pgo_eff}"
@@ -368,7 +400,7 @@ target="${NINJA_TARGET:-chrome chrome_sandbox}"
 # "chrome" sozinho é a build completa com pacote: inclui chrome_sandbox (não é dependência do chrome)
 if [ "${target}" = chrome ]; then target="chrome chrome_sandbox"; fi
 read -r -a targets <<<"${target}"   # aceita vários alvos separados por espaço
-ninja -C out/Default -j "${JOBS}" "${targets[@]}"
+ninja -C "out/${AERO_OUT}" -j "${JOBS}" "${targets[@]}"
 kill "${_memmon}" 2>/dev/null || true
 _memmon=""
 
@@ -377,22 +409,22 @@ if [ "${target}" != "chrome chrome_sandbox" ]; then
     exit 0
 fi
 echo "== pacote"
-name="aerographene-${AERO_VERSION}-${UC_TAG}-${AERO_SHA:-local}-x86_64_linux"
+name="aerographene-${AERO_VERSION}-${UC_TAG}-${AERO_SHA:-local}${O3_TAG}-${AERO_CPU}-x86_64_linux"
 stage="/work/dist/${name}"
 rm -rf "$stage"; mkdir -p "$stage"
 for f in chrome chrome_100_percent.pak chrome_200_percent.pak chrome_crashpad_handler chrome-wrapper \
          icudtl.dat libEGL.so libGLESv2.so libqt5_shim.so libqt6_shim.so libvk_swiftshader.so \
          libvulkan.so.1 locales product_logo_48.png resources.pak v8_context_snapshot.bin \
          vk_swiftshader_icd.json xdg-mime xdg-settings; do
-    [ -e "out/Default/$f" ] && cp -r "out/Default/$f" "$stage/"
+    [ -e "out/${AERO_OUT}/$f" ] && cp -r "out/${AERO_OUT}/$f" "$stage/"
 done
 # sandbox setuid: alvo GN sandbox/linux:chrome_sandbox, data_dep do chrome. O Chromium procura
 # <dir do binário>/chrome-sandbox e só o usa se for root:root 4755 (o PKGBUILD instala assim);
 # sem ele vale o sandbox de user namespaces do kernel. O portablelinux não empacota.
-if [ -f out/Default/chrome_sandbox ]; then
-    cp out/Default/chrome_sandbox "$stage/chrome-sandbox"
+if [ -f "out/${AERO_OUT}/chrome_sandbox" ]; then
+    cp "out/${AERO_OUT}/chrome_sandbox" "$stage/chrome-sandbox"
 else
-    echo "== aviso: out/Default/chrome_sandbox ausente; pacote sem chrome-sandbox" >&2
+    echo "== aviso: out/${AERO_OUT}/chrome_sandbox ausente; pacote sem chrome-sandbox" >&2
 fi
 # ícones hicolor do tema do app (PKGBUILD instala em /usr/share/icons/hicolor/<n>x<n>/apps/aerographene.png)
 for n in 16 24 32 48 64 128 256; do
@@ -404,6 +436,11 @@ done
 if [ -f "${_src_dir}/third_party/ublock/managed_storage.json" ]; then
     mkdir -p "$stage/resources/ublock"
     cp "${_src_dir}/third_party/ublock/managed_storage.json" "$stage/resources/ublock/"
+fi
+# chromium-web-store: mesmo caso (manifest tem storage.managed_schema = managed_storage.json)
+if [ -f "${_src_dir}/third_party/chromium_web_store/managed_storage.json" ]; then
+    mkdir -p "$stage/resources/chromium_web_store"
+    cp "${_src_dir}/third_party/chromium_web_store/managed_storage.json" "$stage/resources/chromium_web_store/"
 fi
 # tabela de símbolos fora do pacote (~234 MB no chrome; o Helium distribui sem).
 # Não muda código executado: .symtab/.strtab não são carregadas em runtime.
@@ -426,7 +463,12 @@ else
 fi
 # binário principal com nome do produto; branding completo fica para depois
 ln -sf chrome "$stage/aerographene"
-rm -f /work/dist/*.tar.zst
+# só remove o tarball do mesmo alvo e da mesma variante (avx2/avx1 e normal/-o3* convivem em dist/)
+for old in /work/dist/aerographene-*"${O3_TAG}-${AERO_CPU}-x86_64_linux.tar.zst"; do
+    [ -f "$old" ] || continue
+    if [ -z "${O3_TAG}" ]; then case "$old" in *-o3*) continue ;; esac; fi
+    rm -f "$old"
+done
 tar -C /work/dist -cf - "$name" | zstd -T0 -19 -o "/work/dist/${name}.tar.zst"
 rm -rf "$stage"
 echo "ARTIFACT=/work/dist/${name}.tar.zst"
