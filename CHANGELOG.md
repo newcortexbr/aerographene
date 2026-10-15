@@ -24,7 +24,7 @@ Published as a normal release: https://github.com/newcortexbr/aerographene/relea
 
 ## v0.3.1 (pre-release, 2026-10-14)
 
-- notes page `aerographene://notes` with an Obsidian-style vault; `o:` in the command bar
+- notes page `aerographene://notes` over a folder of Markdown files (vault); `o:` in the command bar
 - terminal board `aerographene://terminal`; `t:` in the command bar
 - Ctrl+T opens the command bar centered in the window
 - settings redesigned (appearance only)
