@@ -154,17 +154,18 @@ fetch("themes.json").then(r => r.json()).then(d => {
 
 /* t: workspace — two terminals, zoom in/out, drag across and back */
 (() => {
-  const ws = $("#ws"), grid = $("#wsgrid"), A = $("#tA"), B = $("#tB"), cur = $("#tcur"), z = $("#zoom");
+  const ws = $("#ws"), grid = $("#wsgrid"), A = $("#tA"), B = $("#tB"), cur = $("#tcur"), side = $("#wside");
   const W = () => ws.clientWidth, H = () => ws.clientHeight;
   let scale = 1;
   const place = (el, x, y) => { el.style.left = x + "px"; el.style.top = y + "px"; };
-  const zoom = s => { scale = s; grid.style.transform = `scale(${s})`; z.textContent = Math.round(s * 100) + "%"; };
+  const zoom = s => { scale = s; grid.style.transform = `scale(${s})`; };
   // screen position of a grid point (grid scales around its centre)
   const scr = (x, y) => [W() / 2 + (x - W() / 2) * scale, H() / 2 + (y - H() / 2) * scale];
   const mv = (x, y) => { const [sx, sy] = scr(x, y); cur.style.transform = `translate(${sx}px,${sy}px)`; };
-  const left = () => [24, 40], right = () => [W() - 214, H() - 130];
+  const mvs = (x, y) => { cur.style.transform = `translate(${x}px,${y}px)`; }; // screen coords (corners)
+  const left = () => [48, 44], right = () => [W() - 304, H() - 100];
   const steps = [
-    () => { zoom(1); A.style.transition = "none"; place(A, ...left()); place(B, W() - 214, 30); mv(W() / 2, H() - 30); requestAnimationFrame(() => A.style.transition = ""); },
+    () => { zoom(1); A.style.transition = "none"; place(A, ...left()); place(B, W() - 304, 50); mv(W() / 2, H() - 30); requestAnimationFrame(() => A.style.transition = ""); },
     () => { zoom(1.35); mv(W() / 2, H() / 2); },
     () => { zoom(.75); mv(...left().map((v, i) => v + (i ? 6 : 60))); },
     () => { A.classList.add("drag"); },
@@ -172,19 +173,20 @@ fetch("themes.json").then(r => r.json()).then(d => {
     () => { A.classList.remove("drag"); zoom(.6); },
     () => { mv(right()[0] + 60, right()[1] + 6); A.classList.add("drag"); },
     () => { place(A, ...left()); mv(left()[0] + 60, left()[1] + 6); },
-    () => { A.classList.remove("drag"); zoom(1.25); mv(W() / 2 + 30, H() / 2 + 20); },
+    () => { A.classList.remove("drag"); zoom(1); mvs(20, 26); },
+    () => { side.hidden = false; },
+    () => { side.hidden = true; zoom(1.25); mv(W() / 2 + 30, H() / 2 + 20); },
   ];
-  const wait = [400, 900, 1000, 300, 900, 900, 400, 900, 1300];
+  const wait = [400, 900, 1000, 300, 900, 900, 400, 900, 900, 1100, 1300];
   let i = 0;
   const run = () => { steps[i](); setTimeout(run, wait[i]); i = (i + 1) % steps.length; };
-  if (reduce) { place(A, ...left()); place(B, W() - 214, 30); } else run();
+  if (reduce) { place(A, ...left()); place(B, W() - 304, 50); } else run();
 })();
 
 /* o: obsidian-style live preview — markdown typed raw, rendered when the line is done */
 (() => {
-  const ed = $("#editor");
+  const ed = $("#edbody");
   const doc = [
-    "# ideas",
     "## browser",
     "- [ ] port to **windows 11**",
     "- notes read from my [[vault]]",
@@ -205,8 +207,18 @@ fetch("themes.json").then(r => r.json()).then(d => {
     return `<div>${inline(l)}</div>`;
   };
   const raw = l => `<span class="raw">${esc(l).replace(/(^#+ |^- \[ \] |^- |\*\*|\*|`|\[\[|\]\])/g, '<span class="mk">$1</span>')}</span><span class="blink">▌</span>`;
+  const words = s => s.split(/\s+/).filter(Boolean).length;
+  const stats = cur => {
+    const t = done.concat(cur != null && cur !== "" ? [cur] : []);
+    const full = t.join("\n");
+    $("#sbw").textContent = words(full) + " palavras";
+    $("#sbc").textContent = full.length + " caracteres";
+    const last = cur != null ? cur : (done[done.length - 1] || "");
+    $("#sbp").textContent = "L" + Math.max(1, t.length || 1) + ":C" + (last.length + 1);
+  };
   let li = 0, ci = 0, done = [];
-  const paint = cur => { ed.innerHTML = done.map(l => `<div class="ln">${render(l)}</div>`).join("") + (cur != null ? `<div class="ln">${raw(cur)}</div>` : ""); };
+  const paint = cur => {
+    stats(cur); ed.innerHTML = done.map(l => `<div class="ln">${render(l)}</div>`).join("") + (cur != null ? `<div class="ln">${raw(cur)}</div>` : ""); };
   function step() {
     if (li >= doc.length) { setTimeout(() => { done = []; li = 0; ci = 0; step(); }, 2200); return; }
     const l = doc[li];

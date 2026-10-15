@@ -96,7 +96,7 @@
   <ul class="feat">
     <li><b>fast</b>x86-64-v3 build with ThinLTO and PGO; an AVX1 build for older CPUs.</li>
     <li><b>spaces</b>separate tab sets for work and life, switched in place.</li>
-    <li><b>o: notes</b>your markdown vault in a tab, with live preview.</li>
+    <li><b>o: notes</b>your markdown vault in a tab, with tabs, live preview and search.</li>
     <li><b>t: terminal</b>a canvas of real shells you can pan, zoom and rearrange.</li>
     <li><b>themes</b>default and pixelized built in; import your own.</li>
     <li><b>no account</b>works fully without signing in; nothing nags you to.</li>
@@ -107,30 +107,61 @@
 <section class="pane" id="t" data-title="t: workspace 1">
   <div class="ws" id="ws">
     <div class="grid" id="wsgrid">
-      <div class="term" id="tA"><div class="bar">~/projects · bash</div><pre>$ make -j16
-[ 82%] linking…
+      <div class="term" id="tA"><div class="bar"><span class="x">×</span></div><div class="fetch"><pre class="cat" aria-hidden="true">⠀⠀⣰⣿⣿⣿⣿⣷⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⢰⣿⣿⣿⣿⣿⣿⣷⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⢀⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣦⡀⠀⠀⠀⠀⠀⠀
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣤⣀⡀⠀⠀
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣶⣤
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿
+⣿⣿⣿⡇⠀⡾⠻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠁
+⣿⣿⣿⣧⡀⠁⣀⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⠀
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡟⠉⢹⠉⠙⣿⣿⠀
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣀⠀⣀⣼⣿⡟⠀
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠋⠀⠀
+⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠛⠁⠀⠀⠀⠀</pre><pre class="info"><i>aerographene</i>
+------------
+<i>aerographene</i>: v0.3.0
+<i>chromium</i>: 154.0
+<i>cpu</i>: Example 8-Core (16 threads)
+<i>gpu</i>: Example GPU
+<i>ram</i>: 32.0 GiB
+<i>disco /</i>: 120.4 / 480.0 GiB</pre></div><pre class="sh">$ make -j16
 $ <span class="blink">▌</span></pre></div>
-      <div class="term" id="tB"><div class="bar">htop</div><pre>CPU ▮▮▮▮▮▯▯▯ 61%
+      <div class="term" id="tB"><div class="bar"><span class="x">×</span></div><pre>CPU ▮▮▮▮▮▯▯▯ 61%
 MEM ▮▮▮▯▯▯▯▯ 3.1G
 $ <span class="blink">▌</span></pre></div>
     </div>
-    <span class="zoom" id="zoom">100%</span>
+    <span class="corner l" id="cside">☰</span>
+    <span class="corner r" id="cadd">+</span>
+    <div class="side" id="wside" hidden>
+      <div>~/projects · bash</div>
+      <div>htop</div>
+    </div>
     <svg class="cursor sm" id="tcur" viewBox="0 0 16 16" width="14" height="14"><path d="M1 1 L1 13 L4.5 10 L7 15 L9 14 L6.6 9.2 L11 9.2 Z"/></svg>
   </div>
 </section>
 
 <section class="pane" id="o" data-title="o: vault">
   <div class="vault">
-    <div class="tree">
-      <div class="fold"><span class="ch">v</span> vault</div>
-      <div><span class="ch">›</span> daily</div>
-      <div class="fold"><span class="ch">v</span> projects</div>
-      <div class="f on">ideas.md</div>
-      <div class="f">browser.md</div>
-      <div class="f">reading.md</div>
-      <div><span class="ch">›</span> attachments</div>
-    </div>
-    <div class="editor" id="editor"></div>
+    <aside class="vside">
+      <div class="modes"><span class="on">▤ arquivos</span><span>⌕ buscar</span><span># tags</span></div>
+      <div class="vact"><span class="hot">+ nota</span><span>▭ pasta</span><span class="sp"></span><span>⇅</span><span>⌃</span></div>
+      <div class="tree">
+        <div class="fold"><span class="ch">v</span> daily</div>
+        <div class="fold"><span class="ch">v</span> projects</div>
+        <div class="f">browser.md</div>
+        <div class="f on">ideas.md</div>
+        <div class="f">reading.md</div>
+        <div><span class="ch">›</span> attachments</div>
+      </div>
+      <div class="vfoot"><div class="keys2"><span><kbd>Ctrl+S</kbd> salvar</span><span><kbd>Ctrl+N</kbd> nova</span><span><kbd>Ctrl+K</kbd> buscar</span></div><div class="vsel"><span>vault</span> <b>vault</b></div></div>
+    </aside>
+    <main class="nmain">
+      <div class="ntabs"><span class="ntab on">ideas <i>×</i></span><span class="ntab">browser <i>×</i></span><span class="tp">+</span><span class="sp"></span><span class="nst">salvo</span></div>
+      <div class="crumbbar"><span><em>vault:</em> projects <em>/</em> <b>ideas.md</b></span><span class="sp"></span><span>editar ⇄ ler</span></div>
+      <div class="editor" id="editor"><div class="dh"><h4>ideas</h4><div class="props"><span class="tag">#browser</span></div></div><div id="edbody"></div></div>
+      <div class="sbar"><span class="sbm">EDIT</span><span>projects</span><span class="sp"></span><span id="sbw">0 palavras</span><span id="sbc">0 caracteres</span><span id="sbp">L1:C1</span><span>UTF-8</span></div>
+    </main>
   </div>
 </section>
 </div>

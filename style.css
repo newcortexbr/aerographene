@@ -25,7 +25,7 @@ main{display:flex;flex-direction:column;gap:28px;min-width:0}
 .pane::before{text-transform:var(--hcase);content:"─ " attr(data-title) " ─";position:absolute;top:-10px;left:18px;background:var(--bg);padding:0 6px;color:var(--muted);font-size:12px}
 .pane:target,.pane.focus{border-color:var(--edge)}
 .pane.focus::before{color:var(--text)}
-.duo{display:grid;grid-template-columns:1fr 1fr;gap:28px}
+.duo{display:grid;grid-template-columns:minmax(0,1fr);gap:28px}
 .duo .pane{padding:30px 22px 22px}
 
 h1{font-size:38px;line-height:1.2;letter-spacing:-.5px;margin-bottom:18px}
@@ -91,23 +91,49 @@ h1 em{font-style:normal;color:var(--text2)}
 .feat b{display:block;color:var(--text);font-weight:600}
 
 /* t: workspace */
-.ws{border-radius:var(--r);position:relative;height:270px;overflow:hidden;background:var(--panel);border:1px solid var(--line)}
+.ws{border-radius:var(--r);position:relative;height:310px;overflow:hidden;background:var(--panel);border:1px solid var(--line)}
 .grid{position:absolute;inset:0;transform-origin:50% 50%;transition:transform .7s cubic-bezier(.3,.7,.2,1);
   background-image:radial-gradient(circle,color-mix(in srgb,var(--text) 9%,transparent) 1px,transparent 1.2px);background-size:18px 18px}
-.term{position:absolute;width:190px;background:var(--bg);border:1px solid var(--term);transition:left .8s cubic-bezier(.3,.7,.2,1),top .8s cubic-bezier(.3,.7,.2,1),box-shadow .2s}
+.term{position:absolute;width:280px;background:var(--bg);border:1px solid var(--term);transition:left .8s cubic-bezier(.3,.7,.2,1),top .8s cubic-bezier(.3,.7,.2,1),box-shadow .2s}
 .term.drag{box-shadow:0 8px 24px color-mix(in srgb,var(--bg) 70%,#000);border-color:var(--text)}
-.term .bar{background:var(--term);color:var(--bg);padding:0 6px;font-size:10px}
+.term .bar{background:var(--term);color:var(--bg);padding:0 5px;font-size:10px;line-height:14px;display:flex;justify-content:flex-end}
+.term .fetch{display:flex;gap:8px;padding:6px 8px 0;font:7px/7px var(--mono);color:var(--text2)}
+.term .fetch pre{font:inherit;white-space:pre}.term .fetch .cat{color:var(--accent)}.term .fetch i{font-style:normal;color:var(--accent)}
+.term .fetch .info{font-size:8px;line-height:9px;padding-top:12px}
+.term .sh{padding:4px 8px 6px;color:var(--text2);font:11px/1.5 var(--mono)}
 .term pre{padding:6px 8px;color:var(--text2);font:11px/1.5 var(--mono)}
 #tB{border-color:var(--edge)}#tB .bar{background:var(--panel);color:var(--text);border-bottom:1px solid var(--edge)}
-.zoom{position:absolute;right:8px;bottom:6px;color:var(--muted);font-size:11px}
+.corner{position:absolute;top:6px;width:20px;height:20px;display:grid;place-items:center;background:var(--panel);border:1px solid var(--line);border-radius:min(var(--r),4px);color:var(--text);font:12px/1 var(--mono);z-index:3}
+.corner.l{left:6px}.corner.r{right:6px}
+.side{position:absolute;left:6px;top:32px;bottom:6px;width:130px;background:var(--panel);border:1px solid var(--line);border-radius:min(var(--r),4px);padding:4px;font:10px var(--mono);color:var(--text);z-index:3}
+.side[hidden]{display:none}.side div{padding:3px 5px;border:1px solid transparent}.side div:first-child{border-color:var(--line)}
 .cursor.sm{transition:transform .8s cubic-bezier(.3,.7,.2,1)}
 
 /* o: vault + live preview */
-.vault{border-radius:var(--r);display:grid;grid-template-columns:120px 1fr;height:270px;border:1px solid var(--line);background:var(--panel);font-size:12px}
-.tree{border-right:1px solid var(--line);padding:10px 8px;color:var(--muted);line-height:1.9}
+.vault{border-radius:var(--r);display:grid;grid-template-columns:190px minmax(0,1fr);grid-template-rows:minmax(0,1fr);height:310px;border:1px solid var(--line);background:var(--panel);font-size:11px;overflow:hidden}
+.vside{display:flex;flex-direction:column;border-right:1px solid var(--line);min-width:0;color:var(--muted)}
+.modes{display:flex;gap:6px;padding:6px 8px;border-bottom:1px solid var(--line);font:10px var(--mono)}.modes .on{color:var(--text)}
+.vact{display:flex;gap:6px;align-items:center;padding:6px 8px;font:10px var(--mono)}.vact .hot{color:var(--accent);border:1px solid var(--accent);padding:0 4px}
+.sp{flex:1}
+.tree{flex:1;padding:2px 8px;line-height:1.8;overflow:hidden}
 .tree .f{padding-left:14px;color:var(--text2)}
 .tree .f.on{background:var(--sel);color:var(--text)}
-.editor{padding:14px 18px;overflow:hidden;font-family:system-ui,sans-serif;font-size:13px;line-height:1.75;color:var(--text2)}
+.vfoot{border-top:1px solid var(--line);padding:6px 8px;font:9px var(--mono);line-height:1.6}
+.vfoot .keys2{display:flex;flex-direction:column}.vfoot kbd{font:inherit;color:var(--text2)}
+.vfoot .vsel{margin-top:4px;color:var(--muted)}.vfoot .vsel b{color:var(--text)}
+.nmain{display:flex;flex-direction:column;min-width:0;min-height:0}
+.ntabs{display:flex;align-items:center;height:26px;border-bottom:1px solid var(--line);font:10px var(--mono);color:var(--text2);padding-right:8px;gap:0}
+.ntab{padding:0 10px;line-height:25px;border-right:1px solid var(--line)}.ntab i{font-style:normal;color:var(--muted);margin-left:4px}
+.ntab.on{color:var(--text);background:var(--sel);box-shadow:inset 0 -2px var(--accent)}
+.tp{padding:0 10px}.nst{color:var(--muted)}
+.crumbbar{white-space:nowrap;display:flex;gap:10px;padding:4px 12px;border-bottom:1px solid var(--line);font:10px var(--mono);color:var(--text2)}
+.crumbbar em{font-style:normal;color:var(--accent)}.crumbbar b{font-weight:400;color:var(--text)}
+.sbar{white-space:nowrap;overflow:hidden;display:flex;gap:10px;align-items:center;height:20px;border-top:1px solid var(--line);font:9px var(--mono);color:var(--text2);padding-right:8px}
+.sbm{background:var(--accent);color:var(--bg);font-weight:700;padding:0 8px;line-height:20px;letter-spacing:.06em}
+.editor .dh h4{margin:0}.editor .props{font:10px var(--mono);margin:2px 0 8px}
+.editor .props .tag{border:1px solid var(--line);color:var(--notes);padding:0 6px}
+.editor h4::before{content:"# ";color:var(--accent);opacity:.75}
+.editor{flex:1;min-height:0;padding:12px 18px;overflow:hidden;font-family:system-ui,sans-serif;font-size:13px;line-height:1.75;color:var(--text2)}
 .editor .ln{min-height:1.75em}
 .editor .raw{font-family:var(--mono);font-size:12px}
 .editor .mk{color:var(--muted)}
