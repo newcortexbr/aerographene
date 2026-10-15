@@ -187,8 +187,8 @@ as configurações seguem a linguagem quadrada do aerographene, sem remover nenh
 
 separando o que existe no navegador do que é só desenho:
 
-- no navegador (compilado): `default` e `pixelized`, tabelas em `aerographene_theme.cc`. `pixelized` é parte do produto final.
-- aprovados pelo dono como mockup, ainda não implementados como tema embutido (nenhum patch da série os define): metro-v2, e-ink-gb (Pixelify Sans), graphite (Doto), classical (couro), e-ink e cli/tui. Os guias e telas ficam fora do repo (pasta de design do dono). Neobrutalism e outros estudos antigos foram arquivados.
+- no navegador (compilado): `default`, `pixelized` e os seis temas aprovados (metro-v2, e-ink-gb, graphite, classical, e-ink e cli), todos embutidos em `aerographene_theme.cc` pelos patches `theme-builtin-approved` e `theme-fidelity`. `pixelized` é parte do produto final. Ainda não vistos em runtime: a verificação visual depende da build de 0.3.4.
+- os guias e telas de design ficam fora do repo. Neobrutalism e outros estudos antigos foram arquivados.
 - o tema cli desenha a moldura como uma TUI em grade de caracteres (JetBrains Mono 15px, célula 9x18, 16 cores ANSI, raio 0, sem sombra, foco em azul); a grade exata só vale na moldura e nas páginas internas, páginas web externas não alinham à grade, e não pode depender de Nerd Font.
 - wallpapers dos mockups são provisórios; os definitivos virão do dono.
 - mockup aprovado não prova funcionalidade no navegador.

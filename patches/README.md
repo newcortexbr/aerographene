@@ -547,7 +547,7 @@ Textos de spaces: `build/strings_space.json` (37 mensagens), aplicados por `buil
 
 ### `aerographene/theme-builtin-approved.patch` (GPL-3.0)
 
-Último da série. Os 6 temas aprovados de `theming/design-language` (metro-v2, e-ink-gb, graphite, classical, e-ink, cli) entram como `ThemeData` embutidos, pelo mesmo caminho do pixelized (`theme-builtin`): tabela de 36 tokens por tema em `aerographene_theme.cc`, raio, fonte e pacote de ícones. `kBuiltinThemeNames` (em `aerographene_theme.h`) passa a ser a lista única usada por `GetBuiltinTheme`, `ListThemes`, `IsReservedThemeName` e `ResolveTheme`; unit test de `theme-repo` ajustado à lista. Nenhum arquivo novo nem mudança em `BUILD.gn`.
+Último da série. Os 6 temas aprovados (metro-v2, e-ink-gb, graphite, classical, e-ink, cli) entram como `ThemeData` embutidos, pelo mesmo caminho do pixelized (`theme-builtin`): tabela de 36 tokens por tema em `aerographene_theme.cc`, raio, fonte e pacote de ícones. `kBuiltinThemeNames` (em `aerographene_theme.h`) passa a ser a lista única usada por `GetBuiltinTheme`, `ListThemes`, `IsReservedThemeName` e `ResolveTheme`; unit test de `theme-repo` ajustado à lista. Nenhum arquivo novo nem mudança em `BUILD.gn`.
 
 Adaptações ao sistema real (autorizadas pelo dono; motivo entre parênteses):
 

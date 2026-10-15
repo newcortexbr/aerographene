@@ -12,8 +12,7 @@ depends=('gtk3' 'nss' 'alsa-lib' 'libxss' 'libcups' 'libxkbcommon' 'mesa'
          'dbus' 'at-spi2-core' 'cairo' 'pango' 'expat' 'libx11' 'libxcb' 'libxext'
          'libxcomposite' 'libxdamage' 'libxfixes' 'libxrandr' 'systemd-libs'
          'xdg-utils' 'ttf-liberation' 'hicolor-icon-theme')
-# pixelized usa JetBrains Mono; sem ela cai na mono do sistema (theme-font.patch)
-optdepends=('ttf-jetbrains-mono: fonte do tema pixelized')
+# fontes dos temas (JetBrains Mono inclusive) vêm no pacote, em /usr/share/fonts/aerographene
 options=('!strip' '!debug')
 # O pacote sai do tarball compilado: packaging/build-native.sh coloca o tarball local no diretório com o
 # nome abaixo (makepkg usa o arquivo presente e não baixa). Sem ele, baixa o asset do release.yml.

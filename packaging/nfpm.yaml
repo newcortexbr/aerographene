@@ -48,8 +48,6 @@ overrides:
       - xdg-utils
       - fonts-liberation
       - hicolor-icon-theme
-    suggests:
-      - fonts-jetbrains-mono
   rpm:
     depends:
       - nss
@@ -78,7 +76,5 @@ overrides:
       - xdg-utils
       - liberation-fonts
       - hicolor-icon-theme
-    suggests:
-      - jetbrains-mono-fonts
 
 contents:
