@@ -540,3 +540,22 @@ Todos originais do aerographene (GPL-3.0), no fim de `patches/series` nesta orde
 7. `notes-ctrl-n` (depende de `commandbar-f3` e `notes-f2b`)
 
 Textos de spaces: `build/strings_space.json` (37 mensagens), aplicados por `build/branding_strings.py`, não pelos patches. Estado de validação: compilados na build avx2 verde; não vistos no navegador.
+
+### `aerographene/theme-builtin-approved.patch` (GPL-3.0)
+
+Último da série. Os 6 temas aprovados de `theming/design-language` (metro-v2, e-ink-gb, graphite, classical, e-ink, cli) entram como `ThemeData` embutidos, pelo mesmo caminho do pixelized (`theme-builtin`): tabela de 36 tokens por tema em `aerographene_theme.cc`, raio, fonte e pacote de ícones. `kBuiltinThemeNames` (em `aerographene_theme.h`) passa a ser a lista única usada por `GetBuiltinTheme`, `ListThemes`, `IsReservedThemeName` e `ResolveTheme`; unit test de `theme-repo` ajustado à lista. Nenhum arquivo novo nem mudança em `BUILD.gn`.
+
+Adaptações ao sistema real (autorizadas pelo dono; motivo entre parênteses):
+
+- só a variante escura de cada mockup (tema é claro ou escuro por natureza, `theme-scheme`; os mockups têm os dois).
+- cores fixas, sem tint (a série não tem pref `aerographene.tint` nem receitas de `tint/`).
+- e-ink-gb: texto secundário das abas inativas sobre a moldura t1 vira t3 (t2 sobre t1 dá 3,43:1, o próprio `e-ink-gb.md` proíbe); janela inativa fica em t2. Pacote de ícones pixelized no lugar dos bitmaps 16×16 próprios. Pixelify Sans 11 px (tamanho nativo da grade); a rasterização em grade do mockup não existe no Skia, então pode haver blur.
+- graphite: raio 10 (controle) e 6 (chip); widget 16 e item 8 não têm métrica própria. Doto 10 px como fonte da UI, por pedido do dono (no `graphite.md` a Doto é só display e a UI é Noto Sans; 10 px é o múltiplo de 10 que mantém o passo dos pontos inteiro). Sem fundo pontilhado nem sombra de cartão.
+- classical e e-ink: fonte do sistema no lugar de Noto Serif (não embarcada; o fallback de `theme-font` é mono, pior que a fonte do sistema para serifa). classical sem textura de couro, filete duplo, losango nem ícones à pena; e-ink sem halftone e contorno de 2 px.
+- metro-v2: fonte do sistema no lugar de Selawik (não embarcada); sem barra de 3 px da aba ativa, borda de campo 2 px e ícones próprios.
+- cli: JetBrains Mono 13 px na UI (15 px é a célula do terminal, grande demais para o chrome).
+- todos: `style` default (variantes compiladas só existem para default/pixelized); WebUI recebe as cores pelos tokens, mas forma e fonte de `webui-theme-shape` seguem o default (só compara com pixelized).
+
+Fontes: nenhuma embarcada (o Linux depende do fontconfig, como a JetBrains Mono do pixelized; empacotar exigiria mudar o PKGBUILD, fora deste patch). Origem e licença, para quando forem empacotadas: Pixelify Sans, The Pixelify Sans Project Authors, SIL OFL 1.1 (cópia em `theming/design-language/e-ink-gb/assets/fonts/`); Doto, Google Fonts, SIL OFL 1.1 (`theming/design-language/graphite/assets/fonts/`). Sem a família instalada, a UI cai na mono do sistema.
+
+Validação: `patch -p1 --fuzz=0` da série inteira sobre os arquivos novos dos temas (reconstruídos sem a árvore Chromium) limpo e idêntico ao esperado; contagens de hunks conferidas; `aerographene_theme.cc` compila com clang C++20 `-Werror` contra stubs de Skia/base e os 8 nomes resolvem. Não verificado: compilação na árvore 154, unit test, aparência no navegador, texto de `settings-theme-import` que ainda cita só "default" e "pixelized" como nomes reservados.

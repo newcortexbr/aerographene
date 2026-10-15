@@ -1,0 +1,505 @@
+aerographene: temas aprovados metro-v2, e-ink-gb, graphite, classical, e-ink e cli como embutidos.
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Depende de: aerographene/theme-builtin.patch (ThemeData, GetBuiltinTheme),
+aerographene/theme-repo.patch e aerographene/windows-confine.patch (estado
+final de aerographene_theme_repo.cc), menus-command-bar.patch e
+webui-theme-colors.patch (lista de tokens menu_border, menu_text_dim,
+text_dim, outline).
+Propósito: o sistema de temas é um só (ThemeData = mesmos campos do
+theme.json); os 6 temas aprovados em theming/design-language entram como
+instâncias embutidas ao lado de default e pixelized, na variante escura de
+cada mockup (tema é claro ou escuro por natureza, theme-scheme). Cores fixas
+dos mockups, sem tint (não há pref aerographene.tint na série). style =
+default (variante compilada do chrome); ícones: pacote pixelized no e-ink-gb
+(bitmap de 1 bit), default nos demais. Fontes não são embarcadas no Linux
+(mesmo caminho do pixelized): família ausente no fontconfig cai na mono do
+sistema (theme-font). Lista única kBuiltinThemeNames substitui as listas fixas
+{default, pixelized} de ListThemes, IsReservedThemeName e ResolveTheme, e
+GetBuiltinTheme passa a procurar por nome (desconhecido = default).
+
+--- a/chrome/browser/themes/aerographene_theme.h
++++ b/chrome/browser/themes/aerographene_theme.h
+@@ -12,11 +12,23 @@
+ 
+ namespace aerographene {
+ 
+-// Profile pref: theme name ("default" | "pixelized"). Read once in
+-// ThemeService::Init; a change applies on the next browser start.
++// Profile pref: theme name (a built-in below or a repository folder). Read
++// once in ThemeService::Init; a change applies on the next browser start.
+ inline constexpr char kThemePref[] = "aerographene.theme";
+ inline constexpr char kThemeDefault[] = "default";
+ inline constexpr char kThemePixelized[] = "pixelized";
++inline constexpr char kThemeMetroV2[] = "metro-v2";
++inline constexpr char kThemeEInkGb[] = "e-ink-gb";
++inline constexpr char kThemeGraphite[] = "graphite";
++inline constexpr char kThemeClassical[] = "classical";
++inline constexpr char kThemeEInk[] = "e-ink";
++inline constexpr char kThemeCli[] = "cli";
++
++// Every built-in theme name, in picker order.
++inline constexpr const char* kBuiltinThemeNames[] = {
++    kThemeDefault,   kThemePixelized, kThemeMetroV2, kThemeEInkGb,
++    kThemeGraphite,  kThemeClassical, kThemeEInk,    kThemeCli,
++};
+ 
+ // Profile pref (bool, default false): opt-in weather block on the new tab
+ // page. No network request is made while it is off (nor in this version when
+--- a/chrome/browser/themes/aerographene_theme.cc
++++ b/chrome/browser/themes/aerographene_theme.cc
+@@ -3,6 +3,8 @@
+ 
+ #include "chrome/browser/themes/aerographene_theme.h"
+ 
++#include <utility>
++
+ #include "base/no_destructor.h"
+ 
+ namespace aerographene {
+@@ -103,6 +105,262 @@
+     {"on_accent", SkColorSetRGB(0x0B, 0x0B, 0x0B)},
+ };
+ 
++// metro-v2 (theming/design-language/metro-v2/metro-v2.md, dark): frame
++// #1f1f1f, panel #2b2b2b, page/field #000, line #3c3c3c, field border
++// #666, text #fff/#c8c8c8/#a8a8a8, button/hover #333, selection #3e3e3e,
++// accent #0072cb (white on it), link #4cc2ff (focus ring).
++constexpr BuiltinToken kMetroV2Tokens[] = {
++    {"frame", SkColorSetRGB(0x1F, 0x1F, 0x1F)},
++    {"frame_inactive", SkColorSetRGB(0x1F, 0x1F, 0x1F)},
++    {"toolbar", SkColorSetRGB(0x2B, 0x2B, 0x2B)},
++    {"toolbar_text", SkColorSetRGB(0xFF, 0xFF, 0xFF)},
++    {"toolbar_icon", SkColorSetRGB(0xC8, 0xC8, 0xC8)},
++    {"tab_text", SkColorSetRGB(0xFF, 0xFF, 0xFF)},
++    {"tab_background_text", SkColorSetRGB(0xC8, 0xC8, 0xC8)},
++    {"tab_background_text_inactive", SkColorSetRGB(0xA8, 0xA8, 0xA8)},
++    {"tab_background", SkColorSetRGB(0x1F, 0x1F, 0x1F)},
++    {"omnibox", SkColorSetRGB(0x00, 0x00, 0x00)},
++    {"omnibox_hover", SkColorSetRGB(0x00, 0x00, 0x00)},
++    {"omnibox_border", SkColorSetRGB(0x66, 0x66, 0x66)},
++    {"omnibox_text", SkColorSetRGB(0xFF, 0xFF, 0xFF)},
++    {"omnibox_text_dim", SkColorSetRGB(0xC8, 0xC8, 0xC8)},
++    {"omnibox_results", SkColorSetRGB(0x2B, 0x2B, 0x2B)},
++    {"omnibox_results_hover", SkColorSetRGB(0x33, 0x33, 0x33)},
++    {"focus_ring", SkColorSetRGB(0x4C, 0xC2, 0xFF)},
++    {"selection", SkColorSetRGB(0x3E, 0x3E, 0x3E)},
++    {"selection_text", SkColorSetRGB(0xFF, 0xFF, 0xFF)},
++    {"selection_text_dim", SkColorSetRGB(0xFF, 0xFF, 0xFF)},
++    {"hover", SkColorSetRGB(0x33, 0x33, 0x33)},
++    {"tab_hover", SkColorSetRGB(0x33, 0x33, 0x33)},
++    {"separator", SkColorSetRGB(0x3C, 0x3C, 0x3C)},
++    {"menu", SkColorSetRGB(0x2B, 0x2B, 0x2B)},
++    {"menu_text", SkColorSetRGB(0xFF, 0xFF, 0xFF)},
++    {"menu_border", SkColorSetRGB(0x3C, 0x3C, 0x3C)},
++    {"menu_text_dim", SkColorSetRGB(0xC8, 0xC8, 0xC8)},
++    {"ntp", SkColorSetRGB(0x00, 0x00, 0x00)},
++    {"ntp_text", SkColorSetRGB(0xFF, 0xFF, 0xFF)},
++    {"base", SkColorSetRGB(0x00, 0x00, 0x00)},
++    {"surface", SkColorSetRGB(0x2B, 0x2B, 0x2B)},
++    {"text", SkColorSetRGB(0xFF, 0xFF, 0xFF)},
++    {"text_dim", SkColorSetRGB(0xC8, 0xC8, 0xC8)},
++    {"outline", SkColorSetRGB(0x66, 0x66, 0x66)},
++    {"accent", SkColorSetRGB(0x00, 0x72, 0xCB)},
++    {"on_accent", SkColorSetRGB(0xFF, 0xFF, 0xFF)},
++};
++
++// e-ink-gb (e-ink-gb.md, dark = LCD inverted): only the 4 tones t0 #0f380f,
++// t1 #35641a, t2 #a3c13a, t3 #cde08a. page/panel/field t0, frame/button t1,
++// text/ink/selection t3 (t0 on it), line t2. Secondary text (t2) is only
++// allowed on page/panel, so tab text over the t1 frame uses t3.
++constexpr BuiltinToken kEInkGbTokens[] = {
++    {"frame", SkColorSetRGB(0x35, 0x64, 0x1A)},
++    {"frame_inactive", SkColorSetRGB(0x35, 0x64, 0x1A)},
++    {"toolbar", SkColorSetRGB(0x35, 0x64, 0x1A)},
++    {"toolbar_text", SkColorSetRGB(0xCD, 0xE0, 0x8A)},
++    {"toolbar_icon", SkColorSetRGB(0xA3, 0xC1, 0x3A)},
++    {"tab_text", SkColorSetRGB(0xCD, 0xE0, 0x8A)},
++    {"tab_background_text", SkColorSetRGB(0xCD, 0xE0, 0x8A)},
++    {"tab_background_text_inactive", SkColorSetRGB(0xA3, 0xC1, 0x3A)},
++    {"tab_background", SkColorSetRGB(0x35, 0x64, 0x1A)},
++    {"omnibox", SkColorSetRGB(0x0F, 0x38, 0x0F)},
++    {"omnibox_hover", SkColorSetRGB(0x0F, 0x38, 0x0F)},
++    {"omnibox_border", SkColorSetRGB(0xA3, 0xC1, 0x3A)},
++    {"omnibox_text", SkColorSetRGB(0xCD, 0xE0, 0x8A)},
++    {"omnibox_text_dim", SkColorSetRGB(0xA3, 0xC1, 0x3A)},
++    {"omnibox_results", SkColorSetRGB(0x0F, 0x38, 0x0F)},
++    {"omnibox_results_hover", SkColorSetRGB(0x35, 0x64, 0x1A)},
++    {"focus_ring", SkColorSetRGB(0xCD, 0xE0, 0x8A)},
++    {"selection", SkColorSetRGB(0xCD, 0xE0, 0x8A)},
++    {"selection_text", SkColorSetRGB(0x0F, 0x38, 0x0F)},
++    {"selection_text_dim", SkColorSetRGB(0x0F, 0x38, 0x0F)},
++    {"hover", SkColorSetRGB(0x35, 0x64, 0x1A)},
++    {"tab_hover", SkColorSetRGB(0x35, 0x64, 0x1A)},
++    {"separator", SkColorSetRGB(0xA3, 0xC1, 0x3A)},
++    {"menu", SkColorSetRGB(0x0F, 0x38, 0x0F)},
++    {"menu_text", SkColorSetRGB(0xCD, 0xE0, 0x8A)},
++    {"menu_border", SkColorSetRGB(0xA3, 0xC1, 0x3A)},
++    {"menu_text_dim", SkColorSetRGB(0xA3, 0xC1, 0x3A)},
++    {"ntp", SkColorSetRGB(0x0F, 0x38, 0x0F)},
++    {"ntp_text", SkColorSetRGB(0xCD, 0xE0, 0x8A)},
++    {"base", SkColorSetRGB(0x0F, 0x38, 0x0F)},
++    {"surface", SkColorSetRGB(0x0F, 0x38, 0x0F)},
++    {"text", SkColorSetRGB(0xCD, 0xE0, 0x8A)},
++    {"text_dim", SkColorSetRGB(0xA3, 0xC1, 0x3A)},
++    {"outline", SkColorSetRGB(0xA3, 0xC1, 0x3A)},
++    {"accent", SkColorSetRGB(0xCD, 0xE0, 0x8A)},
++    {"on_accent", SkColorSetRGB(0x0F, 0x38, 0x0F)},
++};
++
++// graphite (graphite.md, dark): frame #0a0a0a, card #151515, inner
++// item/field #1e1e1e, page #101010, line #2c2c2c, field border #707070,
++// text #f3f3f3/#b8b8b8/#8e8e8e, red #ff4638 (black on it). Selection =
++// inner item + text, no bar.
++constexpr BuiltinToken kGraphiteTokens[] = {
++    {"frame", SkColorSetRGB(0x0A, 0x0A, 0x0A)},
++    {"frame_inactive", SkColorSetRGB(0x0A, 0x0A, 0x0A)},
++    {"toolbar", SkColorSetRGB(0x15, 0x15, 0x15)},
++    {"toolbar_text", SkColorSetRGB(0xF3, 0xF3, 0xF3)},
++    {"toolbar_icon", SkColorSetRGB(0xB8, 0xB8, 0xB8)},
++    {"tab_text", SkColorSetRGB(0xF3, 0xF3, 0xF3)},
++    {"tab_background_text", SkColorSetRGB(0xB8, 0xB8, 0xB8)},
++    {"tab_background_text_inactive", SkColorSetRGB(0x8E, 0x8E, 0x8E)},
++    {"tab_background", SkColorSetRGB(0x0A, 0x0A, 0x0A)},
++    {"omnibox", SkColorSetRGB(0x1E, 0x1E, 0x1E)},
++    {"omnibox_hover", SkColorSetRGB(0x1E, 0x1E, 0x1E)},
++    {"omnibox_border", SkColorSetRGB(0x70, 0x70, 0x70)},
++    {"omnibox_text", SkColorSetRGB(0xF3, 0xF3, 0xF3)},
++    {"omnibox_text_dim", SkColorSetRGB(0xB8, 0xB8, 0xB8)},
++    {"omnibox_results", SkColorSetRGB(0x15, 0x15, 0x15)},
++    {"omnibox_results_hover", SkColorSetRGB(0x1E, 0x1E, 0x1E)},
++    {"focus_ring", SkColorSetRGB(0xFF, 0x46, 0x38)},
++    {"selection", SkColorSetRGB(0x1E, 0x1E, 0x1E)},
++    {"selection_text", SkColorSetRGB(0xF3, 0xF3, 0xF3)},
++    {"selection_text_dim", SkColorSetRGB(0xF3, 0xF3, 0xF3)},
++    {"hover", SkColorSetRGB(0x1E, 0x1E, 0x1E)},
++    {"tab_hover", SkColorSetRGB(0x1E, 0x1E, 0x1E)},
++    {"separator", SkColorSetRGB(0x2C, 0x2C, 0x2C)},
++    {"menu", SkColorSetRGB(0x15, 0x15, 0x15)},
++    {"menu_text", SkColorSetRGB(0xF3, 0xF3, 0xF3)},
++    {"menu_border", SkColorSetRGB(0x2C, 0x2C, 0x2C)},
++    {"menu_text_dim", SkColorSetRGB(0xB8, 0xB8, 0xB8)},
++    {"ntp", SkColorSetRGB(0x10, 0x10, 0x10)},
++    {"ntp_text", SkColorSetRGB(0xF3, 0xF3, 0xF3)},
++    {"base", SkColorSetRGB(0x10, 0x10, 0x10)},
++    {"surface", SkColorSetRGB(0x15, 0x15, 0x15)},
++    {"text", SkColorSetRGB(0xF3, 0xF3, 0xF3)},
++    {"text_dim", SkColorSetRGB(0xB8, 0xB8, 0xB8)},
++    {"outline", SkColorSetRGB(0x70, 0x70, 0x70)},
++    {"accent", SkColorSetRGB(0xFF, 0x46, 0x38)},
++    {"on_accent", SkColorSetRGB(0x00, 0x00, 0x00)},
++};
++
++// classical (classical/tokens.css, classical-dark): frame #170a0b, panel
++// #221012, page/field #0e0506, line #4b2a2c, brass #c9a45c (focus), field
++// border #a8864a, text #f2e8d5/#d2c2aa/#ae9a84, hover #2c1518, selection
++// #3a1b1f, accent oxblood #9e1f2d (cream on it).
++constexpr BuiltinToken kClassicalTokens[] = {
++    {"frame", SkColorSetRGB(0x17, 0x0A, 0x0B)},
++    {"frame_inactive", SkColorSetRGB(0x17, 0x0A, 0x0B)},
++    {"toolbar", SkColorSetRGB(0x22, 0x10, 0x12)},
++    {"toolbar_text", SkColorSetRGB(0xF2, 0xE8, 0xD5)},
++    {"toolbar_icon", SkColorSetRGB(0xD2, 0xC2, 0xAA)},
++    {"tab_text", SkColorSetRGB(0xF2, 0xE8, 0xD5)},
++    {"tab_background_text", SkColorSetRGB(0xD2, 0xC2, 0xAA)},
++    {"tab_background_text_inactive", SkColorSetRGB(0xAE, 0x9A, 0x84)},
++    {"tab_background", SkColorSetRGB(0x17, 0x0A, 0x0B)},
++    {"omnibox", SkColorSetRGB(0x0E, 0x05, 0x06)},
++    {"omnibox_hover", SkColorSetRGB(0x0E, 0x05, 0x06)},
++    {"omnibox_border", SkColorSetRGB(0xA8, 0x86, 0x4A)},
++    {"omnibox_text", SkColorSetRGB(0xF2, 0xE8, 0xD5)},
++    {"omnibox_text_dim", SkColorSetRGB(0xD2, 0xC2, 0xAA)},
++    {"omnibox_results", SkColorSetRGB(0x22, 0x10, 0x12)},
++    {"omnibox_results_hover", SkColorSetRGB(0x2C, 0x15, 0x18)},
++    {"focus_ring", SkColorSetRGB(0xC9, 0xA4, 0x5C)},
++    {"selection", SkColorSetRGB(0x3A, 0x1B, 0x1F)},
++    {"selection_text", SkColorSetRGB(0xF2, 0xE8, 0xD5)},
++    {"selection_text_dim", SkColorSetRGB(0xF2, 0xE8, 0xD5)},
++    {"hover", SkColorSetRGB(0x2C, 0x15, 0x18)},
++    {"tab_hover", SkColorSetRGB(0x2C, 0x15, 0x18)},
++    {"separator", SkColorSetRGB(0x4B, 0x2A, 0x2C)},
++    {"menu", SkColorSetRGB(0x22, 0x10, 0x12)},
++    {"menu_text", SkColorSetRGB(0xF2, 0xE8, 0xD5)},
++    {"menu_border", SkColorSetRGB(0x4B, 0x2A, 0x2C)},
++    {"menu_text_dim", SkColorSetRGB(0xD2, 0xC2, 0xAA)},
++    {"ntp", SkColorSetRGB(0x0E, 0x05, 0x06)},
++    {"ntp_text", SkColorSetRGB(0xF2, 0xE8, 0xD5)},
++    {"base", SkColorSetRGB(0x0E, 0x05, 0x06)},
++    {"surface", SkColorSetRGB(0x22, 0x10, 0x12)},
++    {"text", SkColorSetRGB(0xF2, 0xE8, 0xD5)},
++    {"text_dim", SkColorSetRGB(0xD2, 0xC2, 0xAA)},
++    {"outline", SkColorSetRGB(0xA8, 0x86, 0x4A)},
++    {"accent", SkColorSetRGB(0x9E, 0x1F, 0x2D)},
++    {"on_accent", SkColorSetRGB(0xF2, 0xE8, 0xD5)},
++};
++
++// e-ink (e-ink.md, dark): 16 greys, no hue. frame #333, panel #222, page/
++// field #111, ink #eee (outline, focus, accent), line #888, text
++// #eee/#ccc/#bbb, hover #555, selection = inversion (#eee, #111 text).
++constexpr BuiltinToken kEInkTokens[] = {
++    {"frame", SkColorSetRGB(0x33, 0x33, 0x33)},
++    {"frame_inactive", SkColorSetRGB(0x33, 0x33, 0x33)},
++    {"toolbar", SkColorSetRGB(0x33, 0x33, 0x33)},
++    {"toolbar_text", SkColorSetRGB(0xEE, 0xEE, 0xEE)},
++    {"toolbar_icon", SkColorSetRGB(0xCC, 0xCC, 0xCC)},
++    {"tab_text", SkColorSetRGB(0xEE, 0xEE, 0xEE)},
++    {"tab_background_text", SkColorSetRGB(0xCC, 0xCC, 0xCC)},
++    {"tab_background_text_inactive", SkColorSetRGB(0xBB, 0xBB, 0xBB)},
++    {"tab_background", SkColorSetRGB(0x33, 0x33, 0x33)},
++    {"omnibox", SkColorSetRGB(0x11, 0x11, 0x11)},
++    {"omnibox_hover", SkColorSetRGB(0x11, 0x11, 0x11)},
++    {"omnibox_border", SkColorSetRGB(0xEE, 0xEE, 0xEE)},
++    {"omnibox_text", SkColorSetRGB(0xEE, 0xEE, 0xEE)},
++    {"omnibox_text_dim", SkColorSetRGB(0xCC, 0xCC, 0xCC)},
++    {"omnibox_results", SkColorSetRGB(0x22, 0x22, 0x22)},
++    {"omnibox_results_hover", SkColorSetRGB(0x55, 0x55, 0x55)},
++    {"focus_ring", SkColorSetRGB(0xEE, 0xEE, 0xEE)},
++    {"selection", SkColorSetRGB(0xEE, 0xEE, 0xEE)},
++    {"selection_text", SkColorSetRGB(0x11, 0x11, 0x11)},
++    {"selection_text_dim", SkColorSetRGB(0x11, 0x11, 0x11)},
++    {"hover", SkColorSetRGB(0x55, 0x55, 0x55)},
++    {"tab_hover", SkColorSetRGB(0x55, 0x55, 0x55)},
++    {"separator", SkColorSetRGB(0x88, 0x88, 0x88)},
++    {"menu", SkColorSetRGB(0x22, 0x22, 0x22)},
++    {"menu_text", SkColorSetRGB(0xEE, 0xEE, 0xEE)},
++    {"menu_border", SkColorSetRGB(0x88, 0x88, 0x88)},
++    {"menu_text_dim", SkColorSetRGB(0xCC, 0xCC, 0xCC)},
++    {"ntp", SkColorSetRGB(0x11, 0x11, 0x11)},
++    {"ntp_text", SkColorSetRGB(0xEE, 0xEE, 0xEE)},
++    {"base", SkColorSetRGB(0x11, 0x11, 0x11)},
++    {"surface", SkColorSetRGB(0x22, 0x22, 0x22)},
++    {"text", SkColorSetRGB(0xEE, 0xEE, 0xEE)},
++    {"text_dim", SkColorSetRGB(0xCC, 0xCC, 0xCC)},
++    {"outline", SkColorSetRGB(0xEE, 0xEE, 0xEE)},
++    {"accent", SkColorSetRGB(0xEE, 0xEE, 0xEE)},
++    {"on_accent", SkColorSetRGB(0x11, 0x11, 0x11)},
++};
++
++// cli (cli/tokens.css, aero-term dark): bg #0a0c10, bg2 #14171d (bars),
++// selection #1c2a40, line #2a3140, fg #d6d6d6, ansi 7 #b4b9c4, dim
++// #7f8796, ansi 4 #6cb6ff (focus, accent).
++constexpr BuiltinToken kCliTokens[] = {
++    {"frame", SkColorSetRGB(0x14, 0x17, 0x1D)},
++    {"frame_inactive", SkColorSetRGB(0x14, 0x17, 0x1D)},
++    {"toolbar", SkColorSetRGB(0x14, 0x17, 0x1D)},
++    {"toolbar_text", SkColorSetRGB(0xD6, 0xD6, 0xD6)},
++    {"toolbar_icon", SkColorSetRGB(0xB4, 0xB9, 0xC4)},
++    {"tab_text", SkColorSetRGB(0xD6, 0xD6, 0xD6)},
++    {"tab_background_text", SkColorSetRGB(0xB4, 0xB9, 0xC4)},
++    {"tab_background_text_inactive", SkColorSetRGB(0x7F, 0x87, 0x96)},
++    {"tab_background", SkColorSetRGB(0x14, 0x17, 0x1D)},
++    {"omnibox", SkColorSetRGB(0x0A, 0x0C, 0x10)},
++    {"omnibox_hover", SkColorSetRGB(0x0A, 0x0C, 0x10)},
++    {"omnibox_border", SkColorSetRGB(0x7F, 0x87, 0x96)},
++    {"omnibox_text", SkColorSetRGB(0xD6, 0xD6, 0xD6)},
++    {"omnibox_text_dim", SkColorSetRGB(0xB4, 0xB9, 0xC4)},
++    {"omnibox_results", SkColorSetRGB(0x14, 0x17, 0x1D)},
++    {"omnibox_results_hover", SkColorSetRGB(0x1C, 0x2A, 0x40)},
++    {"focus_ring", SkColorSetRGB(0x6C, 0xB6, 0xFF)},
++    {"selection", SkColorSetRGB(0x1C, 0x2A, 0x40)},
++    {"selection_text", SkColorSetRGB(0xD6, 0xD6, 0xD6)},
++    {"selection_text_dim", SkColorSetRGB(0xD6, 0xD6, 0xD6)},
++    {"hover", SkColorSetRGB(0x1C, 0x2A, 0x40)},
++    {"tab_hover", SkColorSetRGB(0x1C, 0x2A, 0x40)},
++    {"separator", SkColorSetRGB(0x2A, 0x31, 0x40)},
++    {"menu", SkColorSetRGB(0x14, 0x17, 0x1D)},
++    {"menu_text", SkColorSetRGB(0xD6, 0xD6, 0xD6)},
++    {"menu_border", SkColorSetRGB(0x2A, 0x31, 0x40)},
++    {"menu_text_dim", SkColorSetRGB(0xB4, 0xB9, 0xC4)},
++    {"ntp", SkColorSetRGB(0x0A, 0x0C, 0x10)},
++    {"ntp_text", SkColorSetRGB(0xD6, 0xD6, 0xD6)},
++    {"base", SkColorSetRGB(0x0A, 0x0C, 0x10)},
++    {"surface", SkColorSetRGB(0x14, 0x17, 0x1D)},
++    {"text", SkColorSetRGB(0xD6, 0xD6, 0xD6)},
++    {"text_dim", SkColorSetRGB(0xB4, 0xB9, 0xC4)},
++    {"outline", SkColorSetRGB(0x7F, 0x87, 0x96)},
++    {"accent", SkColorSetRGB(0x6C, 0xB6, 0xFF)},
++    {"on_accent", SkColorSetRGB(0x0A, 0x0C, 0x10)},
++};
++
+ template <size_t N>
+ std::vector<ThemeToken> ToTokens(const BuiltinToken (&table)[N]) {
+   std::vector<ThemeToken> tokens;
+@@ -142,6 +400,69 @@
+   return theme;
+ }
+ 
++// Approved themes of theming/design-language (2026-10-14). Dark variants:
++// a theme is dark or light by nature, so each enters with its dark mockup.
++// Fonts are not bundled (as pixelized): a family missing from fontconfig
++// falls back to the system monospace (theme-font.patch).
++ThemeData MakeFlatTheme(const char* name,
++                        std::vector<ThemeToken> tokens,
++                        int radius,
++                        int radius_small,
++                        const char* font_family,
++                        int font_size_px,
++                        const char* icons_base) {
++  ThemeData theme;
++  theme.name = name;
++  theme.scheme = ThemeScheme::kDark;
++  theme.radius = radius;
++  theme.radius_small = radius_small;
++  theme.font_family = font_family;
++  theme.font_size_px = font_size_px;
++  theme.icons_base = icons_base;
++  theme.style = kStyleDefault;
++  theme.tokens = std::move(tokens);
++  return theme;
++}
++
++ThemeData MakeBuiltinTheme(std::string_view name) {
++  if (name == kThemePixelized) {
++    return MakePixelizedTheme();
++  }
++  // metro-v2: square corners; Selawik not bundled, system UI font.
++  if (name == kThemeMetroV2) {
++    return MakeFlatTheme(kThemeMetroV2, ToTokens(kMetroV2Tokens), 0, 0, "",
++                         0, kIconPackDefault);
++  }
++  // e-ink-gb: square corners, Pixelify Sans 11px (native grid size), 1-bit
++  // pixel icons -> compiled pixelized pack.
++  if (name == kThemeEInkGb) {
++    return MakeFlatTheme(kThemeEInkGb, ToTokens(kEInkGbTokens), 0, 0,
++                         "Pixelify Sans", 11, kIconPackPixelized);
++  }
++  // graphite: controls 10px, chips 6px; Doto 10px (dot pitch 0.1em stays on
++  // whole pixels only at multiples of 10px).
++  if (name == kThemeGraphite) {
++    return MakeFlatTheme(kThemeGraphite, ToTokens(kGraphiteTokens), 10, 6,
++                         "Doto", 10, kIconPackDefault);
++  }
++  // classical: radius 0; Noto Serif not bundled, system UI font.
++  if (name == kThemeClassical) {
++    return MakeFlatTheme(kThemeClassical, ToTokens(kClassicalTokens), 0, 0,
++                         "", 0, kIconPackDefault);
++  }
++  // e-ink: radius 0; Noto Serif not bundled, system UI font.
++  if (name == kThemeEInk) {
++    return MakeFlatTheme(kThemeEInk, ToTokens(kEInkTokens), 0, 0, "", 0,
++                         kIconPackDefault);
++  }
++  // cli: radius 0, JetBrains Mono 13px (UI size; 15px is the terminal cell).
++  if (name == kThemeCli) {
++    return MakeFlatTheme(kThemeCli, ToTokens(kCliTokens), 0, 0,
++                         "JetBrains Mono", 13, kIconPackDefault);
++  }
++  return MakeDefaultTheme();
++}
++
+ ThemeData& ActiveTheme() {
+   static base::NoDestructor<ThemeData> active(MakeDefaultTheme());
+   return *active;
+@@ -155,10 +476,19 @@
+ ThemeData::~ThemeData() = default;
+ 
+ const ThemeData& GetBuiltinTheme(std::string_view name) {
+-  static const base::NoDestructor<ThemeData> default_theme(MakeDefaultTheme());
+-  static const base::NoDestructor<ThemeData> pixelized_theme(
+-      MakePixelizedTheme());
+-  return name == kThemePixelized ? *pixelized_theme : *default_theme;
++  static const base::NoDestructor<std::vector<ThemeData>> themes([] {
++    std::vector<ThemeData> list;
++    for (const char* builtin : kBuiltinThemeNames) {
++      list.push_back(MakeBuiltinTheme(builtin));
++    }
++    return list;
++  }());
++  for (const ThemeData& theme : *themes) {
++    if (theme.name == name) {
++      return theme;
++    }
++  }
++  return themes->front();
+ }
+ 
+ const ThemeData& GetActiveTheme() {
+--- a/chrome/browser/themes/aerographene_theme_repo.cc
++++ b/chrome/browser/themes/aerographene_theme_repo.cc
+@@ -526,8 +526,9 @@
+             });
+ 
+   std::vector<ThemeInfo> result;
+-  result.push_back({GetBuiltinTheme(kThemeDefault), /*builtin=*/true});
+-  result.push_back({GetBuiltinTheme(kThemePixelized), /*builtin=*/true});
++  for (const char* builtin : kBuiltinThemeNames) {
++    result.push_back({GetBuiltinTheme(builtin), /*builtin=*/true});
++  }
+   std::set<std::u16string> seen;
+   for (ThemeInfo& info : found) {
+     if (seen.insert(FoldName(info.theme.name)).second) {
+@@ -693,8 +694,12 @@
+ }
+ 
+ bool IsReservedThemeName(std::string_view name) {
+-  return base::EqualsCaseInsensitiveASCII(name, kThemeDefault) ||
+-         base::EqualsCaseInsensitiveASCII(name, kThemePixelized);
++  for (const char* builtin : kBuiltinThemeNames) {
++    if (base::EqualsCaseInsensitiveASCII(name, builtin)) {
++      return true;
++    }
++  }
++  return false;
+ }
+ 
+ ThemeParseResult ParseThemeJson(std::string_view json, ThemeData* out) {
+@@ -818,7 +823,7 @@
+ 
+ ResolvedTheme ResolveTheme(std::string_view pref_value) {
+   ResolvedTheme resolved;
+-  for (const char* builtin : {kThemeDefault, kThemePixelized}) {
++  for (const char* builtin : kBuiltinThemeNames) {
+     if (base::EqualsCaseInsensitiveASCII(pref_value, builtin)) {
+       resolved.theme = GetBuiltinTheme(builtin);
+       resolved.pref_value = builtin;
+--- a/chrome/browser/themes/aerographene_theme_repo_unittest.cc
++++ b/chrome/browser/themes/aerographene_theme_repo_unittest.cc
+@@ -3,6 +3,7 @@
+ 
+ #include "chrome/browser/themes/aerographene_theme_repo.h"
+ 
++#include <iterator>
+ #include <string>
+ #include <vector>
+ 
+@@ -126,6 +127,10 @@
+ TEST_F(AerographeneThemeRepoTest, ResolveBuiltinsAndFallback) {
+   EXPECT_EQ(ResolveTheme("pixelized").theme.style, kStylePixelized);
+   EXPECT_EQ(ResolveTheme("Pixelized").pref_value, "pixelized");
++  EXPECT_EQ(ResolveTheme("Metro-V2").pref_value, "metro-v2");
++  EXPECT_EQ(ResolveTheme("e-ink-gb").theme.font_family, "Pixelify Sans");
++  EXPECT_EQ(ResolveTheme("graphite").theme.radius, 10);
++  EXPECT_TRUE(IsReservedThemeName("CLI"));
+   EXPECT_EQ(ResolveTheme("").pref_value, "default");
+   EXPECT_EQ(ResolveTheme("../etc").pref_value, "default");
+   // Valid name without folder: default now, choice kept in the pref.
+@@ -175,13 +180,15 @@
+   base::test::TestFuture<std::vector<ThemeInfo>> future;
+   ListThemes(future.GetCallback());
+   const std::vector<ThemeInfo>& themes = future.Get();
+-  ASSERT_EQ(themes.size(), 4u);
++  const size_t builtins = std::size(kBuiltinThemeNames);
++  ASSERT_EQ(themes.size(), builtins + 2);
+   EXPECT_EQ(themes[0].theme.name, "default");
+   EXPECT_TRUE(themes[0].builtin);
+   EXPECT_EQ(themes[1].theme.name, "pixelized");
+-  EXPECT_EQ(themes[2].theme.name, "Alfa");
+-  EXPECT_EQ(themes[3].theme.name, "zeta");
+-  EXPECT_FALSE(themes[3].builtin);
++  EXPECT_TRUE(themes[builtins - 1].builtin);
++  EXPECT_EQ(themes[builtins].theme.name, "Alfa");
++  EXPECT_EQ(themes[builtins + 1].theme.name, "zeta");
++  EXPECT_FALSE(themes[builtins + 1].builtin);
+ }
+ 
+ TEST_F(AerographeneThemeRepoTest, InstallConflictAndReplace) {
+@@ -318,7 +325,8 @@
+   EXPECT_EQ(ResolveTheme("Fora").theme.name, "default");
+   base::test::TestFuture<std::vector<ThemeInfo>> list;
+   ListThemes(list.GetCallback());
+-  EXPECT_EQ(list.Get().size(), 2u);  // builtins only
++  EXPECT_EQ(list.Get().size(),
++            std::size(kBuiltinThemeNames));  // builtins only
+   // Replacing a junction with the theme's name is refused; the target stays.
+   base::test::TestFuture<InstallResult, std::string> install;
+   InstallTheme(R"({"name":"fora"})", true, install.GetCallback());
