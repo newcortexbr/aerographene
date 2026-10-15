@@ -2,9 +2,9 @@
 
 ## primeiro uso
 
-- perfil novo abre a página nova aba. Não há tela de setup nem a tela de primeiro uso nativa do Chromium (seletor de perfil), nem com `--force-first-run`.
+- perfil novo abre `aerographene://setup` uma vez (ver [onboarding](onboarding.md)). A tela de primeiro uso nativa do Chromium (seletor de perfil) segue desligada, também com `--force-first-run`.
 - origem: `patches/aerographene/first-run-off.patch` (`IsFirstRunEligibleProcess()` devolve `false`). A tela `chrome://setup` e os serviços do Helium (`helium/core/onboarding-page.patch`, `helium/core/services-prefs.patch`) saíram da série em 14/10/2026; o pacote helium-onboarding não é mais baixado.
-- o onboarding próprio ainda não existe.
+- o onboarding próprio é `onboarding-setup.patch` (página) mais o disparo em `first-run-off.patch`.
 
 ## buscador
 
@@ -30,7 +30,7 @@ Patch aplica com `--fuzz=0` e os alvos afetados compilam no overlay; não testad
 
 ## resumo para agentes
 
-- primeiro uso: `first-run-off.patch` desliga a FRE nativa; sem `chrome://setup`, sem `components/helium_services` (prefs `helium.services.*`), sem helium-onboarding.
+- primeiro uso: `first-run-off.patch` desliga a FRE nativa e abre `chrome://setup` em perfil novo; a página é do aerographene (`onboarding-setup.patch`, ver `onboarding.md`), sem `components/helium_services` (prefs `helium.services.*`), sem helium-onboarding.
 
 - buscador: `defaults-f4.patch` restaura `google` em `prepopulated_engines.json`.
 - loja: componente `third_party/chromium_web_store`, baixado por `build/inner.sh` (`cws_ver`/`cws_sha`), registrado em `ComponentLoader::AddChromiumWebStore`.
