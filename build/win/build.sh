@@ -52,12 +52,17 @@ s = open(path).read()
 beg, end = '  # aerographene-win: -march (build/win/build.sh)\n', '  # /aerographene-win\n'
 s = re.sub(re.escape(beg) + r'.*?' + re.escape(end), '', s, flags=re.S)
 m = re.search(r'config\("compiler_cpu_abi"\) \{\n(?:.*\n)*?  ldflags \+?= cpu_abi_ldflags\n', s)
+    # asmflags = cflags (fim do bloco) copiaria o /clang:-march para llvm-ml; o bloco entra depois dela
 assert m, "bloco compiler_cpu_abi mudou"
+end_i = s.index('\n}\n', m.end()) + 1
+tail = s[m.end():end_i]
+assert 'asmflags = cflags' in tail, "asmflags do compiler_cpu_abi mudou"
+m_end = end_i
 add = (beg + '  if (current_cpu == "x64" && is_win) {\n'
        f'    cflags += [ "/clang:-march={march}" ]\n'
        f'    rustflags = [ "-Ctarget-cpu={march}" ]\n'
        '  }\n' + end)
-s = s[:m.end()] + add + s[m.end():]
+s = s[:m_end] + add + s[m_end:]
 tmp = path + '.aero-new'
 open(tmp, 'w').write(s)
 os.replace(tmp, path)
