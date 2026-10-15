@@ -431,6 +431,13 @@ for n in 16 24 32 48 64 128 256; do
     mkdir -p "$stage/icons/hicolor/${n}x${n}/apps"
     cp "/aero/branding/png/aerographene-icon-${n}.png" "$stage/icons/hicolor/${n}x${n}/apps/aerographene.png"
 done
+# fontes dos temas (branding/fonts, SIL OFL 1.1, licença junto); o PKGBUILD instala em
+# /usr/share/fonts/aerographene/<família>/ (fontconfig) e o smoke-themes.sh no container
+for d in /aero/branding/fonts/*/; do
+    fam="$(basename "$d")"
+    mkdir -p "$stage/fonts/$fam"
+    cp "$d"*.ttf "${d}OFL.txt" "$stage/fonts/$fam/"
+done
 # uBlock: o Chromium lê o schema de storage.managed do disco, em resources/ublock/ ao lado do binário
 # (sem isso o log traz "Failed to parse schema for extension blockjmkbacgjkknlgpkjjiijinjdanf").
 if [ -f "${_src_dir}/third_party/ublock/managed_storage.json" ]; then

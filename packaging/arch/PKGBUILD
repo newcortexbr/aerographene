@@ -58,5 +58,16 @@ package() {
     install -Dm644 "app/icons/hicolor/${n}x${n}/apps/aerographene.png" \
       "$pkgdir/usr/share/icons/hicolor/${n}x${n}/mimetypes/application-x-aerotheme.png"
   done
+  # fontes dos temas (SIL OFL 1.1; build/inner.sh as põe em fonts/ no tarball): fontconfig
+  # as acha em /usr/share/fonts; sem elas o tema cai na família genérica (theme_service.cc)
+  if [ -d app/fonts ]; then
+    for d in app/fonts/*/; do
+      fam="$(basename "$d")"
+      for f in "$d"*.ttf; do
+        install -Dm644 "$f" "$pkgdir/usr/share/fonts/$pkgname/$fam/$(basename "$f")"
+      done
+      install -Dm644 "${d}OFL.txt" "$pkgdir/usr/share/licenses/$pkgname/fonts/$fam/OFL.txt"
+    done
+  fi
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
