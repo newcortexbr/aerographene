@@ -40,80 +40,118 @@ document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
 setCmd("curl");
 $("#copy").onclick = () => { navigator.clipboard?.writeText($("#cmd").textContent); $("#copy").textContent = "copied"; setTimeout(() => $("#copy").textContent = "copy", 1200); };
 
-/* theme carousel: add a theme = add one entry */
-const THEMES = [
-  { id: "default", cls: "" },
-  { id: "pixelized", cls: "pixelized" },
-];
-const browser = $("#browser"), segs = $("#segs");
-let cur = 0, t0 = performance.now(), paused = false;
-const DUR = 1000;
-THEMES.forEach((t, i) => {
-  const s = document.createElement("div");
-  s.className = "seg"; s.title = t.id; s.innerHTML = "<i></i>";
-  s.onclick = () => go(i);
-  segs.append(s);
+/* themes: themes.json (built by tools/build-gallery.sh) feeds the site picker and the gallery.
+   the picker restyles the whole site (data-theme + data-mode on <html>); the gallery only chooses which print is shown. */
+const KEY = "aero-theme", root = document.documentElement;
+const STATUS = { approved: "approved", proposal: "proposal", soon: "coming soon" };
+let THEMES = [], G = [], gi = 0, gmode = "dark", userPaused = reduce, hover = false, inView = true, timer;
+
+function applyTheme(id, m, save) {
+  const t = THEMES.find(x => x.id === id && x.tokens) || THEMES.find(x => x.id === "default");
+  if (!t) return;
+  m = t.modes.includes(m) ? m : t.modes[0];
+  root.dataset.theme = t.id; root.dataset.mode = m;
+  if (save) try { localStorage.setItem(KEY, t.id + "|" + m); } catch (e) {}
+  const bg = getComputedStyle(root).getPropertyValue("--bg").trim();
+  $('meta[name="theme-color"]').content = bg;
+  renderPicker(); dispatchEvent(new Event("themechange"));
+}
+
+/* site picker: radiogroup (arrows move + select) and a dark/light switch */
+function renderPicker() {
+  const box = $("#pk"), cur = root.dataset.theme, m = root.dataset.mode;
+  const list = THEMES.filter(t => t.tokens);
+  if (!box.children.length) list.forEach(t => {
+    const b = document.createElement("button");
+    b.type = "button"; b.setAttribute("role", "radio"); b.dataset.id = t.id;
+    b.title = t.name + " · " + STATUS[t.status];
+    b.innerHTML = '<i class="sw"><u></u><u></u><u></u></i><span></span>' + (t.status === "proposal" ? "<small>proposal</small>" : "");
+    b.children[1].textContent = t.name;
+    b.onclick = () => applyTheme(t.id, root.dataset.mode, true);
+    box.append(b);
+  });
+  list.forEach((t, i) => {
+    const b = box.children[i], k = t.tokens[m] || t.tokens[t.modes[0]];
+    b.setAttribute("aria-checked", t.id === cur); b.tabIndex = t.id === cur ? 0 : -1;
+    const u = b.querySelectorAll("u"); u[0].style.background = k.bg; u[1].style.background = k.text; u[2].style.background = k.accent;
+    b.querySelector(".sw").style.borderColor = k.edge;
+  });
+  const t = list.find(x => x.id === cur);
+  document.querySelectorAll("#pkmode button").forEach(b => {
+    const ok = t.modes.includes(b.dataset.m);
+    b.setAttribute("aria-pressed", b.dataset.m === m); b.disabled = !ok;
+    b.title = ok ? "" : t.name + " has no " + b.dataset.m + " mode";
+  });
+}
+$("#pk").addEventListener("keydown", e => {
+  const k = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key];
+  if (!k) return;
+  e.preventDefault();
+  const bs = [...$("#pk").children], i = bs.findIndex(b => b.getAttribute("aria-checked") === "true"), n = bs[(i + k + bs.length) % bs.length];
+  n.click(); n.focus();
 });
-function go(i) {
-  cur = (i + THEMES.length) % THEMES.length; t0 = performance.now();
-  THEMES.forEach(t => t.cls && browser.classList.remove(t.cls));
-  THEMES[cur].cls && browser.classList.add(THEMES[cur].cls);
-  $("#tname").textContent = THEMES[cur].id;
-}
-browser.parentElement.addEventListener("mouseenter", () => paused = true);
-browser.parentElement.addEventListener("mouseleave", () => { paused = false; t0 = performance.now(); });
-function tick(now) {
-  if (paused) t0 = now - (Number(segs.dataset.p) || 0) * DUR;
-  const p = Math.min(1, (now - t0) / DUR);
-  segs.dataset.p = p;
-  [...segs.children].forEach((s, i) => s.firstChild.style.width = (i < cur ? 100 : i === cur ? p * 100 : 0) + "%");
-  if (p >= 1 && !reduce && !window.NOROT) go(cur + 1);
-  requestAnimationFrame(tick);
-}
-go(0); requestAnimationFrame(tick);
+document.querySelectorAll("#pkmode button").forEach(b => b.onclick = () => applyTheme(root.dataset.theme, b.dataset.m, true));
 
-/* pixelized: 1-bit bayer 8x8 dither (pixel 2), used for the wallpaper and the active-tab ramp */
-const BAYER = (() => { const m = [[0]]; let M = m; for (let n = 1; n < 8; n *= 2) { const R = []; for (let j = 0; j < 2 * n; j++) { R[j] = []; for (let i = 0; i < 2 * n; i++) R[j][i] = 4 * M[j % n][i % n] + [0, 2, 3, 1][(j >= n) * 2 + (i >= n)]; } M = R; } return M; })();
-function dither(c, f) {
-  const px = c.dataset.px ? +c.dataset.px : 1, w = c.width = Math.max(1, Math.ceil(c.clientWidth / px)), h = c.height = Math.max(1, Math.ceil(c.clientHeight / px));
-  const x = c.getContext("2d"), im = x.createImageData(w, h);
-  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
-    const on = f(i / w, j / h) * 64 > BAYER[j % 8][i % 8] + .5, k = (j * w + i) * 4;
-    im.data[k] = im.data[k + 1] = im.data[k + 2] = on ? 240 : 0; im.data[k + 3] = 255;
-  }
-  x.putImageData(im, 0, 0);
+/* gallery: folder-tab stack of browser prints. autoplay only changes the selected print, never the site theme */
+function galSelect(i, focus) {
+  gi = (i + G.length) % G.length;
+  const t = G[gi];
+  [...$("#galtabs").children].forEach((b, j) => { b.setAttribute("aria-selected", j === gi); b.tabIndex = j === gi ? 0 : -1; if (j === gi && focus) b.focus(); });
+  const m = t.print[gmode] ? gmode : t.modes[0];
+  const img = $("#galimg"), soon = $("#galsoon");
+  $("#galaddr").textContent = "aerographene://theme/" + t.id;
+  $("#galstat").textContent = STATUS[t.status]; $("#galstat").dataset.s = t.status;
+  $("#galcap").textContent = [t.note, t.status === "proposal" ? "proposal: still being refined, not final." : "", t.status === "approved" ? "approved design." : "", t.print && Object.keys(t.print).length ? "mockup, made-up content." : ""].filter(Boolean).join(" ");
+  const p = t.print[m];
+  img.hidden = !p; soon.hidden = !!p;
+  if (p) { img.src = p; img.alt = t.name + " theme, " + m + " mode: mockup screenshot of the browser"; }
+  $("#galpanel").setAttribute("aria-labelledby", "gt-" + t.id);
+  document.querySelectorAll("#galmode button").forEach(b => { b.setAttribute("aria-pressed", b.dataset.m === m); b.disabled = !t.print[b.dataset.m]; });
+  const nx = G[(gi + 1) % G.length].print; const f = nx[gmode] || nx[Object.keys(nx)[0]]; if (f) new Image().src = f;
 }
-(() => {
-  const page = $("#dither"), ramp = $("#ramp");
-  const g = (u, v, cx, cy, rx, ry) => Math.exp(-(((u - cx) / rx) ** 2 + ((v - cy) / ry) ** 2));
-  const draw = () => {
-    dither(page, (u, v) => {
-      // mid-grey field, bright textured core top-right, dark wedge under the search box
-      const core = g(u, v, .72, .3, .16, .26), halo = g(u, v, .7, .35, .4, .55);
-      const field = .2 + .1 * Math.sin(u * 9) * Math.sin(v * 7);
-      const edge = 1 - .45 * Math.max(0, (u - .9) / .1);
-      const wedge = Math.max(0, 1 - Math.abs(u - .46) / (.05 + .1 * Math.max(0, v - .6))) * (v > .62 ? 1 : 0);
-      return Math.min(.85, (field + .3 * halo + .55 * core) * edge) * (1 - .95 * wedge);
-    });
-    dither(ramp, u => u);   // black → white, left to right, like the real active tab
-  };
-  draw(); addEventListener("resize", draw);
-  new MutationObserver(draw).observe($("#browser"), { attributes: true, attributeFilter: ["class"] });
-})();
+function galNext() { let n = 0, i = gi; do { i = (i + 1) % G.length; n++; } while (!Object.keys(G[i].print).length && n < G.length); galSelect(i); }
+function galPlay() {
+  clearInterval(timer);
+  const on = !userPaused && !hover && inView && !document.hidden;
+  if (on) timer = setInterval(galNext, 5500);
+  const b = $("#galpause"); b.setAttribute("aria-pressed", userPaused); b.textContent = userPaused ? "▶ play" : "❚❚ pause";
+  b.setAttribute("aria-label", userPaused ? "start gallery autoplay" : "pause gallery autoplay");
+}
+function buildGallery() {
+  G = THEMES;
+  const tabs = $("#galtabs");
+  G.forEach((t, i) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.role = "tab"; b.id = "gt-" + t.id; b.setAttribute("aria-controls", "galpanel");
+    b.style.setProperty("--i", i); b.textContent = t.name; b.dataset.s = t.status;
+    b.onclick = () => galSelect(i);
+    tabs.append(b);
+  });
+  tabs.addEventListener("keydown", e => {
+    const k = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
+    if (k) { e.preventDefault(); galSelect(gi + k, true); }
+    else if (e.key === "Home") { e.preventDefault(); galSelect(0, true); }
+    else if (e.key === "End") { e.preventDefault(); galSelect(G.length - 1, true); }
+  });
+  $("#galprev").onclick = () => galSelect(gi - 1);
+  $("#galnext").onclick = () => galSelect(gi + 1);
+  $("#galpause").onclick = () => { userPaused = !userPaused; galPlay(); };
+  document.querySelectorAll("#galmode button").forEach(b => b.onclick = () => { gmode = b.dataset.m; galSelect(gi); });
+  const g = $("#gal");
+  g.addEventListener("mouseenter", () => { hover = true; galPlay(); });
+  g.addEventListener("mouseleave", () => { hover = g.matches(":focus-within"); galPlay(); });
+  g.addEventListener("focusin", () => { hover = true; galPlay(); });
+  g.addEventListener("focusout", () => { hover = g.matches(":hover"); galPlay(); });
+  new IntersectionObserver(es => { inView = es[0].isIntersecting; galPlay(); }).observe(g);
+  document.addEventListener("visibilitychange", galPlay);
+  galSelect(0); galPlay();
+}
+fetch("themes.json").then(r => r.json()).then(d => {
+  THEMES = d.themes;
+  applyTheme(root.dataset.theme, root.dataset.mode, false);
+  buildGallery();
+}).catch(() => { $("#galcap").textContent = "themes could not be loaded."; });
 
-/* cursor wandering over hot items */
-const cursor = $("#cursor"), hots = [...browser.querySelectorAll(".hot")];
-let last;
-function wander() {
-  const b = browser.getBoundingClientRect();
-  const h = hots[Math.floor(Math.random() * hots.length)];
-  const r = h.getBoundingClientRect();
-  const x = r.left - b.left + Math.random() * r.width * .8 + 4, y = r.top - b.top + Math.random() * r.height * .6 + 2;
-  cursor.style.transform = `translate(${x}px,${y}px)`;
-  setTimeout(() => { last?.classList.remove("hover"); h.classList.add("hover"); last = h; }, 260);
-  setTimeout(wander, 380 + Math.random() * 520);
-}
-if (!reduce) wander();
 
 /* t: workspace — two terminals, zoom in/out, drag across and back */
 (() => {
@@ -206,24 +244,28 @@ const DATA = {
   pss: [["thorium", 627.5], ["ungoogled", 634.6], ["aerographene", 635.3], ["helium", 662.0], ["chrome", 686.7]],
 };
 const charts = document.querySelectorAll("canvas.px");
-const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { draw(e.target); io.unobserve(e.target); } }));
+const drawn = new Set();
+const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { drawn.add(e.target); draw(e.target); io.unobserve(e.target); } }));
+addEventListener("themechange", () => drawn.forEach(c => draw(c, true)));
 charts.forEach(c => io.observe(c));
-function draw(c) {
+function draw(c, instant) {
+  const cs = getComputedStyle(document.documentElement), col = n => cs.getPropertyValue(n).trim();
+  const cText = col("--text"), cMuted = col("--muted"), cAcc = col("--accent"), cA = col("--sel"), cB = col("--line");
   const x = c.getContext("2d"), d = DATA[c.dataset.set], max = Math.max(...d.map(r => r[1])), min = Math.min(...d.map(r => r[1])) * .8;
   const S = 3, cell = 4, rowH = 28, x0 = 0, bx = 0, maxCells = Math.floor((c.width - 4) / cell);
-  let f = 0;
+  let f = instant ? 1 : 0;
   const frame = () => {
     f = Math.min(1, f + (reduce ? 1 : .05));
     x.clearRect(0, 0, c.width, c.height);
     d.forEach(([n, v], r) => {
       const y = r * rowH, me = n === "aerographene";
-      pxText(x, n, x0, y, 2, me ? "#e6edf8" : "#5e6b82");
+      pxText(x, n, x0, y, 2, me ? cText : cMuted);
       const end = pxText(x, "", 0, 0, 1, "#0000");
       const vs = String(v).replace(/\.0$/, "");
-      pxText(x, vs, c.width - vs.length * 8, y, 2, me ? "#6cb6ff" : "#5e6b82");
+      pxText(x, vs, c.width - vs.length * 8, y, 2, me ? cAcc : cMuted);
       const cells = Math.round(maxCells * ((v - min) / (max - min)) * f);
       for (let k = 0; k < cells; k++) {
-        x.fillStyle = me ? "#6cb6ff" : (k % 2 ? "#2a3345" : "#3a4559");
+        x.fillStyle = me ? cAcc : (k % 2 ? cA : cB);
         x.fillRect(bx + k * cell, y + 14, cell - 1, 9);
       }
     });
@@ -236,11 +278,3 @@ $("#copy2").onclick = () => {
   navigator.clipboard?.writeText("curl -fsSL https://newcortexbr.github.io/aerographene/install.sh | bash");
   const b = $("#copy2"); b.textContent = "✓ copied"; setTimeout(() => b.textContent = "$ copy install command", 1400);
 };
-
-/* layout switch + folder drawer */
-document.querySelectorAll(".lay button").forEach(b => b.onclick = () => {
-  document.querySelectorAll(".lay button").forEach(o => o.classList.toggle("on", o === b));
-  $("#browser").classList.toggle("top", b.dataset.l === "top");
-  dispatchEvent(new Event("resize"));
-});
-if (!reduce) setInterval(() => $("#browser .folder").classList.toggle("open"), 2600);

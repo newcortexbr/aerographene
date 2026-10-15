@@ -21,6 +21,8 @@
 <meta name="twitter:description" content="Spaces, markdown notes, terminal workspaces and themes in a tuned Chromium. No account required.">
 <meta name="twitter:image" content="https://newcortexbr.github.io/aerographene/og.png">
 <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<script>(function(){try{var s=localStorage.getItem("aero-theme"),d=document.documentElement,t="default",m="dark";if(s&&/^[a-z0-9-]+\|(dark|light)$/.test(s)){s=s.split("|");t=s[0];m=s[1]}else if(matchMedia("(prefers-color-scheme: light)").matches){t="metro-v2";m="light"}d.dataset.theme=t;d.dataset.mode=m}catch(e){}})()</script>
+<link rel="stylesheet" href="themes.css">
 <link rel="stylesheet" href="style.css">
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"SoftwareApplication","name":"aerographene","applicationCategory":"BrowserApplication","operatingSystem":"Linux","license":"https://www.gnu.org/licenses/gpl-3.0.html","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"url":"https://newcortexbr.github.io/aerographene/","codeRepository":"https://github.com/newcortexbr/aerographene"}
@@ -40,6 +42,11 @@
     <a href="#bench"><span>05</span> numbers</a>
     <a href="#get"><span>06</span> get it</a>
   </nav>
+  <div class="picker" id="picker" role="group" aria-labelledby="pkh">
+    <h2 id="pkh">site theme</h2>
+    <div class="pk" id="pk" role="radiogroup" aria-labelledby="pkh"></div>
+    <div class="pkmode" id="pkmode" role="group" aria-label="site mode"><button type="button" data-m="dark" aria-pressed="true">dark</button><button type="button" data-m="light" aria-pressed="false">light</button></div>
+  </div>
   <div class="ext">
     <a href="https://github.com/newcortexbr/aerographene">github ↗</a>
     <a href="https://github.com/newcortexbr/aerographene/tree/main/docs/wiki">wiki ↗</a>
@@ -60,45 +67,24 @@
 </section>
 
 <section class="pane wide" id="themes" data-title="themes">
-  <div class="browser" id="browser">
-    <div class="tb">
-      <span class="hot"><svg viewBox="0 0 16 16" class="ic"><path d="M2 3h12v10H2zM6 3v10"/></svg></span><span class="hot dim"><svg viewBox="0 0 16 16" class="ic"><path d="M10 3L5 8l5 5"/></svg></span><span class="hot dim"><svg viewBox="0 0 16 16" class="ic"><path d="M6 3l5 5-5 5"/></svg></span><span class="hot"><svg viewBox="0 0 16 16" class="ic"><path d="M13 8a5 5 0 1 1-1.5-3.5M13 2v3h-3"/></svg></span>
-      <div class="omni hot">Search or enter address<span class="oi"><svg viewBox="0 0 16 16" class="ic"><path d="M2 5h12M2 11h12M5 3v4M11 9v4"/></svg><svg viewBox="0 0 16 16" class="ic"><path d="M6 10l4-4M5 7l-2 2a2 2 0 0 0 3 3l2-2M11 9l2-2a2 2 0 0 0-3-3L8 6"/></svg></span></div>
-      <span class="hot"><svg viewBox="0 0 16 16" class="ic"><path d="M8 1.5l5.5 2v4c0 3.5-2.5 6-5.5 7c-3-1-5.5-3.5-5.5-7v-4z"/></svg></span><span class="av hot"><svg viewBox="0 0 16 16" class="ic"><path d="M8 8a3 3 0 1 0 0-6a3 3 0 0 0 0 6M2.5 15c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/></svg></span><span class="hot"><svg viewBox="0 0 16 16" class="ic"><path d="M8 3v.5M8 8v.5M8 13v.5"/></svg></span>
-    </div>
-    <span class="wc"><svg viewBox="0 0 16 16" class="ic"><path d="M4 8h8"/></svg><svg viewBox="0 0 16 16" class="ic"><path d="M5 5h6v6H5z"/></svg><svg viewBox="0 0 16 16" class="ic"><path d="M4 4l8 8M12 4l-8 8"/></svg></span>
-    <aside class="side">
-      <div class="pins">
-        <span class="hot dot"><svg viewBox="0 0 16 16" class="ic"><path d="M8 1.5a6.5 6.5 0 1 0 0 13a6.5 6.5 0 0 0 0-13M1.5 8h13M8 1.5c2 2 2 11 0 13M8 1.5c-2 2-2 11 0 13"/></svg></span><span class="hot dot"><svg viewBox="0 0 16 16" class="ic"><path d="M8 1.5a6.5 6.5 0 1 0 0 13a6.5 6.5 0 0 0 0-13M1.5 8h13M8 1.5c2 2 2 11 0 13M8 1.5c-2 2-2 11 0 13"/></svg></span><span class="hot"><i class="fav">N</i></span><span class="hot empty">•</span>
-        <span class="hot empty">•</span><span class="hot empty">•</span>
+  <div class="gal" id="gal">
+    <div class="galtabs" id="galtabs" role="tablist" aria-label="browser themes"></div>
+    <div class="galcard" id="galpanel" role="tabpanel">
+      <div class="galbar">
+        <span class="wc" aria-hidden="true"><svg viewBox="0 0 16 16" class="ic"><path d="M4 8h8"/></svg><svg viewBox="0 0 16 16" class="ic"><path d="M5 5h6v6H5z"/></svg><svg viewBox="0 0 16 16" class="ic"><path d="M4 4l8 8M12 4l-8 8"/></svg></span>
+        <button type="button" class="gb" id="galprev" aria-label="previous theme"><svg viewBox="0 0 16 16" class="ic" aria-hidden="true"><path d="M10 3L5 8l5 5"/></svg></button>
+        <button type="button" class="gb" id="galnext" aria-label="next theme"><svg viewBox="0 0 16 16" class="ic" aria-hidden="true"><path d="M6 3l5 5-5 5"/></svg></button>
+        <span class="addr" id="galaddr">aerographene://theme/default</span>
+        <span class="stat" id="galstat" data-s="approved">approved</span>
+        <span class="mode" id="galmode" role="group" aria-label="print mode"><button type="button" data-m="dark" aria-pressed="true">dark</button><button type="button" data-m="light" aria-pressed="false">light</button></span>
+        <button type="button" class="gb txt" id="galpause" aria-pressed="false" aria-label="pause gallery autoplay">❚❚ pause</button>
       </div>
-      <div class="folder hot"><svg viewBox="0 0 16 16" class="ic"><path d="M1.5 4h5l1.5 1.5h6.5v8h-13z"/></svg><span>Work</span><b>›</b></div>
-      <div class="drawer"><span class="hot"><i class="fav">G</i></span><span class="hot"><i class="fav w">N</i></span><span class="hot wide2"><i class="fav">D</i></span></div>
-      <hr>
-      <div class="newtab hot">+ <span>New tab</span></div>
-      <div class="tabl"><div class="tab hot"><svg viewBox="0 0 16 16" class="ic"><path d="M8 1.5a6.5 6.5 0 1 0 0 13a6.5 6.5 0 0 0 0-13M1.5 8h13M8 1.5c2 2 2 11 0 13M8 1.5c-2 2-2 11 0 13"/></svg><span>New tab</span><svg viewBox="0 0 16 16" class="ic"><path d="M4 4l8 8M12 4l-8 8"/></svg></div>
-      <div class="tab hot"><i class="fav">G</i><span>GitHub</span><svg viewBox="0 0 16 16" class="ic"><path d="M4 4l8 8M12 4l-8 8"/></svg></div>
-      <div class="tab hot"><i class="fav w">N</i><span>Notion</span><svg viewBox="0 0 16 16" class="ic"><path d="M4 4l8 8M12 4l-8 8"/></svg></div>
-      <div class="tab hot on"><svg viewBox="0 0 16 16" class="ic"><path d="M8 1.5a6.5 6.5 0 1 0 0 13a6.5 6.5 0 0 0 0-13M1.5 8h13M8 1.5c2 2 2 11 0 13M8 1.5c-2 2-2 11 0 13"/></svg><span>New tab</span><canvas class="dz" id="ramp" data-px="2"></canvas><svg viewBox="0 0 16 16" class="ic"><path d="M4 4l8 8M12 4l-8 8"/></svg></div><span class="plus hot">+</span></div>
-      <div class="foot"><span class="hot"><svg viewBox="0 0 16 16" class="ic"><path d="M8 2v8M4.5 7L8 10.5L11.5 7M2.5 13.5h11"/></svg></span><span class="hot"><svg viewBox="0 0 16 16" class="ic"><path d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z"/></svg></span></div>
-    </aside>
-    <div class="page">
-      <canvas class="dither" id="dither" data-px="2"></canvas>
-      <svg class="waves" viewBox="0 0 800 500" preserveAspectRatio="none"><path d="M0 330C200 280 380 360 560 300S760 180 800 200"/><path d="M0 360C220 300 420 390 600 330S780 230 800 240"/><path d="M0 430C260 400 500 420 800 400"/></svg>
-      <div class="nt">
-        <div class="clock hot">23:49</div>
-        <div class="greet hot">good evening.</div>
-        <div class="motd"><small>MESSAGE OF THE DAY</small><span>pick one priority today.</span></div>
-        <div class="ntsearch hot"><svg viewBox="0 0 16 16" class="ic"><path d="M7 2.5a4.5 4.5 0 1 0 0 9a4.5 4.5 0 0 0 0-9M10.5 10.5L14 14"/></svg><span>Search or open an address</span><kbd>Ctrl+K</kbd></div>
+      <div class="galview">
+        <img id="galimg" width="1280" height="697" alt="" decoding="async">
+        <div class="galsoon" id="galsoon" hidden><span>coming soon</span></div>
       </div>
-      <div class="cust hot"><svg viewBox="0 0 16 16" class="ic"><path d="M8 5.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 0 0 0-5M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.5 1.5M11.5 11.5L13 13M3 13l1.5-1.5M11.5 4.5L13 3"/></svg><span>Customize</span></div>
+      <p class="galcap" id="galcap" aria-live="polite"></p>
     </div>
-    <svg class="cursor" id="cursor" viewBox="0 0 16 16" width="16" height="16"><path d="M1 1 L1 13 L4.5 10 L7 15 L9 14 L6.6 9.2 L11 9.2 Z"/></svg>
-  </div>
-  <div class="themebar">
-    <div class="lay" role="group" aria-label="tab layout"><button class="on" data-l="side">sidebar</button><button data-l="top">topbar</button></div>
-    <span class="tname" id="tname">default</span>
-    <div class="segs" id="segs"></div>
   </div>
   <div class="explain">
     <p><b>pinned</b>the grid on top. Sites you keep for good: they survive restarts, reopen in the background without loading until you click them, and stay visible (dashed) even after you close them. A tile can span several cells.</p>
