@@ -2,7 +2,7 @@
 # aerographene installer: picks the package for your distro and CPU from the
 # latest GitHub release, checks it against SHA256SUMS and installs it.
 #   curl -fsSL https://newcortexbr.github.io/aerographene/install.sh | bash
-# options (env): AERO_VERSION=v0.3.0  AERO_CPU=avx2|avx1  AERO_FORMAT=arch|debian|fedora|linux
+# options (env): AERO_VERSION=v0.3.3  AERO_CPU=avx2|avx1  AERO_FORMAT=arch|debian|fedora|linux
 set -euo pipefail
 # everything runs inside main so a piped script is fully read before anything
 # executes; package managers read answers from the terminal, not from the pipe.
