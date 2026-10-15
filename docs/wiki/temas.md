@@ -195,6 +195,18 @@ separando o que existe no navegador do que é só desenho:
 - site (branch `site`, GitHub Pages): galeria de temas com seletor; sem prints reais do navegador a galeria mostra "em breve".
 - cores ajustáveis pelo usuário: proposta em [temas tintáveis](temas-tintaveis.md), nada implementado.
 
+## fidelidade dos temas (v0.3.4)
+
+o que mudou no navegador (patch `theme-fidelity`, compilado, não visto em runtime):
+
+- aba ativa por tema: `default` gradiente com barra no topo; `pixelized` bloco preto com rampa; `metro-v2` barra de 3px à esquerda; `graphite` ponto vermelho de 6px à direita; `classical` losango na borda esquerda; `e-ink` e `e-ink-gb` inversão; `cli` só fundo de seleção. Vale na sidebar e na barra superior. O gradiente azul e o fundo azul da sidebar ficam só no `default`.
+- token novo `tab_marker` (opcional no `theme.json`): cor do marcador; sem ele, usa `accent`.
+- fontes empacotadas no Linux (SIL OFL 1.1, em `/usr/share/fonts/aerographene/`): Selawik (`metro-v2`, 13px), Noto Serif (`classical` e `e-ink`, 13px), Pixelify Sans (`e-ink-gb`, 11px), Doto (`graphite`, só títulos; texto na fonte do sistema), JetBrains Mono (`pixelized`, `cli`). Fonte ausente cai em Monospace, Serif ou Sans conforme o tipo.
+- nova aba: temas sem variante própria usam fundo liso com as cores, raios e fontes do tema (sem o wallpaper azul).
+- páginas internas: raio, chips, checkbox/radio e fontes seguem o tema ativo; a fonte de título vai em `h1`, `h2` e no título da barra da página.
+- tema de repositório (`theme.json`) usa o marcador `kFill` (fundo de seleção); não há chave para escolher outro marcador.
+- smoke (`build/smoke-themes.sh`): abre as páginas por `session.startup_urls` (URLs `chrome://` da linha de comando são descartadas), instala as fontes do tarball e gera `<tema>-sidebar.png` com sidebar e abas extras.
+
 ## problemas comuns
 
 - nada mudou: confira se reiniciou, se o JSON é válido (`jq . theme.json`) e se `mode` é `"dark"`.

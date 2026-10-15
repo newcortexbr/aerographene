@@ -2,6 +2,15 @@
 
 Newest first. Releases: https://github.com/newcortexbr/aerographene/releases
 
+## v0.3.4 (unreleased, branch `v0.3.4`)
+
+- each built-in theme draws its own active-tab marker (bar, dot, lozenge, inversion); the blue gradient stays in `default` only
+- new tab page follows the colors, radii and fonts of the active theme
+- Pixelify Sans, Doto, Selawik and Noto Serif (SIL OFL 1.1) bundled in the Linux packages; Doto only in graphite titles
+- internal pages take radius and font from the active theme
+- chromium-web-store without a permanent service worker
+- theme smoke test opens the pages for real and adds sidebar shots
+
 ## v0.3.3 (2026-10-15)
 
 Published as a normal release: https://github.com/newcortexbr/aerographene/releases/tag/v0.3.3
