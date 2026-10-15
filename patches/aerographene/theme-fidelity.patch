@@ -26,8 +26,15 @@ Propósito:
 - WebUI (colors.css): raio, raio de chip, checkbox/radio quadrados e fontes
   vêm do tema ativo (antes só pixelized x default); --aero-display-font vale
   em h1/h2 e no título do cr-toolbar. Saída do default e do pixelized
-  equivalente à anterior.
-Compilado (os 7 .o tocados e resources_grit da WebUI); runtime não verificado.
+  equivalente à anterior. Settings, histórico, downloads, extensões e
+  favoritos carregam chrome://theme/colors.css sempre (antes só com a flag
+  webuiRefresh2026), senão nada disso chegava às páginas.
+- espaço do marcador: ActiveTabMarkerLeadingSpace/TrailingSpace() reservam
+  6px antes do favicon (losango do classical) e 12px depois do botão de
+  fechar (ponto do graphite) nos layouts horizontal e vertical.
+- nova aba do pixelized: saudação em Pixelify Sans.
+- título da aba: temas com fonte mono (cli, pixelized) elidem com reticências
+  em vez de esmaecer.
 
 --- a/chrome/browser/resources/aero_newtab/aero_newtab.html
 +++ b/chrome/browser/resources/aero_newtab/aero_newtab.html
@@ -38,10 +45,11 @@ Compilado (os 7 .o tocados e resources_grit da WebUI); runtime não verificado.
  <head>
  <meta charset="utf-8">
  <title>New Tab</title>
-@@ -42,6 +42,13 @@
+@@ -42,6 +42,14 @@
  .pz .go{background:#181818;font-family:var(--mono)}.pz .go:hover{box-shadow:inset 0 0 0 1px #f2f2f2}.pz .go span{font-size:13px}
  .pz kbd{font-family:var(--mono);font-size:11px}
  .pz .cz{background:#111;font-family:var(--mono);font-size:12px;text-transform:uppercase;letter-spacing:.08em}
++.pz h1{font-family:"Pixelify Sans",var(--mono);font-weight:400}
 +.th .wp,.th .scrim{display:none}
 +.th body{font-family:var(--font)}
 +.th h1{font-family:var(--display);font-weight:400;text-shadow:none}
@@ -52,6 +60,82 @@ Compilado (os 7 .o tocados e resources_grit da WebUI); runtime não verificado.
  </style>
  </head>
  <body>
+--- a/chrome/browser/resources/bookmarks/app.ts
++++ b/chrome/browser/resources/bookmarks/app.ts
+@@ -96,8 +96,11 @@
+   override connectedCallback() {
+     super.connectedCallback();
+ 
++    // aerographene: theme colors, shape and fonts (chrome://theme/colors.css)
++    // on every page, not only with the 2026 refresh.
+     const enableWebuiRefresh2026 =
+-        loadTimeData.getString('webuiRefresh2026') !== '';
++        loadTimeData.getString('webuiRefresh2026') !== '' ||
++        true;
+     if (enableWebuiRefresh2026) {
+       this.addThemedColors_();
+       ColorChangeUpdater.forDocument().start();
+--- a/chrome/browser/resources/downloads/manager.ts
++++ b/chrome/browser/resources/downloads/manager.ts
+@@ -130,8 +130,11 @@
+     this.toggleAttribute('loading', true);
+     document.documentElement.classList.remove('loading');
+ 
++    // aerographene: theme colors, shape and fonts (chrome://theme/colors.css)
++    // on every page, not only with the 2026 refresh.
+     const enableWebuiRefresh2026 =
+-        loadTimeData.getString('webuiRefresh2026') !== '';
++        loadTimeData.getString('webuiRefresh2026') !== '' ||
++        true;
+     if (enableWebuiRefresh2026) {
+       this.addThemedColors_();
+       ColorChangeUpdater.forDocument().start();
+--- a/chrome/browser/resources/extensions/manager.ts
++++ b/chrome/browser/resources/extensions/manager.ts
+@@ -214,8 +214,11 @@
+   override connectedCallback() {
+     super.connectedCallback();
+ 
++    // aerographene: theme colors, shape and fonts (chrome://theme/colors.css)
++    // on every page, not only with the 2026 refresh.
+     const enableWebuiRefresh2026 =
+-        loadTimeData.getString('webuiRefresh2026') !== '';
++        loadTimeData.getString('webuiRefresh2026') !== '' ||
++        true;
+     if (enableWebuiRefresh2026) {
+       this.addThemedColors_();
+       ColorChangeUpdater.forDocument().start();
+--- a/chrome/browser/resources/history/app.ts
++++ b/chrome/browser/resources/history/app.ts
+@@ -276,8 +276,11 @@
+   override connectedCallback() {
+     super.connectedCallback();
+ 
++    // aerographene: theme colors, shape and fonts (chrome://theme/colors.css)
++    // on every page, not only with the 2026 refresh.
+     const enableWebuiRefresh2026 =
+-        loadTimeData.getString('webuiRefresh2026') !== '';
++        loadTimeData.getString('webuiRefresh2026') !== '' ||
++        true;
+     if (enableWebuiRefresh2026) {
+       this.addThemedColors_();
+       ColorChangeUpdater.forDocument().start();
+--- a/chrome/browser/resources/settings/settings_ui/settings_ui.ts
++++ b/chrome/browser/resources/settings/settings_ui/settings_ui.ts
+@@ -156,9 +156,12 @@
+   override connectedCallback() {
+     super.connectedCallback();
+ 
++    // aerographene: theme colors, shape and fonts (chrome://theme/colors.css)
++    // on every page, not only with the 2026 refresh.
+     const enableThemedColors =
+         loadTimeData.getString('webuiRefresh2026') !== '' ||
+-        loadTimeData.getString('settingsRefresh2026') !== '';
++        loadTimeData.getString('settingsRefresh2026') !== '' ||
++        true;
+     if (enableThemedColors) {
+       this.addThemedColors_();
+       ColorChangeUpdater.forDocument().start();
 --- a/chrome/browser/themes/aerographene_theme.cc
 +++ b/chrome/browser/themes/aerographene_theme.cc
 @@ -158,7 +158,7 @@
@@ -188,7 +272,7 @@ Compilado (os 7 .o tocados e resources_grit da WebUI); runtime não verificado.
    }
    return MakeDefaultTheme();
  }
-@@ -508,4 +524,20 @@
+@@ -508,4 +524,29 @@
    return GetActiveTheme().style == kStylePixelized;
  }
  
@@ -206,6 +290,15 @@ Compilado (os 7 .o tocados e resources_grit da WebUI); runtime não verificado.
 +
 +bool UsesAccentGradient() {
 +  return GetActiveTheme().active_tab_marker == ActiveTabMarker::kGradient;
++}
++
++int ActiveTabMarkerLeadingSpace() {
++  return GetActiveTheme().active_tab_marker == ActiveTabMarker::kDiamond ? 6
++                                                                          : 0;
++}
++
++int ActiveTabMarkerTrailingSpace() {
++  return GetActiveTheme().active_tab_marker == ActiveTabMarker::kDot ? 12 : 0;
 +}
 +
  }  // namespace aerographene
@@ -250,7 +343,7 @@ Compilado (os 7 .o tocados e resources_grit da WebUI); runtime não verificado.
    // Applied in order through the theme token -> ColorId mapping.
    std::vector<ThemeToken> tokens;
  };
-@@ -90,6 +111,15 @@
+@@ -90,6 +111,21 @@
  // Shorthand for GetActiveTheme().style == kStylePixelized.
  bool UsesPixelizedStyle();
  
@@ -262,6 +355,12 @@ Compilado (os 7 .o tocados e resources_grit da WebUI); runtime não verificado.
 +
 +// True when the active theme draws the accent gradient (default theme).
 +bool UsesAccentGradient();
++
++// Room the active theme's tab marker takes inside every tab, in px, so it
++// does not cover the tab contents: leading = before the favicon (classical
++// lozenge), trailing = after the close button (graphite dot); 0 otherwise.
++int ActiveTabMarkerLeadingSpace();
++int ActiveTabMarkerTrailingSpace();
 +
  }  // namespace aerographene
  
@@ -313,16 +412,18 @@ Compilado (os 7 .o tocados e resources_grit da WebUI); runtime não verificado.
      flags.setShader(gfx::CreateGradientShader(
 --- a/chrome/browser/ui/views/tabs/common/tab_view.cc
 +++ b/chrome/browser/ui/views/tabs/common/tab_view.cc
-@@ -187,6 +187,72 @@
+@@ -187,6 +187,74 @@
    return *ramp;
  }
  
 +// Active tab of a theme without the accent gradient or the pixelized block:
 +// selection fill plus the theme marker (aerographene::ActiveTabMarker). The
-+// marker color is the "tab_marker" token, the accent if absent.
++// marker color is the "tab_marker" token, the accent if absent. Dot and
++// lozenge sit in the room reserved by aerographene::ActiveTabMarker*Space()
++// (after the close button, before the favicon).
 +constexpr int kAeroThemeBarWidth = 3;
 +constexpr int kAeroThemeDotSize = 6;
-+constexpr int kAeroThemeDotInset = 8;
++constexpr int kAeroThemeDotInset = 5;
 +constexpr float kAeroThemeLozenge = 4.0f;
 +constexpr float kAeroThemeLozengeInset = 5.0f;
 +
@@ -386,7 +487,7 @@ Compilado (os 7 .o tocados e resources_grit da WebUI); runtime não verificado.
  // Draws the background of a vertical (sidebar) tab: default = faint fill
  // (active: tenuous gradient, 1px outline on top and sides, 2px accent bar on
  // top; no bottom line), pixelized = black block with white outline, Bayer
-@@ -254,7 +320,7 @@
+@@ -254,7 +322,7 @@
        gfx::RectF outline(bounds);
        outline.Inset(0.5f);
        canvas->DrawRoundRect(outline, radius, stroke);
@@ -395,7 +496,7 @@ Compilado (os 7 .o tocados e resources_grit da WebUI); runtime não verificado.
        flags.setShader(gfx::CreateGradientShader(
            gfx::Point(0, 0), gfx::Point(0, bounds.height()),
            SkColorSetARGB(0x24, 0x6C, 0xB6, 0xFF),
-@@ -274,6 +340,8 @@
+@@ -274,6 +342,8 @@
                      std::max(0, bounds.width() - 2 * kAeroIndicatorInset),
                      kAeroIndicatorHeight),
            flags);
@@ -404,18 +505,54 @@ Compilado (os 7 .o tocados e resources_grit da WebUI); runtime não verificado.
      }
    } else if (hovered) {
      flags.setColor(colors->GetColor(
+@@ -509,6 +579,12 @@
+   }
+ 
+   title_->SetProperty(views::kElementIdentifierKey, kVerticalTabTitleElementId);
++  // aerographene: monospace theme fonts (cli, pixelized) end a long title
++  // with an ellipsis; the fade reads as a title cut mid-word.
++  if (aerographene::GetActiveTheme().font_family.find("Mono") !=
++      std::string::npos) {
++    title_->SetElideBehavior(gfx::ELIDE_TAIL);
++  }
+   SetProperty(views::kElementIdentifierKey, kTabElementId);
+   // Layout manager must be set after child views are created because the
+   // vertical layout stores pointers to those children.
+--- a/chrome/browser/ui/views/tabs/common/tab_view_vertical_layout.cc
++++ b/chrome/browser/ui/views/tabs/common/tab_view_vertical_layout.cc
+@@ -5,6 +5,7 @@
+ #include "chrome/browser/ui/views/tabs/common/tab_view_vertical_layout.h"
+ 
+ #include "base/command_line.h"
++#include "chrome/browser/themes/aerographene_theme.h"
+ #include "chrome/browser/glic/browser_ui/tab_underline_view.h"
+ #include "chrome/browser/ui/layout_constants.h"
+ #include "chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h"
+@@ -57,6 +58,10 @@
+ 
+   gfx::Rect bounds_remaining = gfx::Rect(layouts.host_size);
+   bounds_remaining.Inset(TabView().tab_styling()->GetContentsInsets());
++  // aerographene: room for the active tab marker (lozenge, dot).
++  bounds_remaining.Inset(
++      gfx::Insets::TLBR(0, aerographene::ActiveTabMarkerLeadingSpace(), 0,
++                        aerographene::ActiveTabMarkerTrailingSpace()));
+ 
+   // If the tab is collapsed but animating with a wider width then we shouldn't
+   // center the contents.
 --- a/chrome/browser/ui/views/tabs/horizontal_tab_style_views.cc
 +++ b/chrome/browser/ui/views/tabs/horizontal_tab_style_views.cc
-@@ -370,6 +370,72 @@
+@@ -370,6 +370,74 @@
    return *ramp;
  }
  
 +// Active tab of a theme without the accent gradient or the pixelized block:
 +// selection fill plus the theme marker (aerographene::ActiveTabMarker). The
-+// marker color is the "tab_marker" token, the accent if absent.
++// marker color is the "tab_marker" token, the accent if absent. Dot and
++// lozenge sit in the room reserved by aerographene::ActiveTabMarker*Space()
++// (after the close button, before the favicon).
 +constexpr int kAeroThemeBarWidth = 3;
 +constexpr int kAeroThemeDotSize = 6;
-+constexpr int kAeroThemeDotInset = 8;
++constexpr int kAeroThemeDotInset = 5;
 +constexpr float kAeroThemeLozenge = 4.0f;
 +constexpr float kAeroThemeLozengeInset = 5.0f;
 +
@@ -479,7 +616,7 @@ Compilado (os 7 .o tocados e resources_grit da WebUI); runtime não verificado.
  // Draws a topbar tab: inactive has no fill (hover: theme hover color) and a
  // 1px separator in the gap after it; active default = tenuous gradient, 1px
  // outline on top and sides (no bottom line) and a 2px accent bar on top;
-@@ -438,7 +504,7 @@
+@@ -438,7 +506,7 @@
        gfx::RectF outline(bounds);
        outline.Inset(0.5f);
        canvas->DrawRoundRect(outline, radius, stroke);
@@ -488,7 +625,7 @@ Compilado (os 7 .o tocados e resources_grit da WebUI); runtime não verificado.
        flags.setShader(gfx::CreateGradientShader(
            gfx::Point(0, bounds.y()), gfx::Point(0, bounds.bottom()),
            SkColorSetARGB(0x24, 0x6C, 0xB6, 0xFF),
-@@ -461,6 +527,8 @@
+@@ -461,6 +529,8 @@
                      std::max(0, bounds.width() - 2 * kAeroIndicatorInset),
                      kAeroIndicatorHeight),
            flags);
@@ -497,6 +634,16 @@ Compilado (os 7 .o tocados e resources_grit da WebUI); runtime não verificado.
      }
      return;
    }
+@@ -549,6 +619,9 @@
+       gfx::Insets::TLBR(
+           0, 0, GetLayoutConstant(LayoutConstant::kTabstripToolbarOverlap), 0) +
+       base_style_insets + split_insets;
++  // aerographene: room for the active tab marker (lozenge, dot).
++  insets += gfx::Insets::TLBR(0, aerographene::ActiveTabMarkerLeadingSpace(), 0,
++                              aerographene::ActiveTabMarkerTrailingSpace());
+ 
+   return insets;
+ }
 --- a/chrome/browser/ui/webui/new_tab_page_third_party/new_tab_page_third_party_ui.cc
 +++ b/chrome/browser/ui/webui/new_tab_page_third_party/new_tab_page_third_party_ui.cc
 @@ -9,6 +9,10 @@
