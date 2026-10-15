@@ -106,7 +106,8 @@ I IMMENSELY thank projects such as Ungoogled-Chromium, Helium, Thorium and Brave
   - 🚧 shortcuts changed by the series (Ctrl+T, Ctrl+Tab, Ctrl+N; Helium shortcut extras removed) in one page ([atalhos](docs/wiki/atalhos.md))
   - 🚧 known gaps, not fixed: the whole series was never dry-run against a real Chromium tree in one pass; `setup.css` of the onboarding has about 130 stylelint violations (whether CI lints it is not confirmed); "+ folder" in notes needs backend work; the Windows test (D4) was never run
   - ⏸️ `-O3` builds (`o3=hot` and `o3=wide`) are paused by the owner; a profile enters the series only if it wins the measurement
-  - 🚧 approved themes, mockups only (outside this repo, nothing of them is in the browser yet): metro-v2, e-ink-gb, graphite, classical, e-ink and cli/tui; pixelized is part of the final product; wallpapers are provisional ([temas](docs/wiki/temas.md))
+  - 🚧 v0.3.3 (state of 15/10/2026): Linux avx2 build green ([run 38676659389](https://github.com/newcortexbr/aerographene/actions/runs/38676659389), commit `fc39b55`, PGO off); bench quick: first_ms 772.1, all_ms 848.0, PSS 687.5 MiB, 20 processes; `-O3` wide tested and rejected (all_ms +2.31%); release draft by [run 38679676633](https://github.com/newcortexbr/aerographene/actions/runs/38679676633); Windows avx2 and avx1 zips untested; no Linux avx1
+  - 🚧 eight built-in themes (default, pixelized and six new: metro-v2, e-ink-gb, graphite, classical, e-ink, cli), dark only, no bundled fonts (Pixelify Sans and Doto use a fallback), names reserved on import ([temas embutidos](docs/wiki/temas-embutidos.md)); compiled, not seen in the browser
   - ⬜ tintable themes: user picks 2 or 3 colors per theme and the rest is derived with contrast correction; spec and prototype exist, no patch, nothing implemented in Chromium ([temas tintáveis](docs/wiki/temas-tintaveis.md))
   - ⬜ Google Sync with own API keys ([ADR 0006](docs/adr/0006-google-sync-com-chaves-proprias.md))
 
@@ -135,6 +136,8 @@ the wiki lives in [`docs/wiki/`](docs/wiki/), in pt-BR.
 - [spaces](docs/wiki/spaces.md): avatar menu, space picker and "new space" screen in the mono look, wording "space" instead of "profile", what is still missing. Ends with a summary for agents.
 
 - [atalhos](docs/wiki/atalhos.md): Ctrl+T, Ctrl+Tab and Ctrl+N as the series changes them, and the Helium shortcuts that were removed. Ends with a summary for agents.
+
+- [temas embutidos](docs/wiki/temas-embutidos.md): the eight built-in themes, how to pick one, reserved names, no bundled fonts. Ends with a summary for agents.
 
 - [temas tintáveis](docs/wiki/temas-tintaveis.md): proposal for 2 or 3 user colors per theme (not implemented). Ends with a summary for agents.
 

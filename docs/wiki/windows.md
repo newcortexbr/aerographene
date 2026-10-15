@@ -25,7 +25,8 @@ mesmos alvos do Linux (ADR 0009): `avx2` = `x86-64-v3`, `avx1` = `ivybridge` (`M
 - `out/Win/.aero-cpu` guarda o alvo do último `gn gen`; `ninja` e `pack` recusam se não bater.
 - `ninja` roda no `aerographene-builder:v2` com `--ulimit nofile=65536:65536`, `flock /tmp/aero-win-ninja.lock` e `nice -n 19`; recusa se houver run em andamento no GitHub (`gh run list -s in_progress`; `AERO_WIN_FORCE=1` ignora). Montagem `ciopfs` (vs_files) exigida: depois de reboot, rodar `gen` de novo.
 - pacote (`pack`): extrai `out/Win/chrome.7z` (lista oficial de arquivos do `chrome.release`), renomeia `Chrome-bin` para `aerographene/`, acrescenta `out/Win/fonts/` ao lado do `aerographene.exe` e gera `<dist>/<cpu>/aerographene-win-<cpu>.zip`, `mini_installer-<cpu>.exe` e `SHA256SUMS`. `<dist>` padrão: `~/aerographene-win/dist` (fora de `out/`, sobrevive à próxima build). O nome final do asset é dado na release. Referência de tamanho (D4, sem `-march`): `chrome.7z` 497 MB, `mini_installer.exe` 136 MB; o zip ainda não foi medido.
-- lacuna: `chrome.release` não lista `fonts\`, então o `mini_installer` instala sem JetBrains Mono (cai para Consolas); só o zip leva as fontes. Corrigir com uma linha no `chrome.release` (`windows-branding.patch`).
+- `fonts\` entrou no `chrome.release` (`windows-branding.patch`, commit `fc39b55`): o `mini_installer` passa a instalar JetBrains Mono como o zip. Compilado, instalador não executado no Windows.
+- correção skcms (`629b31b`): `/clang:-march=x86-64-v4` repetido após `/arch:AVX512` no skia (`skcms_TransformSkx`); os zips avx2 e avx1 saem de `build/win/build.sh` com `-march`.
 
 ```bash
 # no Cezanne, com o repo na versão desejada e a árvore com a série aplicada
