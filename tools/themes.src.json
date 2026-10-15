@@ -1,0 +1,59 @@
+{
+  "_doc": "fonte única dos temas do site. adicionar tema = uma entrada aqui + rodar tools/build-gallery.sh. status: approved | proposal | soon. 'src' é a pasta em theming/design-language (ou null); 'print' mapeia modo -> arquivo dentro de src (ou de tools/src/ com prefixo '@'). 'crop' = [l,t,r,b] opcional. tokens por modo; 'soon' não tem tokens nem prints.",
+  "fonts": {
+    "selawik": {"src": "metro-v2/assets/fonts/selawk.ttf", "weight": 400, "file": "selawik-400", "license": "metro-v2/assets/fonts/LICENSE-Selawik.txt", "licout": "LICENSE-Selawik.txt", "family": "Selawik"},
+    "selawik-sb": {"src": "metro-v2/assets/fonts/selawksb.ttf", "weight": 600, "file": "selawik-600", "family": "Selawik"},
+    "noto-serif": {"src": "e-ink/assets/fonts/NotoSerif-Regular.woff2", "weight": 400, "file": "noto-serif-400", "license": "e-ink/assets/fonts/LICENSE-NotoSerif.txt", "licout": "LICENSE-NotoSerif.txt", "family": "Noto Serif"},
+    "noto-serif-b": {"src": "e-ink/assets/fonts/NotoSerif-Bold.woff2", "weight": 700, "file": "noto-serif-700", "family": "Noto Serif"},
+    "pixelify": {"src": "e-ink-gb/assets/fonts/PixelifySans.ttf", "weight": 400, "pin": 400, "file": "pixelify-400", "license": "e-ink-gb/assets/fonts/OFL.txt", "licout": "LICENSE-PixelifySans-OFL.txt", "family": "Pixelify Sans"},
+    "pixelify-b": {"src": "e-ink-gb/assets/fonts/PixelifySans.ttf", "weight": 700, "pin": 700, "file": "pixelify-700", "family": "Pixelify Sans"}
+  },
+  "themes": [
+    {"id": "default", "name": "default", "status": "approved", "src": null,
+     "note": "rendered from the site's own preview of the default theme, not a capture of the real browser.",
+     "print": {"dark": "@default-dark.png"}, "modes": ["dark"],
+     "ui": {"r": "0px", "font": "\"JetBrains Mono\",\"JetBrainsMono Nerd Font\",ui-monospace,\"DejaVu Sans Mono\",monospace", "wm": {"dark": "none"}},
+     "tokens": {"dark": {"bg": "#05070c", "panel": "#0a0e16", "line": "#1c2433", "edge": "#2c3a52", "text": "#e6edf8", "text2": "#9aa8bf", "muted": "#7d8aa3", "accent": "#6cb6ff", "inv": "#05070c", "notes": "#c4a7ff", "term": "#58a6ff", "sel": "#1a1730"}}},
+    {"id": "metro-v2", "name": "metro v2", "status": "approved", "src": "metro-v2",
+     "print": {"dark": "dark.png", "light": "light.png"}, "modes": ["dark", "light"],
+     "ui": {"r": "0px", "font": "Selawik,\"Segoe UI\",system-ui,sans-serif", "fonts": ["selawik", "selawik-sb"], "wm": {"dark": "none", "light": "invert(1)"}},
+     "tokens": {
+       "dark": {"bg": "#1f1f1f", "panel": "#2b2b2b", "line": "#3c3c3c", "edge": "#666666", "text": "#ffffff", "text2": "#c8c8c8", "muted": "#a8a8a8", "accent": "#4cc2ff", "inv": "#1f1f1f", "notes": "#4cc2ff", "term": "#4cc2ff", "sel": "#3e3e3e"},
+       "light": {"bg": "#f2f2f2", "panel": "#e6e6e6", "line": "#d6d6d6", "edge": "#7a7a7a", "text": "#000000", "text2": "#333333", "muted": "#4a4a4a", "accent": "#0063b1", "inv": "#f2f2f2", "notes": "#0063b1", "term": "#0063b1", "sel": "#cccccc"}}},
+    {"id": "e-ink-gb", "name": "e-ink gb", "status": "approved", "src": "e-ink-gb", "lossless": true,
+     "print": {"dark": "dark.png", "light": "light.png"}, "modes": ["dark", "light"],
+     "ui": {"r": "0px", "fs": "16px", "font": "\"Pixelify Sans\",ui-monospace,monospace", "fonts": ["pixelify", "pixelify-b"], "wm": {"dark": "grayscale(1)", "light": "grayscale(1) invert(1)"}},
+     "tokens": {
+       "dark": {"bg": "#0f380f", "panel": "#0f380f", "line": "#a3c13a", "edge": "#cde08a", "text": "#cde08a", "text2": "#a3c13a", "muted": "#a3c13a", "accent": "#cde08a", "inv": "#0f380f", "notes": "#cde08a", "term": "#a3c13a", "sel": "#35641a"},
+       "light": {"bg": "#cde08a", "panel": "#cde08a", "line": "#35641a", "edge": "#0f380f", "text": "#0f380f", "text2": "#35641a", "muted": "#35641a", "accent": "#0f380f", "inv": "#cde08a", "notes": "#0f380f", "term": "#35641a", "sel": "#a3c13a"}}},
+    {"id": "e-ink", "name": "e-ink", "status": "proposal", "src": "e-ink",
+     "print": {"dark": "dark.png", "light": "light.png"}, "modes": ["dark", "light"],
+     "ui": {"r": "0px", "font": "\"Noto Serif\",\"Liberation Serif\",\"DejaVu Serif\",serif", "fonts": ["noto-serif", "noto-serif-b"], "wm": {"dark": "grayscale(1)", "light": "grayscale(1) invert(1)"}},
+     "tokens": {
+       "dark": {"bg": "#111111", "panel": "#222222", "line": "#888888", "edge": "#eeeeee", "text": "#eeeeee", "text2": "#cccccc", "muted": "#bbbbbb", "accent": "#eeeeee", "inv": "#111111", "notes": "#eeeeee", "term": "#cccccc", "sel": "#444444"},
+       "light": {"bg": "#eeeeee", "panel": "#dddddd", "line": "#555555", "edge": "#111111", "text": "#111111", "text2": "#333333", "muted": "#444444", "accent": "#111111", "inv": "#eeeeee", "notes": "#111111", "term": "#333333", "sel": "#bbbbbb"}}},
+    {"id": "classical", "name": "classical", "status": "proposal", "src": "classical",
+     "print": {"dark": "dark.png", "light": "light.png"}, "modes": ["dark", "light"],
+     "ui": {"r": "0px", "font": "\"Noto Serif\",Georgia,serif", "fonts": ["noto-serif", "noto-serif-b"], "wm": {"dark": "sepia(.6) saturate(1.5)", "light": "invert(1) sepia(.6)"}},
+     "tokens": {
+       "dark": {"bg": "#0e0506", "panel": "#221012", "line": "#4b2a2c", "edge": "#a8864a", "text": "#f2e8d5", "text2": "#d2c2aa", "muted": "#ae9a84", "accent": "#d9b36a", "inv": "#0e0506", "notes": "#e0525f", "term": "#8fbf8a", "sel": "#3a1b1f"},
+       "light": {"bg": "#fbf6ea", "panel": "#efe3cc", "line": "#c4b08a", "edge": "#8a6b3a", "text": "#2a1214", "text2": "#4a2c2e", "muted": "#6a4a46", "accent": "#8a1c28", "inv": "#fbf6ea", "notes": "#8a1c28", "term": "#2f5d2a", "sel": "#d8c6a3"}}},
+    {"id": "graphite", "name": "graphite", "status": "proposal", "src": "graphite",
+     "print": {"dark": "dark.png", "light": "light.png"}, "modes": ["dark", "light"],
+     "ui": {"r": "10px", "font": "\"Noto Sans\",\"DejaVu Sans\",system-ui,sans-serif", "wm": {"dark": "grayscale(1)", "light": "grayscale(1) invert(1)"}},
+     "tokens": {
+       "dark": {"bg": "#101010", "panel": "#151515", "line": "#2c2c2c", "edge": "#707070", "text": "#f3f3f3", "text2": "#b8b8b8", "muted": "#8e8e8e", "accent": "#ff4638", "inv": "#101010", "notes": "#ff4638", "term": "#b8b8b8", "sel": "#1e1e1e"},
+       "light": {"bg": "#fafaf8", "panel": "#f1f1ee", "line": "#d2d2cd", "edge": "#767676", "text": "#101010", "text2": "#3d3d3d", "muted": "#5e5e5e", "accent": "#d71921", "inv": "#fafaf8", "notes": "#d71921", "term": "#3d3d3d", "sel": "#dcdcd8"}}},
+    {"id": "neobrutalism", "name": "neobrutalism v4", "status": "proposal", "src": "neobrutalism-v4",
+     "print": {"dark": "dark.png", "light": "light.png"}, "modes": ["dark", "light"],
+     "ui": {"r": "0px", "font": "\"JetBrains Mono\",\"DejaVu Sans Mono\",ui-monospace,monospace", "shadow": "4px 4px 0 var(--shadow-c)", "heading": "uppercase", "wm": {"dark": "grayscale(1)", "light": "grayscale(1) invert(1)"}},
+     "tokens": {
+       "dark": {"bg": "#0e0f10", "panel": "#161718", "line": "#6b7279", "edge": "#6b7279", "text": "#eceeef", "text2": "#a3a9af", "muted": "#8b9197", "accent": "#ffc400", "inv": "#0e0f10", "notes": "#ffc400", "term": "#ff6a13", "sel": "#2a2d30", "hl": "#ffc400", "on-hl": "#0b0c0d", "shadow-c": "#3a3f44"},
+       "light": {"bg": "#cfd2d4", "panel": "#d8dbdd", "line": "#0e0f10", "edge": "#0e0f10", "text": "#0e0f10", "text2": "#3f464c", "muted": "#3f464c", "accent": "#0e0f10", "inv": "#cfd2d4", "notes": "#0e0f10", "term": "#3f464c", "sel": "#e4e6e7", "hl": "#ffc400", "on-hl": "#0b0c0d", "shadow-c": "#0e0f10"}}},
+    {"id": "pixelized", "name": "pixelized", "status": "proposal", "src": "pixelized",
+     "print": {"dark": "R-r01a-home-sidebar.png"}, "crop": [0, 0, 1440, 785], "q": 50, "modes": ["dark"],
+     "ui": {"r": "0px", "font": "\"JetBrains Mono\",\"JetBrainsMono Nerd Font\",ui-monospace,\"DejaVu Sans Mono\",monospace", "wm": {"dark": "grayscale(1)"}},
+     "tokens": {"dark": {"bg": "#111111", "panel": "#141414", "line": "#2e2e2e", "edge": "#6a6a6a", "text": "#f2f2f2", "text2": "#a8a8a8", "muted": "#8c8c8c", "accent": "#f2f2f2", "inv": "#111111", "notes": "#f2f2f2", "term": "#f2f2f2", "sel": "#1c1c1c"}}},
+    {"id": "cli", "name": "cli / tui", "status": "soon", "src": null, "note": "terminal theme, mockup on the way.", "modes": [], "print": {}}
+  ]
+}
