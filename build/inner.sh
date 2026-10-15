@@ -47,7 +47,7 @@ patch_hash() {
         cat "${AERO_PATCHES}/series"
         series_list "${AERO_PATCHES}" | while read -r p; do cat "${AERO_PATCHES}/${p}"; done
         echo "march=${MARCH}"
-        cat /aero/build/branding_strings.py /aero/build/strings_ptbr_extra.json
+        cat /aero/build/branding_strings.py /aero/build/strings_ptbr_extra.json /aero/build/strings_space.json
         echo "chromium-web-store=${cws_ver}"
     } | sha256sum | cut -d' ' -f1
 }

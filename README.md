@@ -99,6 +99,7 @@ I IMMENSELY thank projects such as Ungoogled-Chromium, Helium, Thorium and Brave
   - 🚧 Helium services and setup page removed: a new profile opens the new tab page, with no setup page and no native Chromium first-run screen, until our own onboarding exists ([padrões e extensões](docs/wiki/padroes-e-extensoes.md)); series applies and the affected files compile (syntax-only); not tested in the browser yet
   - 🚧 Helium extras out of scope removed (MRU tab cycling, keyboard shortcuts, Shift+right-click native menu, new tabs next to the active one, window-menu customize item, crash-reporting prefs); the whole patch series now applies with `--fuzz=0`; affected files compile (syntax-only); not tested in the browser yet
   - 🚧 optional selective `-O3` ([build](docs/BUILD.md)): V8, partition_alloc and Blink `core_hot` are already `-O3` upstream; build input `o3=hot|wide` raises Blink `platform`/`heap` (and `base`) to `-O3` and produces a `-o3<profile>` package; off by default, not measured yet
+  - 🚧 spaces look and wording ([spaces](docs/wiki/spaces.md)): avatar menu, space picker and new-space steps restyled in the mono look (square corners, no Chromium banners or origami avatars, the avatar is a glyph with the space's initial) and "profile" worded as "space" (en and pt-BR, 32 messages through `build/strings_space.json`); looks only, same flow; the series applies with `--fuzz=0` and the menu file compiles (syntax-only); the WebUI resources are not built and none of it was seen in the browser yet
   - ⬜ Google Sync with own API keys ([ADR 0006](docs/adr/0006-google-sync-com-chaves-proprias.md))
 
 ## docs
@@ -123,6 +124,8 @@ the wiki lives in [`docs/wiki/`](docs/wiki/), in pt-BR.
 - [configurações](docs/wiki/settings.md): the One UI look of `chrome://settings` and Customise profile, how the `--oneui-*` variables work. Ends with a summary for agents.
 
 - [padrões e extensões](docs/wiki/padroes-e-extensoes.md): Google as default search engine in new profiles, the bundled chromium-web-store extension (pinned by version + sha256) and `extension-mime-request-handling` on by default. Ends with a summary for agents.
+
+- [spaces](docs/wiki/spaces.md): how the avatar menu, the space picker and the new-space steps look, how "profile" becomes "space" in the strings, and what is not done (glyph choice, themed picker). Ends with a summary for agents.
 
 for builders: [scope](docs/SCOPE.md), [build](docs/BUILD.md), [packaging](docs/PACKAGING.md), [decisions](docs/adr/), [patch origins](patches/README.md).
 
