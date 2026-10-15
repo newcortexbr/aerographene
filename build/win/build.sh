@@ -68,18 +68,40 @@ open(tmp, 'w').write(s)
 os.replace(tmp, path)
 PY
     echo "march=$MARCH ($cpu) em compiler_cpu_abi (is_win)"
-    # /clang:-march global anula o /arch:AVX512 do skia (skcms_TransformSkx); repete /clang:-march=x86-64-v4 depois
-    # dele (mesmo -march do ramo não-Windows do skia). Idempotente.
-    python3 - "$src/skia/BUILD.gn" <<'PY'
-import os, sys
-path = sys.argv[1]
-s = open(path).read()
-old = '    cflags = [ "/arch:AVX512" ]\n'
-new = '    cflags = [ "/arch:AVX512", "/clang:-march=x86-64-v4" ]\n'
-if new not in s:
-    assert s.count(old) == 1, "skia_avx512_flags mudou"
-    open(path + '.aero-new', 'w').write(s.replace(old, new))
-    os.replace(path + '.aero-new', path)
+    # /clang:-march global (acima) vence qualquer /arch:AVX2|AVX512 dos alvos (skcms_TransformHsw/Skx, skia_opts_ml3,
+    # libaom, libvpx, opus, webrtc, pdfium...) e eles perderiam a ISA (cflags do alvo vêm antes dos das configs, então
+    # o -march global sempre é o último). Acrescenta as features do nível (/clang:-m*, que se somam ao -march)
+    # logo depois de cada /arch. Genérico e idempotente; no avx2 só repete features já presentes.
+    python3 - "$src" <<'PY'
+import os, re, sys
+root = sys.argv[1]
+skip = {'out', '.git', 'llvm-build', 'rust-toolchain', 'node_modules', 'win_toolchain', 'depot_tools'}
+v3 = ['avx2', 'fma', 'f16c', 'bmi', 'bmi2', 'lzcnt', 'movbe']
+v4 = v3 + ['avx512f', 'avx512cd', 'avx512bw', 'avx512dq', 'avx512vl']
+fl = lambda l: ''.join(f', "/clang:-m{x}"' for x in l)
+pats = [(re.compile(r'"/arch:AVX2"(?!, "/clang:-mavx2")(?:, "/clang:-march=x86-64-v3")?'), '"/arch:AVX2"' + fl(v3)),
+        (re.compile(r'"/arch:AVX512"(?!, "/clang:-mavx2")(?:, "/clang:-march=x86-64-v4")?'), '"/arch:AVX512"' + fl(v4))]
+n = 0
+for d, dirs, files in os.walk(root):
+    dirs[:] = [x for x in dirs if x not in skip]
+    for fn in files:
+        if not fn.endswith(('.gn', '.gni')):
+            continue
+        path = os.path.join(d, fn)
+        try:
+            s = open(path).read()
+        except (UnicodeDecodeError, OSError):
+            continue
+        if '/arch:AVX' not in s:
+            continue
+        t = s
+        for rx, rep in pats:
+            t = rx.sub(rep, t)
+        if t != s:
+            open(path + '.aero-new', 'w').write(t)
+            os.replace(path + '.aero-new', path)
+            n += 1
+print(f"/arch:AVX2|AVX512 + /clang:-m*: {n} arquivos .gn/.gni atualizados")
 PY
 }
 
