@@ -104,25 +104,32 @@ continuam as imagens upstream, glifos exigiriam assets novos).
            color: var(--cr-primary-text-color);
 --- a/chrome/browser/resources/settings/settings_page/settings_section.css
 +++ b/chrome/browser/resources/settings/settings_page/settings_section.css
-@@ -33,6 +33,17 @@
-   text-transform: uppercase;
- }
+@@ -21,16 +21,18 @@
  
 +/* aerographene (settings-oneui): small gray label above a rounded card. */
-+#header .title {
+ #header .title {
+-  color: var(--cr-primary-text-color);
+-  font-family: var(--aero-mono, inherit);
+-  font-size: 11px;
 +  color: var(--cr-secondary-text-color);
 +  font-family: inherit;
 +  font-size: 13px;
+   font-weight: 500;
+-  letter-spacing: .08em;
+-  margin-bottom: 8px;
 +  letter-spacing: 0;
 +  margin-bottom: 4px;
-+  padding-inline-start: 20px;
-+  text-transform: none;
-+}
-+
- #feedback {
    margin-top: var(--cr-section-vertical-margin);
+   outline: none;
+   padding-bottom: 2px;
++  padding-inline-start: 20px;
+   padding-top: 4px;
+-  text-transform: uppercase;
++  text-transform: none;
  }
-@@ -42,6 +53,7 @@
+ 
+ #feedback {
+@@ -42,6 +44,7 @@
    border-radius: var(--cr-card-border-radius);
    box-shadow: var(--cr-card-shadow);
    flex: 1;
@@ -132,29 +139,38 @@ continuam as imagens upstream, glifos exigiriam assets novos).
  
 --- a/chrome/browser/resources/settings/settings_shared_lit.css
 +++ b/chrome/browser/resources/settings/settings_shared_lit.css
-@@ -34,6 +34,15 @@
-   text-transform: uppercase;
- }
- 
-+/* aerographene (settings-oneui): sub-headers as small gray labels. */
-+h2 {
+@@ -24,14 +24,15 @@
+   align-items: center;
+   color: var(--cr-secondary-text-color);
+   display: flex;
+-  font-family: var(--aero-mono, inherit);
+-  font-size: 11px;
++  /* aerographene (settings-oneui): sub-headers as small gray labels. */
 +  font-family: inherit;
 +  font-size: 13px;
+   font-weight: 500;
+-  letter-spacing: .06em;
 +  letter-spacing: 0;
+   margin: 0;
+   padding-bottom: 0;
+-  padding-top: 10px;
+-  text-transform: uppercase;
 +  padding-top: 12px;
 +  text-transform: none;
-+}
-+
- cr-icon,
- iron-icon {
-   flex-shrink: 0;  /* Prevent distortion of icons in cramped UI. */
---- a/chrome/browser/resources/settings/settings_vars.css
-+++ b/chrome/browser/resources/settings/settings_vars.css
-@@ -32,6 +32,50 @@
-   --cr-section-vertical-margin: 14px;
  }
  
-+html {
+ cr-icon,
+--- a/chrome/browser/resources/settings/settings_vars.css
++++ b/chrome/browser/resources/settings/settings_vars.css
+@@ -25,11 +25,47 @@
+ 
+   /* aerographene: compact density and mono labels (settings-f5). */
+   --aero-mono: 'JetBrains Mono', 'DejaVu Sans Mono', ui-monospace, monospace;
+-  --cr-section-min-height: 40px;
+-  --cr-section-two-line-min-height: 54px;
+-  --cr-section-padding: 16px;
+-  --cr-section-vertical-padding: 8px;
+-  --cr-section-vertical-margin: 14px;
 +  /* aerographene (settings-oneui): One UI look. Surfaces come from the
 +   * theme tokens, so light and dark follow the browser theme. */
 +  --oneui-page: var(--color-settings-webui-page-background,
@@ -196,11 +212,9 @@ continuam as imagens upstream, glifos exigiriam assets novos).
 +  --cr-card-background-color: var(--oneui-card);
 +  --cr-card-border-radius: var(--oneui-card-radius);
 +  --cr-card-shadow: none;
-+}
-+
+ }
+ 
  @media (prefers-color-scheme: dark) {
-   html {
-     --iron-icon-fill-color: var(--google-grey-500);
 --- a/ui/webui/resources/cr_components/theme_color_picker/theme_color.css
 +++ b/ui/webui/resources/cr_components/theme_color_picker/theme_color.css
 @@ -8,7 +8,7 @@

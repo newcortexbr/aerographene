@@ -87,7 +87,7 @@
 -  constexpr int kTitleTopMargin = 8;
 -  constexpr int kBottomMarginWhenNoButton = 24;
 +  constexpr int kIdentityContainerHorizontalPadding = kSpaceHeaderPadding;
-+      constexpr int kBottomMarginWhenNoButton = 16;
++  constexpr int kBottomMarginWhenNoButton = 16;
    constexpr int kSubtitleBottomMarginInfoBelow = 4;
    constexpr int kSubtitleBottomMarginButtonBelow = 12;
 -  constexpr int kButtonBottomMargin = 28;
