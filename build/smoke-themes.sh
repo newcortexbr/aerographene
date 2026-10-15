@@ -43,20 +43,25 @@ openbox >"${tmp}/wm.log" 2>&1 &
 sleep 1
 
 # abre o navegador com o tema, espera, captura a tela inteira (= a janela) e fecha
-shot() { # tema url arquivo
-    local theme="$1" url="$2" file="$3" prof="${tmp}/prof-$1" pid
-    if [ ! -d "$prof" ]; then
-        mkdir -p "${prof}/Default"
-        # "onboarding" = perfil novo sem prefs: mostra a primeira execução
-        if [ "$theme" != onboarding ]; then
-            printf '{"aerographene":{"theme":"%s","onboarding_completed":true}}' "$theme" \
-                >"${prof}/Default/Preferences"
-        fi
+shot() { # tema arquivo [url...]  (sem url = só o que o navegador abre sozinho; a 1ª aba fica ativa)
+    local theme="$1" file="$2" prof="${tmp}/prof-$1" pid
+    shift 2
+    # perfil novo a cada captura: sem restauro de sessão da captura anterior
+    rm -rf -- "$prof"
+    mkdir -p "${prof}/Default"
+    # "onboarding" = perfil novo sem prefs e sem --no-first-run: abre chrome://setup sozinho
+    local extra=(--no-first-run)
+    if [ "$theme" = onboarding ]; then
+        extra=()
+    else
+        printf '{"aerographene":{"theme":"%s","onboarding_completed":true}}' "$theme" \
+            >"${prof}/Default/Preferences"
     fi
-    HOME="${tmp}/home" "$bin" --no-sandbox --disable-gpu --disable-dev-shm-usage \
-        --disable-crash-reporter --disable-breakpad --no-first-run --no-default-browser-check \
+    # --test-type suprime a infobar de flag não suportada (--no-sandbox, exigido como root no container)
+    HOME="${tmp}/home" "$bin" --no-sandbox --test-type --disable-gpu --disable-dev-shm-usage \
+        --disable-crash-reporter --disable-breakpad "${extra[@]}" --no-default-browser-check \
         --user-data-dir="$prof" --window-position=0,0 --window-size=${W},${H} \
-        "$url" >>"${tmp}/chrome-${theme}.log" 2>&1 &
+        "$@" >>"${tmp}/chrome-${theme}.log" 2>&1 &
     pid=$!
     sleep "${AERO_SHOT_WAIT:-12}"
     if ! kill -0 "$pid" 2>/dev/null; then
@@ -74,12 +79,15 @@ shot() { # tema url arquivo
 fail=0
 for t in "${themes[@]}"; do
     echo "== tema ${t}"
-    shot "$t" "chrome://newtab" "${t}.png" || fail=1
-    shot "$t" "chrome://settings/appearance" "${t}-settings.png" || fail=1
+    shot "$t" "${t}.png" chrome://newtab || fail=1
+    shot "$t" "${t}-settings.png" chrome://settings/appearance || fail=1
+    # várias abas (a 1ª, ativa, é as notas): a tabstrip e as superfícies mostram o tema
+    shot "$t" "${t}-tabs.png" chrome://notes chrome://settings/appearance chrome://version \
+        chrome://about chrome://newtab || fail=1
 done
 
 echo "== onboarding (perfil novo)"
-shot onboarding "about:blank" "onboarding.png" || fail=1
+shot onboarding "onboarding.png" || fail=1
 
 ls -l "$outdir"
 for t in "${themes[@]}"; do
