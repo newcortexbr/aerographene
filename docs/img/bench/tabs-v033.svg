@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="792" viewBox="0 0 900 792" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+<rect width="900" height="792" rx="14" fill="#14161c"/>
+<text x="28" y="40" font-size="22" font-weight="700" fill="#f2f4f8">10 tabs: time until all loaded</text>
+<text x="28" y="64" font-size="14" fill="#9aa3b2">median, in ms · lower is better</text>
+<text x="196" y="119" text-anchor="end" font-size="15" fill="#c3cad6" font-weight="400">Thorium</text>
+<rect x="210" y="102" width="432.9" height="28" rx="5" fill="#3a4152"/>
+<text x="652.9" y="122" font-size="15" font-weight="400" fill="#f2f4f8">837.2 ms</text>
+<text x="196" y="163" text-anchor="end" font-size="15" fill="#c3cad6" font-weight="400">v0.3.3 (quick, n=6)</text>
+<rect x="210" y="146" width="438.5" height="28" rx="5" fill="#3a4152"/>
+<text x="658.5" y="166" font-size="15" font-weight="400" fill="#f2f4f8">848.0 ms</text>
+<text x="196" y="207" text-anchor="end" font-size="15" fill="#ffffff" font-weight="700">aerographene</text>
+<rect x="210" y="190" width="452.6" height="28" rx="5" fill="#7c9cff"/>
+<text x="672.6" y="210" font-size="15" font-weight="700" fill="#f2f4f8">875.2 ms</text>
+<text x="196" y="251" text-anchor="end" font-size="15" fill="#c3cad6" font-weight="400">Helium</text>
+<rect x="210" y="234" width="464.3" height="28" rx="5" fill="#3a4152"/>
+<text x="684.3" y="254" font-size="15" font-weight="400" fill="#f2f4f8">898.0 ms</text>
+<text x="196" y="295" text-anchor="end" font-size="15" fill="#c3cad6" font-weight="400">Google Chrome</text>
+<rect x="210" y="278" width="471.9" height="28" rx="5" fill="#3a4152"/>
+<text x="691.9" y="298" font-size="15" font-weight="400" fill="#f2f4f8">912.5 ms</text>
+<text x="196" y="339" text-anchor="end" font-size="15" fill="#c3cad6" font-weight="400">ungoogled-chromium</text>
+<rect x="210" y="322" width="540.0" height="28" rx="5" fill="#3a4152"/>
+<text x="760.0" y="342" font-size="15" font-weight="400" fill="#f2f4f8">1,044 ms</text>
+<text x="28" y="412" font-size="22" font-weight="700" fill="#f2f4f8">10 tabs: memory (total PSS)</text>
+<text x="28" y="436" font-size="14" fill="#9aa3b2">median, in MiB · lower is better</text>
+<text x="196" y="491" text-anchor="end" font-size="15" fill="#c3cad6" font-weight="400">Thorium</text>
+<rect x="210" y="474" width="492.9" height="28" rx="5" fill="#3a4152"/>
+<text x="712.9" y="494" font-size="15" font-weight="400" fill="#f2f4f8">627.5 MiB</text>
+<text x="196" y="535" text-anchor="end" font-size="15" fill="#c3cad6" font-weight="400">ungoogled-chromium</text>
+<rect x="210" y="518" width="498.4" height="28" rx="5" fill="#3a4152"/>
+<text x="718.4" y="538" font-size="15" font-weight="400" fill="#f2f4f8">634.6 MiB</text>
+<text x="196" y="579" text-anchor="end" font-size="15" fill="#ffffff" font-weight="700">aerographene</text>
+<rect x="210" y="562" width="499.0" height="28" rx="5" fill="#7c9cff"/>
+<text x="719.0" y="582" font-size="15" font-weight="700" fill="#f2f4f8">635.3 MiB</text>
+<text x="196" y="623" text-anchor="end" font-size="15" fill="#c3cad6" font-weight="400">Helium</text>
+<rect x="210" y="606" width="520.0" height="28" rx="5" fill="#3a4152"/>
+<text x="740.0" y="626" font-size="15" font-weight="400" fill="#f2f4f8">662.0 MiB</text>
+<text x="196" y="667" text-anchor="end" font-size="15" fill="#c3cad6" font-weight="400">Google Chrome</text>
+<rect x="210" y="650" width="539.4" height="28" rx="5" fill="#3a4152"/>
+<text x="759.4" y="670" font-size="15" font-weight="400" fill="#f2f4f8">686.7 MiB</text>
+<text x="196" y="711" text-anchor="end" font-size="15" fill="#c3cad6" font-weight="400">v0.3.3 (quick, n=6)</text>
+<rect x="210" y="694" width="540.0" height="28" rx="5" fill="#3a4152"/>
+<text x="760.0" y="714" font-size="15" font-weight="400" fill="#f2f4f8">687.5 MiB</text>
+<text x="28" y="758" font-size="12" fill="#7a8394">Test machine: Intel Core i3-10110U · 16 GB RAM · CachyOS (kernel 7.3.0-rc6) · power profile: performance</text>
+<text x="28" y="776" font-size="12" fill="#7a8394">v0.2 baseline (interleaved, n=20) plus aerographene v0.3.3, official build, --quick --tabs 10, n=6, 15/10/2026: separate run, not paired</text>
+</svg>

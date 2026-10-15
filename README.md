@@ -8,6 +8,10 @@
   <img src="docs/img/bench/tabs_pss.svg" alt="10 tabs memory" width="440">
 </p>
 <p align="center"><sub>v0.2 baseline, Comet Lake i3-10110U, interleaved runs, median, lower is better. Details and limits: <a href="docs/BASELINE.md">BASELINE</a>.</sub></p>
+<p align="center">
+  <img src="docs/img/bench/tabs-v033.svg" alt="10 tabs: load time and memory, v0.2 baseline plus v0.3.3 (separate run)" width="440">
+</p>
+<p align="center"><sub>v0.3.3: separate quick run (n=6, 10 tabs), not interleaved with the baseline; order of magnitude only.</sub></p>
 
 <p align="center">
   <img src="branding/ascii/wordmark-simple.svg" alt="aerographene" width="720">
