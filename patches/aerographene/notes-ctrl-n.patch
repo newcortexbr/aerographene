@@ -57,7 +57,7 @@ accelerator_table.cc e browser_command_controller.cc), aerographene/notes-f2b.pa
           command_id == IDC_SELECT_NEXT_TAB ||
           command_id == IDC_SELECT_PREVIOUS_TAB ||
           command_id == IDC_CYCLE_TO_NEXT_TAB ||
-@@ -750,6 +753,24 @@
+@@ -750,6 +753,25 @@
      case IDC_NEW_WINDOW:
        NewWindow(browser_);
        break;
@@ -67,10 +67,11 @@ accelerator_table.cc e browser_command_controller.cc), aerographene/notes-f2b.pa
 +      // through the WebUI; the key never reaches the page because Ctrl+N is a
 +      // reserved accelerator. Anywhere else it is a plain new window.
 +      content::WebContents* active =
-+          browser_->tab_strip_model()->GetActiveWebContents();
-+      if (browser_->is_type_normal() && active && active->GetWebUI() &&
++          browser_->GetTabStripModel()->GetActiveWebContents();
++      if (browser_->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL &&
++          active && active->GetWebUI() &&
 +          active->GetLastCommittedURL().SchemeIs(content::kChromeUIScheme) &&
-+          active->GetLastCommittedURL().host_piece() == "notes") {
++          active->GetLastCommittedURL().host() == "notes") {
 +        active->GetWebUI()->CallJavascriptFunctionUnsafe("aeroNotesNewNote");
 +        break;
 +      }

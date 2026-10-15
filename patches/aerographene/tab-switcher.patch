@@ -62,7 +62,7 @@ aerographene/commandbar-f3.patch (contexto do browser_command_controller.cc).
          CycleToMruTab(browser_,
 --- /dev/null
 +++ b/chrome/browser/ui/views/frame/aerographene_tab_switcher.cc
-@@ -0,0 +1,737 @@
+@@ -0,0 +1,740 @@
 +// Copyright 2026 The Aerographene Authors
 +// You can use, redistribute, and/or modify this source code under
 +// the terms of the GPL-3.0 license that can be found in the LICENSE file.
@@ -87,13 +87,13 @@ aerographene/commandbar-f3.patch (contexto do browser_command_controller.cc).
 +#include "base/time/time.h"
 +#include "cc/paint/paint_flags.h"
 +#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
-+#include "chrome/browser/ui/color/chrome_color_id.h"
 +#include "chrome/browser/ui/tabs/tab_strip_model.h"
 +#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 +#include "chrome/browser/ui/thumbnails/thumbnail_image.h"
 +#include "chrome/browser/ui/thumbnails/thumbnail_tab_helper.h"
 +#include "chrome/browser/ui/views/frame/browser_view.h"
 +#include "components/favicon/content/content_favicon_driver.h"
++#include "components/tabs/public/tab_interface.h"
 +#include "content/public/browser/web_contents.h"
 +#include "third_party/skia/include/core/SkColor.h"
 +#include "ui/base/metadata/metadata_header_macros.h"
@@ -109,6 +109,7 @@ aerographene/commandbar-f3.patch (contexto do browser_command_controller.cc).
 +#include "ui/gfx/font_list.h"
 +#include "ui/gfx/geometry/rect.h"
 +#include "ui/gfx/geometry/rect_f.h"
++#include "ui/gfx/geometry/rounded_corners_f.h"
 +#include "ui/gfx/image/image.h"
 +#include "ui/gfx/image/image_skia.h"
 +#include "ui/gfx/paint_vector_icon.h"
@@ -194,8 +195,10 @@ aerographene/commandbar-f3.patch (contexto do browser_command_controller.cc).
 +    }
 +    // Only show what the hover card already captured: no capture is forced,
 +    // and discarded tabs keep the placeholder (no reload, no memory).
++    tabs::TabInterface* const tab =
++        tabs::TabInterface::MaybeGetFromContents(contents);
 +    ThumbnailTabHelper* const helper =
-+        ThumbnailTabHelper::FromWebContents(contents);
++        tab ? ThumbnailTabHelper::From(tab) : nullptr;
 +    scoped_refptr<ThumbnailImage> thumbnail =
 +        helper ? helper->thumbnail() : nullptr;
 +    if (thumbnail && thumbnail->has_data() && !contents->WasDiscarded()) {
@@ -241,7 +244,7 @@ aerographene/commandbar-f3.patch (contexto do browser_command_controller.cc).
 +  void OnPaint(gfx::Canvas* canvas) override {
 +    const ui::ColorProvider* const colors = GetColorProvider();
 +    const SkColor accent = colors->GetColor(ui::kColorSysPrimary);
-+    const SkColor line = colors->GetColor(kColorToolbarSeparator);
++    const SkColor line = colors->GetColor(ui::kColorToolbarSeparator);
 +    const SkColor text = colors->GetColor(ui::kColorSysOnSurface);
 +    const SkColor subtle = colors->GetColor(ui::kColorSysOnSurfaceSubtle);
 +    const float radius = GetRadius();
@@ -406,7 +409,7 @@ aerographene/commandbar-f3.patch (contexto do browser_command_controller.cc).
 +  void OnPaint(gfx::Canvas* canvas) override {
 +    const ui::ColorProvider* const colors = GetColorProvider();
 +    const SkColor accent = colors->GetColor(ui::kColorSysPrimary);
-+    const SkColor line = colors->GetColor(kColorToolbarSeparator);
++    const SkColor line = colors->GetColor(ui::kColorToolbarSeparator);
 +    const SkColor text = colors->GetColor(ui::kColorSysOnSurface);
 +    const SkColor subtle = colors->GetColor(ui::kColorSysOnSurfaceSubtle);
 +    const float radius = GetRadius();
@@ -567,7 +570,7 @@ aerographene/commandbar-f3.patch (contexto do browser_command_controller.cc).
 +    params.activatable = views::Widget::InitParams::Activatable::kNo;
 +    params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
 +    params.shadow_type = views::Widget::InitParams::ShadowType::kDrop;
-+    params.corner_radius = GetRadius() + 2;
++    params.rounded_corners = gfx::RoundedCornersF(GetRadius() + 2);
 +    params.name = "AerographeneTabSwitcher";
 +    params.bounds =
 +        gfx::Rect(window.CenterPoint().x() - size.width() / 2,

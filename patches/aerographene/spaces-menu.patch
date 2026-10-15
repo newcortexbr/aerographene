@@ -124,7 +124,7 @@
  
    if (!params.header_string.empty() && !params.header_image.IsEmpty()) {
      // Header.
-@@ -566,46 +610,42 @@ void ProfileMenuViewBase::SetProfileIdentityWithCallToAction(
+@@ -566,46 +610,43 @@ void ProfileMenuViewBase::SetProfileIdentityWithCallToAction(
              .Build());
    }
  
@@ -149,7 +149,8 @@
 +                      views::BoxLayout::CrossAxisAlignment::kCenter,
 +                      gfx::Insets(kSpaceHeaderPadding));
 +  row_layout->set_between_child_spacing(kSpaceHeaderSpacing);
-+  identity_row->SetLayoutManager(std::move(row_layout));
++  auto* identity_row_layout =
++      identity_row->SetLayoutManager(std::move(row_layout));
 +  identity_row->AddChildView(
 +      std::make_unique<SpaceGlyphView>(params.title, kSpaceGlyphSize));
 +  auto* title_label = identity_row->AddChildView(
@@ -161,7 +162,7 @@
 +          .SetHorizontalAlignment(gfx::ALIGN_LEFT)
 +          .SetEnabledColor(kColorProfileMenuIdentityInfoTitle)
            .Build());
-+  identity_row->SetFlexForView(title_label, 1);
++  identity_row_layout->SetFlexForView(title_label, 1);
  
    // Optional subscription badge.
    if (params.avatar_ring == AvatarRingType::kGradient) {

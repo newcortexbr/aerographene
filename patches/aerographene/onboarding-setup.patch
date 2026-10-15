@@ -818,7 +818,7 @@ Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-them
 \ No newline at end of file
 --- /dev/null
 +++ b/chrome/browser/ui/webui/aero_setup/BUILD.gn
-@@ -0,0 +1,33 @@
+@@ -0,0 +1,34 @@
 +# Copyright 2026 The aerographene Authors
 +# Use of this source code is governed by the GPL-3.0 license.
 +
@@ -842,6 +842,7 @@ Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-them
 +    "//chrome/browser/profiles:profile",
 +    "//chrome/browser/search_engines",
 +    "//chrome/browser/themes",
++    "//chrome/browser/ui/navigator",
 +    "//chrome/browser/ui/select_file_policy",
 +    "//chrome/browser/ui/webui/aero_notes",
 +    "//chrome/common",
@@ -956,7 +957,7 @@ Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-them
 +#endif  // CHROME_BROWSER_UI_WEBUI_AERO_SETUP_AERO_SETUP_UI_H_
 --- /dev/null
 +++ b/chrome/browser/ui/webui/aero_setup/setup_handler.cc
-@@ -0,0 +1,445 @@
+@@ -0,0 +1,444 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -971,6 +972,8 @@ Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-them
 +#include "chrome/browser/profiles/profile.h"
 +#include "chrome/browser/search_engines/template_url_service_factory.h"
 +#include "chrome/browser/themes/aerographene_theme.h"
++#include "chrome/browser/ui/navigator/browser_navigator.h"
++#include "chrome/browser/ui/navigator/browser_navigator_params.h"
 +#include "chrome/browser/ui/select_file_policy/chrome_select_file_policy.h"
 +#include "chrome/browser/ui/webui/aero_notes/notes_handler.h"
 +#include "chrome/common/aero_version.h"
@@ -980,7 +983,6 @@ Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-them
 +#include "components/search_engines/template_url.h"
 +#include "components/search_engines/template_url_service.h"
 +#include "content/public/browser/navigation_controller.h"
-+#include "content/public/browser/open_url_params.h"
 +#include "content/public/browser/render_frame_host.h"
 +#include "content/public/browser/web_contents.h"
 +#include "content/public/browser/web_ui.h"
@@ -997,7 +999,7 @@ Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-them
 +// A search engine the page may offer and select: a regular entry that comes
 +// from the prepopulated list (no extension, no user-typed custom engine).
 +bool IsListable(TemplateURLService* service, const TemplateURL* url) {
-+  return url->GetType() == TemplateURL::NORMAL && url->prepopulate_id() != 0 &&
++  return url->type() == TemplateURL::NORMAL && url->prepopulate_id() != 0 &&
 +         service->CanMakeDefault(url);
 +}
 +
@@ -1378,12 +1380,10 @@ Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-them
 +  // page stays open until the user finishes.
 +  const GURL url(std::string(chrome::kChromeUISettingsURL) +
 +                 std::string(chrome::kImportDataSubPage));
-+  web_ui()->GetWebContents()->OpenURL(
-+      content::OpenURLParams(url, content::Referrer(),
-+                             WindowOpenDisposition::NEW_FOREGROUND_TAB,
-+                             ui::PAGE_TRANSITION_LINK,
-+                             /*is_renderer_initiated=*/false),
-+      /*navigation_handle_callback=*/{});
++  NavigateParams params(profile_, url, ui::PAGE_TRANSITION_LINK);
++  params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
++  params.source_contents = web_ui()->GetWebContents();
++  Navigate(&params);
 +  ResolveJavascriptCallback(args[0], base::Value(true));
 +}
 +
