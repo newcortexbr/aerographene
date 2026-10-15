@@ -17,6 +17,37 @@ uma só série de patches para Linux e Windows; Windows não perde função. Pat
 
 - D4 (14/10/2026): `chrome` e `mini_installer` linkam no Cezanne (`aerographene.exe` 5,3 MB, `chrome.dll` 337 MB, `mini_installer.exe` 136 MB, todos `PE32+ x86-64`; ThinLTO, sem PGO). Args sem mudança (`build/win/args.gn`, `safe_browsing_mode=0`). Patches para isso: `windows-ungoogled-prefs` e `windows-safe-browsing-dummy` (trechos do ungoogled-chromium-windows 154) e correção `wstring` em `notes-b5` (`vault_watcher.cc`). Não executado no Windows.
 
+## alvos de CPU e pacote (`build/win/build.sh`, 15/10/2026)
+
+mesmos alvos do Linux (ADR 0009): `avx2` = `x86-64-v3`, `avx1` = `ivybridge` (`MARCH` no env sobrescreve). Os dois usam o mesmo `out/Win` em sequência: o disco do Cezanne não comporta dois (`out/Win` completo ~15 GB, 46 GB livres em 15/10/2026); trocar de alvo recompila tudo.
+
+- `-march`: o script acrescenta, na `config("compiler_cpu_abi")` de `build/config/compiler/BUILD.gn` da árvore Windows, um bloco marcado `# aerographene-win` só para `current_cpu == "x64" && is_win`: `cflags += [ "/clang:-march=<m>" ]` (clang-cl) e `rustflags = [ "-Ctarget-cpu=<m>" ]`. O link ThinLTO (lld-link) usa o `target-cpu` gravado em cada função do bitcode. A toolchain host Linux não recebe `-march`. Rodar de novo troca o bloco (idempotente), escrevendo por temporário + `mv`.
+- `out/Win/.aero-cpu` guarda o alvo do último `gn gen`; `ninja` e `pack` recusam se não bater.
+- `ninja` roda no `aerographene-builder:v2` com `--ulimit nofile=65536:65536`, `flock /tmp/aero-win-ninja.lock` e `nice -n 19`; recusa se houver run em andamento no GitHub (`gh run list -s in_progress`; `AERO_WIN_FORCE=1` ignora). Montagem `ciopfs` (vs_files) exigida: depois de reboot, rodar `gen` de novo.
+- pacote (`pack`): extrai `out/Win/chrome.7z` (lista oficial de arquivos do `chrome.release`), renomeia `Chrome-bin` para `aerographene/`, acrescenta `out/Win/fonts/` ao lado do `aerographene.exe` e gera `<dist>/<cpu>/aerographene-win-<cpu>.zip`, `mini_installer-<cpu>.exe` e `SHA256SUMS`. `<dist>` padrão: `~/aerographene-win/dist` (fora de `out/`, sobrevive à próxima build). O nome final do asset é dado na release. Referência de tamanho (D4, sem `-march`): `chrome.7z` 497 MB, `mini_installer.exe` 136 MB; o zip ainda não foi medido.
+- lacuna: `chrome.release` não lista `fonts\`, então o `mini_installer` instala sem JetBrains Mono (cai para Consolas); só o zip leva as fontes. Corrigir com uma linha no `chrome.release` (`windows-branding.patch`).
+
+```bash
+# no Cezanne, com o repo na versão desejada e a árvore com a série aplicada
+cd <repo>
+build/win/build.sh avx2            # prepare + gn gen + ninja chrome mini_installer + pack
+build/win/build.sh avx1            # depois, no mesmo out/Win
+# passos isolados: build/win/build.sh <cpu> gen | ninja [alvos...] | pack
+# env: AERO_WIN_SRC (padrão ~/aerographene-win/src4), AERO_WIN_TOOLCHAIN_DIR (~/win-toolchain),
+#      AERO_WIN_DIST, AERO_WIN_JOBS (10)
+```
+
+## atualizar a árvore para a série atual
+
+a árvore em uso é `~/aerographene-win/src4` (as `src`, `src2`, `src3` são tentativas antigas). Ela não tem `.aero-applied`: foi montada pelo script descartável `~/aerographene-win/mksrc4.sh` (hardlink da árvore do CI, links quebrados nos arquivos da série, `patch -R` da série do CI, série nova aplicada). Para uma série nova (ex.: v0.3 com versão 0.3.3):
+
+1. esperar a build Linux da mesma série terminar (a árvore do CI passa a ter `.aero-applied` com ela).
+2. montar uma árvore nova `src5` com o mesmo procedimento do `mksrc4.sh`, trocando `P` pela pasta `patches/` do repo na versão desejada (copiar o script; ele recusa destino existente). Não escrever através de hardlink.
+3. conferir `--fuzz=0` da série e que nenhum arquivo tocado ficou com link compartilhado (o script imprime).
+4. `AERO_WIN_SRC=~/aerographene-win/src5 build/win/build.sh <cpu>`. Se o disco não couber, mover `out/Win` da `src4` para a `src5` antes (`mv`, mesmo fs) e só então apagar a `src4`.
+
+alternativa sem árvore nova: reverter na `src4` a série antiga (`patch -R` na ordem inversa, com a cópia da série usada na D4) e aplicar a nova; mais rápido, mas sem registro `.aero-applied` fica fácil errar a série de origem.
+
 ## branding Windows (D3d)
 
 `aerographene/windows-branding.patch` (último da série) + `build/win/apply_assets.sh` (chamado por `prepare.sh`, passo 9):
@@ -104,4 +135,5 @@ arquivo novo sempre entra por temporário + `mv`, então nada é escrito atravé
 - D3d: branding no `windows-branding.patch` (nomes `aerographene`/`aerographene.exe`, dados em `%LOCALAPPDATA%\aerographene`, ícones do tema nos botões da janela, JetBrains Mono em `<exe>\fonts`); `.ico` e fontes entram por `build/win/apply_assets.sh`.
 - notas no Windows: leitura confinada ativa (D3c, `kVaultReadSupported` true), escrita não (`kVaultWriteSupported` false → "unsupported"). Patch `aerographene/windows-confine.patch` (fim da série) concentra o ramo Win32 da vault e do repositório de temas; testes Windows em `vault_reader_win_unittest.cc` e `aerographene_theme_repo_unittest.cc` (`Windows*`), escritos mas não executados (sem Windows no host).
 - D4: `ninja -C out/Win chrome mini_installer` passa (14/10/2026); falta smoke test no Windows 11. Ninja no container com `--ulimit nofile=65536:65536` e `flock /tmp/aero-win-ninja.lock`.
+- build completa e pacote: `build/win/build.sh <avx2|avx1> [all|gen|ninja|pack]`; um `out/Win` por vez (disco), `-march` via bloco `# aerographene-win` na `compiler_cpu_abi` (só `is_win`); pacotes em `~/aerographene-win/dist/<cpu>/`. Árvore atual: `~/aerographene-win/src4`. Fontes faltam no `mini_installer` (`chrome.release`).
 - o zip do toolchain é licenciado: nunca commitar, copiar para o repo ou publicar.
