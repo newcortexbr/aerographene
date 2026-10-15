@@ -26,19 +26,19 @@
      "tokens": {
        "dark": {"bg": "#0f380f", "panel": "#0f380f", "line": "#a3c13a", "edge": "#cde08a", "text": "#cde08a", "text2": "#a3c13a", "muted": "#a3c13a", "accent": "#cde08a", "inv": "#0f380f", "notes": "#cde08a", "term": "#a3c13a", "sel": "#35641a"},
        "light": {"bg": "#cde08a", "panel": "#cde08a", "line": "#35641a", "edge": "#0f380f", "text": "#0f380f", "text2": "#35641a", "muted": "#35641a", "accent": "#0f380f", "inv": "#cde08a", "notes": "#0f380f", "term": "#35641a", "sel": "#a3c13a"}}},
-    {"id": "e-ink", "name": "e-ink", "status": "proposal", "src": "e-ink",
+    {"id": "e-ink", "name": "e-ink", "status": "approved", "src": "e-ink",
      "print": {"dark": "dark.png", "light": "light.png"}, "modes": ["dark", "light"],
      "ui": {"r": "0px", "font": "\"Noto Serif\",\"Liberation Serif\",\"DejaVu Serif\",serif", "fonts": ["noto-serif", "noto-serif-b"], "wm": {"dark": "grayscale(1)", "light": "grayscale(1) invert(1)"}},
      "tokens": {
        "dark": {"bg": "#111111", "panel": "#222222", "line": "#888888", "edge": "#eeeeee", "text": "#eeeeee", "text2": "#cccccc", "muted": "#bbbbbb", "accent": "#eeeeee", "inv": "#111111", "notes": "#eeeeee", "term": "#cccccc", "sel": "#444444"},
        "light": {"bg": "#eeeeee", "panel": "#dddddd", "line": "#555555", "edge": "#111111", "text": "#111111", "text2": "#333333", "muted": "#444444", "accent": "#111111", "inv": "#eeeeee", "notes": "#111111", "term": "#333333", "sel": "#bbbbbb"}}},
-    {"id": "classical", "name": "classical", "status": "proposal", "src": "classical",
+    {"id": "classical", "name": "classical", "status": "approved", "src": "classical",
      "print": {"dark": "dark.png", "light": "light.png"}, "modes": ["dark", "light"],
      "ui": {"r": "0px", "font": "\"Noto Serif\",Georgia,serif", "fonts": ["noto-serif", "noto-serif-b"], "wm": {"dark": "sepia(.6) saturate(1.5)", "light": "invert(1) sepia(.6)"}},
      "tokens": {
        "dark": {"bg": "#0e0506", "panel": "#221012", "line": "#4b2a2c", "edge": "#a8864a", "text": "#f2e8d5", "text2": "#d2c2aa", "muted": "#ae9a84", "accent": "#d9b36a", "inv": "#0e0506", "notes": "#e0525f", "term": "#8fbf8a", "sel": "#3a1b1f"},
        "light": {"bg": "#fbf6ea", "panel": "#efe3cc", "line": "#c4b08a", "edge": "#8a6b3a", "text": "#2a1214", "text2": "#4a2c2e", "muted": "#6a4a46", "accent": "#8a1c28", "inv": "#fbf6ea", "notes": "#8a1c28", "term": "#2f5d2a", "sel": "#d8c6a3"}}},
-    {"id": "graphite", "name": "graphite", "status": "proposal", "src": "graphite",
+    {"id": "graphite", "name": "graphite", "status": "approved", "src": "graphite",
      "print": {"dark": "dark.png", "light": "light.png"}, "modes": ["dark", "light"],
      "ui": {"r": "10px", "font": "\"Noto Sans\",\"DejaVu Sans\",system-ui,sans-serif", "wm": {"dark": "grayscale(1)", "light": "grayscale(1) invert(1)"}},
      "tokens": {
@@ -54,6 +54,11 @@
      "print": {"dark": "R-r01a-home-sidebar.png"}, "crop": [0, 0, 1440, 785], "q": 50, "modes": ["dark"],
      "ui": {"r": "0px", "font": "\"JetBrains Mono\",\"JetBrainsMono Nerd Font\",ui-monospace,\"DejaVu Sans Mono\",monospace", "wm": {"dark": "grayscale(1)"}},
      "tokens": {"dark": {"bg": "#111111", "panel": "#141414", "line": "#2e2e2e", "edge": "#6a6a6a", "text": "#f2f2f2", "text2": "#a8a8a8", "muted": "#8c8c8c", "accent": "#f2f2f2", "inv": "#111111", "notes": "#f2f2f2", "term": "#f2f2f2", "sel": "#1c1c1c"}}},
-    {"id": "cli", "name": "cli / tui", "status": "soon", "src": null, "note": "terminal theme, mockup on the way.", "modes": [], "print": {}}
+    {"id": "cli", "name": "cli / tui", "status": "approved", "src": "cli",
+     "print": {"dark": "dark.png", "light": "light.png"}, "modes": ["dark", "light"],
+     "ui": {"r": "0px", "fs": "15px", "font": "\"JetBrains Mono\",\"JetBrainsMono Nerd Font\",ui-monospace,\"DejaVu Sans Mono\",monospace", "wm": {"dark": "none", "light": "invert(1)"}},
+     "tokens": {
+       "dark": {"bg": "#0a0c10", "panel": "#14171d", "line": "#2a3140", "edge": "#7f8796", "text": "#d6d6d6", "text2": "#b4b9c4", "muted": "#7f8796", "accent": "#6cb6ff", "inv": "#0a0c10", "notes": "#c4a7ff", "term": "#4fd1d9", "sel": "#1c2a40"},
+       "light": {"bg": "#fbf8f1", "panel": "#eee9dc", "line": "#cfc8b6", "edge": "#5f6672", "text": "#24282f", "text2": "#24282f", "muted": "#5f6672", "accent": "#0b5fb0", "inv": "#fbf8f1", "notes": "#7a3fb0", "term": "#0a6f80", "sel": "#d7e6f7"}}}
   ]
 }
