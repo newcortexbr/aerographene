@@ -1,22 +1,8 @@
 # aerographene: profile picker (chrome://profile-picker) e customização do perfil novo no visual mono aero
-# (mockups 04 e 02, theming/mockups/perfis-onboarding). Sem banners, gradientes nem avatares origami: o avatar vira glifo
+# (mockups 04 e 02, theming/mockups/perfis-onboarding). Sem conta: o botão de login do passo
+# 'novo space' fica oculto e a ação principal é criar o space (texto aprovado do mockup 02 via strings_space.json). Sem banners, gradientes nem avatares origami: o avatar vira glifo
 # (inicial do nome). Só aparência; fluxo e funções iguais. Textos (space no lugar de perfil) vêm de build/strings_space.json.
 #
---- a/chrome/browser/resources/signin/profile_customization/profile_customization.html
-+++ b/chrome/browser/resources/signin/profile_customization/profile_customization.html
-@@ -19,6 +19,12 @@
-           background-color: var(--md-background-color);
-         }
-       }
-+      /* aerographene: fundo mono do tema (fallback: mockup 02) */
-+      body {
-+        --md-background-color: var(--color-sys-base, #05070c);
-+        background-color: var(--md-background-color);
-+        color: var(--color-sys-on-surface, #e6edf8);
-+      }
-     </style>
-   </head>
-   <body>
 --- a/chrome/browser/resources/signin/profile_customization/profile_customization_app.css
 +++ b/chrome/browser/resources/signin/profile_customization/profile_customization_app.css
 @@ -11,6 +11,21 @@
@@ -31,8 +17,8 @@
 +  --aero-text: var(--color-sys-on-surface, #e6edf8);
 +  --aero-text2: var(--color-sys-on-surface-subtle, #9aa8bf);
 +  --aero-accent: var(--color-sys-primary, #6cb6ff);
-+  --aero-mono: "JetBrains Mono", "JetBrainsMono Nerd Font", ui-monospace,
-+      "DejaVu Sans Mono", monospace;
++  --aero-mono: 'JetBrains Mono', 'JetBrainsMono Nerd Font', ui-monospace,
++      'DejaVu Sans Mono', monospace;
 +  --cr-primary-text-color: var(--aero-text);
 +  --cr-secondary-text-color: var(--aero-text2);
 +  font-family: var(--aero-mono);
@@ -101,7 +87,25 @@
    bottom: 0;
  }
  
-@@ -194,13 +217,32 @@ cr-theme-color-picker {
+@@ -135,7 +158,7 @@
+ }
+ 
+ #inputTitle {
+-  color: var(--color-sys-on-surface-subtle);
++  color: var(--aero-text2);
+   flex-grow: 1;
+   font-size: 11px;
+   font-weight: 500;
+@@ -164,7 +187,7 @@
+ }
+ 
+ #themePickerTitle {
+-  color: var(--color-sys-on-surface-subtle);
++  color: var(--aero-text2);
+   font-size: 11px;
+   font-weight: 500;
+   line-height: 16px;
+@@ -194,20 +217,46 @@
  }
  
  cr-button {
@@ -120,6 +124,7 @@
 +}
 +
 +cr-input {
++  caret-color: var(--aero-accent);
 +  --cr-input-background-color: transparent;
 +  --cr-input-color: var(--aero-text);
 +  --cr-input-focus-color: var(--aero-text);
@@ -136,7 +141,20 @@
  }
  
  .in-dialog-design #themePickerTitle {
-@@ -282,18 +324,3 @@ cr-profile-avatar-selector {
++  text-align: start;
+   width: 320px;
+ }
+ 
++/* texto do mockup 02: o que um space guarda, e que não há conta */
+ .in-dialog-design #inputTitle {
++  font-size: 12px;
++  font-weight: 400;
++  line-height: 18px;
++  text-align: start;
+   width: 320px;
+ }
+ 
+@@ -282,18 +331,3 @@
  #selectAvatarConfirmButton {
    min-width: 119px;
  }
@@ -157,7 +175,7 @@
 -}
 --- a/chrome/browser/resources/signin/profile_customization/profile_customization_app.html.ts
 +++ b/chrome/browser/resources/signin/profile_customization/profile_customization_app.html.ts
-@@ -16,7 +16,9 @@ export function getHtml(this: ProfileCustomizationAppElement) {
+@@ -16,7 +16,9 @@
      <div class="profile-customization-wrapper">
        <div id="header">
          <div id="avatarContainer">
@@ -168,9 +186,27 @@
            ${!this.isLocalProfileCreation_ ? html`
              <div class="avatar-badge" id="workBadge"
                  ?hidden="${!this.isManaged_}">
+@@ -39,7 +41,7 @@
+         <div id="title">${this.welcomeTitle_}</div>
+       </div>
+         <div id="inputTitle"
+-          ?hidden="${!this.isRefreshedUI_}">
++          ?hidden="${!this.isRefreshedUI_ && !this.isLocalProfileCreation_}">
+           $i18n{profileCustomizationInputTitle}
+         </div>
+         <cr-input id="nameInput" pattern=".*\\S.*" .value="${this.profileName_}"
+@@ -59,7 +61,7 @@
+         </cr-tooltip>
+ 
+       <div id="themePickerTitle"
+-          ?hidden="${!this.isRefreshedUI_}">
++          ?hidden="${!this.isRefreshedUI_ && !this.isLocalProfileCreation_}">
+         $i18n{profileCustomizationThemePickerLabel}
+       </div>
+       <div id="pickThemeContainer">
 --- a/chrome/browser/resources/signin/profile_customization/profile_customization_app.ts
 +++ b/chrome/browser/resources/signin/profile_customization/profile_customization_app.ts
-@@ -149,6 +149,15 @@ export class ProfileCustomizationAppElement extends
+@@ -149,6 +149,15 @@
          this.i18n('profileCustomizationTitle');
    }
  
@@ -186,9 +222,24 @@
    protected getNameInputPlaceHolder_(): string {
      return this.isRefreshedUI_ ?
          '' :
+--- a/chrome/browser/resources/signin/profile_customization/profile_customization.html
++++ b/chrome/browser/resources/signin/profile_customization/profile_customization.html
+@@ -19,6 +19,12 @@
+           background-color: var(--md-background-color);
+         }
+       }
++      /* aerographene: fundo mono do tema (fallback: mockup 02) */
++      body {
++        --md-background-color: var(--color-sys-base, #05070c);
++        background-color: var(--md-background-color);
++        color: var(--color-sys-on-surface, #e6edf8);
++      }
+     </style>
+   </head>
+   <body>
 --- a/chrome/browser/resources/signin/profile_picker/profile_card.css
 +++ b/chrome/browser/resources/signin/profile_picker/profile_card.css
-@@ -46,11 +46,11 @@ cr-button {
+@@ -46,11 +46,11 @@
    --domain-icon-size: 24px;
    --domain-icon-border-size: 2px;
    align-items: center;
@@ -203,7 +254,7 @@
    display: flex;
    height: var(--domain-icon-size);
    inset-inline-end: -6px;
-@@ -62,7 +62,7 @@ cr-button {
+@@ -62,7 +62,7 @@
  }
  
  cr-icon {
@@ -212,7 +263,18 @@
  }
  
  #forceSigninContainer {
-@@ -91,7 +91,7 @@ cr-input {
+@@ -83,15 +83,18 @@
+ }
+ 
+ cr-input {
++  --cr-input-color: var(--aero-text);
++  --cr-input-focus-color: var(--aero-text);
+   --cr-input-background-color: none;
+   --cr-input-hover-background-color: transparent;
+   --cr-input-border-bottom: none;
+   --cr-input-padding-top: 0;
++  font-family: var(--aero-mono);
+   top: 0;
  }
  
  #hoverUnderline {
@@ -221,10 +283,11 @@
    border-radius: 0;
    height: 0;
    left: 0;
-@@ -121,18 +121,8 @@ cr-tooltip {
+@@ -120,19 +123,3 @@
+   --paper-tooltip-min-width: none;
    overflow-wrap: break-word;
  }
- 
+-
 -@media (prefers-color-scheme: dark) {
 -  #iconContainer {
 -    background-color: var(--md-background-color);
@@ -239,14 +302,10 @@
 -  #hoverUnderline {
 -    border-color: var(--google-grey-700);
 -  }
-+cr-input {
-+  --cr-input-color: var(--aero-text);
-+  --cr-input-focus-color: var(--aero-text);
-+  font-family: var(--aero-mono);
- }
+-}
 --- a/chrome/browser/resources/signin/profile_picker/profile_card.html.ts
 +++ b/chrome/browser/resources/signin/profile_picker/profile_card.html.ts
-@@ -6,6 +6,7 @@ import {html} from '//resources/lit/v3_0/lit.rollup.js';
+@@ -6,6 +6,7 @@
  
  import type {ProfileCardElement} from './profile_card.js';
  import {isGlicVersion} from './profile_picker_flags.js';
@@ -254,7 +313,7 @@
  
  export function getHtml(this: ProfileCardElement) {
    return html`<!--_html_template_start_-->
-@@ -14,9 +15,9 @@ export function getHtml(this: ProfileCardElement) {
+@@ -14,9 +15,9 @@
        ?disabled="${this.disabled}"
        aria-label="${this.profileState.profileCardButtonLabel}">
      <div id="avatarContainer">
@@ -269,7 +328,12 @@
          <cr-icon icon="${this.profileState.avatarBadge}"></cr-icon>
 --- a/chrome/browser/resources/signin/profile_picker/profile_card_menu.css
 +++ b/chrome/browser/resources/signin/profile_picker/profile_card_menu.css
-@@ -32,14 +32,14 @@ cr-action-menu {
+@@ -28,22 +28,28 @@
+ }
+ 
+ cr-action-menu {
++  --cr-menu-background-color: var(--aero-panel);
+   font-weight: normal;
  }
  
  #actionMenu cr-icon {
@@ -286,7 +350,16 @@
    padding-inline-start: 14px;
  }
  
-@@ -62,8 +62,8 @@ cr-dialog::part(dialog) {
+ cr-dialog::part(dialog) {
++  --cr-dialog-background-color: var(--aero-panel);
++  background-color: var(--aero-panel);
++  border: 1px solid var(--aero-line2);
++  border-radius: 0;
++  color: var(--aero-text);
+   width: 448px;
+ }
+ 
+@@ -62,8 +68,8 @@
  
  #removeActionDialogBody {
    align-items: center;
@@ -297,7 +370,7 @@
    box-sizing: border-box;
    display: flex;
    flex-direction: row;
-@@ -72,7 +72,7 @@ cr-dialog::part(dialog) {
+@@ -72,7 +78,7 @@
  #profileCardContainer {
    align-items: center;
    background-color: var(--profile-card-hover-color);
@@ -306,7 +379,7 @@
    display: flex;
    flex-direction: column;
    height: var(--profile-item-height);
-@@ -113,7 +113,7 @@ cr-dialog::part(dialog) {
+@@ -113,12 +119,14 @@
  
  .count {
    align-self: center;
@@ -315,7 +388,15 @@
    text-align: end;
  }
  
-@@ -126,31 +126,24 @@ cr-dialog::part(dialog) {
+ #removeConfirmationButton {
+-  --cr-button-background-color: var(--google-red-600);
++  --cr-button-background-color: var(--aero-text);
++  --cr-button-text-color: var(--aero-bg);
++  border-radius: 0;
+ }
+ 
+ #removeConfirmationButton:hover {
+@@ -126,31 +134,6 @@
    --cr-button-border-color: var(--google-red-100);
  }
  
@@ -331,38 +412,23 @@
 -  .warning-message {
 -    color: var(--google-grey-500);
 -  }
-+.warning-message {
-+  color: var(--aero-text2);
-+}
- 
+-
 -  #removeActionDialogBody {
 -    border-color: var(--google-grey-700);
 -  }
-+cr-action-menu {
-+  --cr-menu-background-color: var(--aero-panel);
-+}
- 
+-
 -  #removeConfirmationButton {
 -    --cr-button-background-color: var(--google-red-300);
 -    --cr-button-text-color: var(--google-grey-900);
 -  }
-+cr-dialog::part(dialog) {
-+  --cr-dialog-background-color: var(--aero-panel);
-+  background-color: var(--aero-panel);
-+  border: 1px solid var(--aero-line2);
-+  border-radius: 0;
-+  color: var(--aero-text);
-+}
- 
+-
 -  #removeConfirmationButton:hover {
 -    --cr-button-background-color: var(--google-red-300)
 -        linear-gradient(rgba(0, 0, 0, .08), rgba(0, 0, 0, .08));
 -    --cr-button-hover-on-prominent-background-color: transparent;
 -  }
-+#removeConfirmationButton {
-+  --cr-button-background-color: var(--aero-text);
-+  --cr-button-text-color: var(--aero-bg);
-+  border-radius: 0;
++.warning-message {
++  color: var(--aero-text2);
  }
 --- a/chrome/browser/resources/signin/profile_picker/profile_card_menu.html.ts
 +++ b/chrome/browser/resources/signin/profile_picker/profile_card_menu.html.ts
@@ -374,7 +440,7 @@
  
  export function getHtml(this: ProfileCardMenuElement) {
    return html`<!--_html_template_start_-->
-@@ -37,8 +38,9 @@ export function getHtml(this: ProfileCardMenuElement) {
+@@ -37,8 +38,9 @@
      <div id="removeActionDialogBody">
        <div id="profileCardContainer">
          <div id="avatarContainer">
@@ -422,31 +488,32 @@
    height: var(--avatar-size);
    width: var(--avatar-size);
    z-index: 1;
-@@ -85,9 +84,9 @@
+@@ -85,9 +84,10 @@
  
  .info-box {
    align-items: center;
 -  border: 1px solid var(--google-grey-200);
 -  border-radius: 8px;
 -  color: var(--google-grey-700);
++  background: var(--aero-panel);
 +  border: 1px solid var(--aero-line);
 +  border-radius: 0;
 +  color: var(--aero-text2);
    display: inline-flex;
    flex-direction: row;
    margin-inline: auto;
-@@ -96,8 +95,8 @@
+@@ -96,10 +96,6 @@
    padding-inline-end: 18px;
  }
  
 -:host([is-refreshed-ui_]) .info-box {
 -  border-radius: 24px;
-+.info-box {
-+  background: var(--aero-panel);
- }
- 
+-}
+-
  .info-box > p {
-@@ -109,8 +108,8 @@
+   flex-grow: 1;
+   margin-block: 0;
+@@ -109,8 +105,8 @@
  .icon-container {
    --icon-container-size: 28px;
    --icon-container-margin: 16px;
@@ -457,7 +524,7 @@
    height: var(--icon-container-size);
    margin-inline: var(--icon-container-margin);
    width: var(--icon-container-size);
-@@ -125,6 +124,10 @@
+@@ -125,6 +121,10 @@
  
  cr-button {
    --cr-button-height: 36px;
@@ -468,7 +535,16 @@
    font-size: 0.75rem;
    font-weight: normal;
    min-width: 210px;
-@@ -143,7 +146,7 @@ cr-button {
+@@ -135,6 +135,8 @@
+ }
+ 
+ #notNowButton {
++  --cr-button-background-color: var(--aero-text);
++  --cr-button-text-color: var(--aero-bg);
+   margin-top: 18px;
+ }
+ 
+@@ -143,7 +145,7 @@
  }
  
  .title-container {
@@ -477,7 +553,7 @@
    text-align: center;
  }
  
-@@ -152,8 +155,9 @@ cr-button {
+@@ -152,8 +154,9 @@
  }
  
  .title {
@@ -489,7 +565,7 @@
    line-height: 43px;
    margin-bottom: 16px;
  }
-@@ -163,19 +167,14 @@ cr-button {
+@@ -163,19 +166,16 @@
  }
  
  .subtitle {
@@ -508,15 +584,17 @@
 -  .icon-container {
 -    background-color: var(--google-grey-700);
 -  }
++/* sem conta: o space é um perfil local. A ação principal é criar o space
++ * (o botão 'não agora' do Chromium, com o texto de strings_space.json); o
++ * botão de login fica oculto. */
 +#signInButton {
-+  --cr-button-background-color: var(--aero-text);
-+  --cr-button-text-color: var(--aero-bg);
++  display: none;
  }
  
  @media screen and ((max-width: 780px) or (max-height: 600px)) {
 --- a/chrome/browser/resources/signin/profile_picker/profile_creation_flow/profile_type_choice.html.ts
 +++ b/chrome/browser/resources/signin/profile_picker/profile_creation_flow/profile_type_choice.html.ts
-@@ -20,8 +20,7 @@ export function getHtml(this: ProfileTypeChoiceElement) {
+@@ -20,8 +20,7 @@
        ?disabled="${this.profileCreationInProgress}">
    </cr-icon-button>
    <div id="avatarContainer">
@@ -526,36 +604,6 @@
    </div>
  </div>
  <div class="title-container">
---- a/chrome/browser/resources/signin/profile_picker/profile_picker.html
-+++ b/chrome/browser/resources/signin/profile_picker/profile_picker.html
-@@ -3,7 +3,7 @@
-   <head>
-     <base href="chrome://profile-picker">
-     <meta charset="utf-8">
--    <meta name="color-scheme" content="light dark">
-+    <meta name="color-scheme" content="dark">
-     <link rel="stylesheet" href="chrome://resources/css/md_colors.css">
-     <link rel="stylesheet" href="chrome://resources/css/text_defaults_md.css">
-     <title>$i18n{mainViewTitle}</title>
-@@ -16,11 +16,13 @@
-         width: 100vw;
-       }
- 
--      @media (prefers-color-scheme: dark) {
--        html {
--          --md-background-color: rgba(41, 42, 45, 1);
--          background: var(--md-background-color);
--        }
-+      /* aerographene: fundo mono escuro com pontilhado (mockup 04), sempre */
-+      html {
-+        --md-background-color: #05070c;
-+        background: #05070c;
-+        background-image: radial-gradient(circle at 1px 1px,
-+            rgba(255, 255, 255, 0.04) 1px, transparent 1.5px);
-+        background-size: 14px 24px;
-       }
-     </style>
-     <profile-picker-app></profile-picker-app>
 --- a/chrome/browser/resources/signin/profile_picker/profile_picker_app.css
 +++ b/chrome/browser/resources/signin/profile_picker/profile_picker_app.css
 @@ -48,48 +48,15 @@
@@ -610,6 +658,36 @@
  }
  
  
+--- a/chrome/browser/resources/signin/profile_picker/profile_picker.html
++++ b/chrome/browser/resources/signin/profile_picker/profile_picker.html
+@@ -3,7 +3,7 @@
+   <head>
+     <base href="chrome://profile-picker">
+     <meta charset="utf-8">
+-    <meta name="color-scheme" content="light dark">
++    <meta name="color-scheme" content="dark">
+     <link rel="stylesheet" href="chrome://resources/css/md_colors.css">
+     <link rel="stylesheet" href="chrome://resources/css/text_defaults_md.css">
+     <title>$i18n{mainViewTitle}</title>
+@@ -16,11 +16,13 @@
+         width: 100vw;
+       }
+ 
+-      @media (prefers-color-scheme: dark) {
+-        html {
+-          --md-background-color: rgba(41, 42, 45, 1);
+-          background: var(--md-background-color);
+-        }
++      /* aerographene: fundo mono escuro com pontilhado (mockup 04), sempre */
++      html {
++        --md-background-color: #05070c;
++        background: #05070c;
++        background-image: radial-gradient(circle at 1px 1px,
++            rgba(255, 255, 255, 0.04) 1px, transparent 1.5px);
++        background-size: 14px 24px;
+       }
+     </style>
+     <profile-picker-app></profile-picker-app>
 --- a/chrome/browser/resources/signin/profile_picker/profile_picker_main_view.css
 +++ b/chrome/browser/resources/signin/profile_picker/profile_picker_main_view.css
 @@ -15,7 +15,7 @@
@@ -683,7 +761,7 @@
    margin-inline-start: var(--footer-spacing);
    padding: 8px 16px;
  }
-@@ -149,7 +168,10 @@ cr-icon[icon='profiles:add-custom'] {
+@@ -149,7 +168,10 @@
  }
  
  cr-checkbox {
@@ -695,10 +773,23 @@
    --cr-checkbox-label-padding-start: 8px;
    justify-content: flex-end;
    margin-inline-end: var(--footer-spacing);
-@@ -167,22 +189,10 @@ cr-checkbox {
-   margin-inline-start: auto;
+@@ -159,30 +181,15 @@
  }
  
+ #ask-on-startup-container {
++  --cr-toggle-checked-bar-color: var(--aero-text);
++  --cr-toggle-checked-button-color: var(--aero-bg);
++  --cr-toggle-unchecked-bar-color: var(--aero-line2);
++  --cr-toggle-unchecked-button-color: var(--aero-text2);
+   align-items: center;
++  color: var(--aero-text2);
+   display: flex;
+   gap: 16px;
+   justify-content: flex-end;
+   margin-inline-end: var(--footer-spacing);
+   margin-inline-start: auto;
+ }
+-
 -@media (prefers-color-scheme: dark) {
 -  :host {
 -    --profile-item-background: var(--google-grey-900);
@@ -717,16 +808,10 @@
 -    --iron-icon-fill-color: var(--google-grey-500);
 -    --iron-icon-stroke-color: rgb(48, 48, 50);
 -  }
-+#ask-on-startup-container {
-+  --cr-toggle-checked-bar-color: var(--aero-text);
-+  --cr-toggle-checked-button-color: var(--aero-bg);
-+  --cr-toggle-unchecked-bar-color: var(--aero-line2);
-+  --cr-toggle-unchecked-button-color: var(--aero-text2);
-+  color: var(--aero-text2);
- }
+-}
 --- a/chrome/browser/resources/signin/profile_picker/profile_picker_main_view.html.ts
 +++ b/chrome/browser/resources/signin/profile_picker/profile_picker_main_view.html.ts
-@@ -38,7 +38,7 @@ ${isGlicVersion() ? html`
+@@ -38,7 +38,7 @@
              class="profile-card-info prominent-text">
            $i18n{addSpaceButton}
          </div>
@@ -750,8 +835,8 @@
 +  --aero-text2: #9aa8bf;
 +  --aero-muted: #5e6b82;
 +  --aero-accent: #6cb6ff;
-+  --aero-mono: "JetBrains Mono", "JetBrainsMono Nerd Font", ui-monospace,
-+      "DejaVu Sans Mono", monospace;
++  --aero-mono: 'JetBrains Mono', 'JetBrainsMono Nerd Font', ui-monospace,
++      'DejaVu Sans Mono', monospace;
 +  --cr-primary-text-color: var(--aero-text);
 +  --cr-secondary-text-color: var(--aero-text2);
 +  --cr-focus-outline-color: var(--aero-text);
@@ -825,7 +910,7 @@
  }
 --- a/chrome/browser/resources/signin/profile_picker/profile_picker_util.ts
 +++ b/chrome/browser/resources/signin/profile_picker/profile_picker_util.ts
-@@ -20,6 +20,15 @@ export function createDummyProfileState(): ProfileState {
+@@ -20,6 +20,15 @@
    };
  }
  
@@ -878,10 +963,15 @@
  }
  
  #titleContainer {
-@@ -84,12 +84,6 @@ cr-button {
-   min-width: 111px;
+@@ -80,16 +80,7 @@
  }
  
+ cr-button {
++  border-radius: 0;
+   margin-inline-start: 8px;
+   min-width: 111px;
+ }
+-
 -@media (prefers-color-scheme: dark) {
 -  #iconContainer {
 -    background-color: var(--md-background-color);
@@ -890,9 +980,7 @@
 -  cr-icon {
 -    --iron-icon-fill-color: var(--google-grey-500);
 -  }
-+cr-button {
-+  border-radius: 0;
- }
+-}
 --- a/chrome/browser/resources/signin/profile_picker/profile_switch.html.ts
 +++ b/chrome/browser/resources/signin/profile_picker/profile_switch.html.ts
 @@ -5,13 +5,16 @@

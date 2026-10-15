@@ -73,8 +73,8 @@
     "pt-BR": "Excluir este space?"
   },
   "IDS_PROFILE_PICKER_PROFILE_CREATION_FLOW_PROFILE_TYPE_CHOICE_TITLE": {
-    "en": "Set up your new space",
-    "pt-BR": "Configure o seu novo space"
+    "en": "New space",
+    "pt-BR": "Novo space"
   },
   "IDS_PROFILE_PICKER_PROFILE_SWITCH_TITLE": {
     "en": "Switch to existing space?",
@@ -113,19 +113,39 @@
     "pt-BR": "Renomear o seu space"
   },
   "IDS_PROFILE_CUSTOMIZATION_INPUT_TITLE": {
-    "en": "Add a name or label for your space",
-    "pt-BR": "Adicione um nome ou rótulo para o seu space"
+    "en": "A space keeps its own history, passwords, pinned tabs and notes folder, and opens in its own window. No account, nothing leaves this machine.",
+    "pt-BR": "Um space guarda seu próprio histórico, senhas, abas fixadas e pasta de notas, e abre em uma janela própria. Sem conta, nada sai desta máquina."
   },
   "IDS_PROFILE_CUSTOMIZATION_INPUT_ERROR_MESSAGE": {
     "en": "Enter a space name",
     "pt-BR": "Digite um nome para o space"
   },
   "IDS_PROFILE_CUSTOMIZATION_THEME_PICKER_LABEL": {
-    "en": "Choose a colour for your space",
-    "pt-BR": "Escolha uma cor para o seu space"
+    "en": "Colour of the space",
+    "pt-BR": "Cor do space"
   },
   "IDS_PROFILE_CUSTOMIZATION_DELETE_PROFILE_BUTTON_LABEL": {
     "en": "Delete space",
     "pt-BR": "Excluir space"
+  },
+  "IDS_PROFILE_PICKER_PROFILE_CREATION_FLOW_PROFILE_TYPE_CHOICE_SUBTITLE_UNO": {
+    "en": "A space keeps its own history, passwords, pinned tabs and notes folder, and opens in its own window. No account, nothing leaves this machine.",
+    "pt-BR": "Um space guarda seu próprio histórico, senhas, abas fixadas e pasta de notas, e abre em uma janela própria. Sem conta, nada sai desta máquina."
+  },
+  "IDS_PROFILE_PICKER_PROFILE_CREATION_FLOW_PROFILE_TYPE_CHOICE_SUBTITLE_UNO_BOOKMARKS": {
+    "en": "A space keeps its own history, passwords, pinned tabs and notes folder, and opens in its own window. No account, nothing leaves this machine.",
+    "pt-BR": "Um space guarda seu próprio histórico, senhas, abas fixadas e pasta de notas, e abre em uma janela própria. Sem conta, nada sai desta máquina."
+  },
+  "IDS_PROFILE_PICKER_PROFILE_CREATION_FLOW_NOT_NOW_BUTTON_LABEL": {
+    "en": "Create space →",
+    "pt-BR": "Criar space →"
+  },
+  "IDS_PROFILE_PICKER_PROFILE_CREATION_FLOW_DONT_SIGN_IN_BUTTON_LABEL": {
+    "en": "Create space →",
+    "pt-BR": "Criar space →"
+  },
+  "IDS_PROFILE_PICKER_PROFILE_CREATION_FLOW_STAY_SIGNED_OUT_BUTTON_LABEL": {
+    "en": "Create space →",
+    "pt-BR": "Criar space →"
   }
 }
