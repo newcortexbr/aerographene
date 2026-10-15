@@ -597,7 +597,7 @@ diff --git a/chrome/app/settings_strings.grdp b/chrome/app/settings_strings.grdp
 +  kInstalled,
 +  kBadArchive,  // ReadThemeArchive failed
 +  kInvalid,     // theme.json fails ParseThemeJson
-+  kReserved,    // name is default/pixelized
++  kReserved,    // name is a built-in name
 +  kConflict,    // same name (case-insensitive) exists and replace == false
 +  kIoError,
 +};

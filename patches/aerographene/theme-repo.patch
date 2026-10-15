@@ -68,14 +68,14 @@ D3c.
 +// Names are stored and compared in NFC; comparisons also ignore case.
 +bool IsValidThemeName(std::string_view name);
 +
-+// "default" and "pixelized" (case-insensitive) belong to the built-in themes.
++// the 8 built-in theme names (case-insensitive) are reserved.
 +bool IsReservedThemeName(std::string_view name);
 +
 +enum class ThemeParseResult {
 +  kOk,
 +  kInvalidJson,   // not JSON, not an object, or larger than the cap
 +  kInvalidName,   // "name" missing or not IsValidThemeName
-+  kReservedName,  // "name" is default/pixelized
++  kReservedName,  // "name" is a built-in name
 +  kInvalidField,  // a field has the wrong type, range or value
 +};
 +
@@ -114,7 +114,7 @@ D3c.
 +  bool builtin = false;
 +};
 +
-+// Lists "default", "pixelized", then valid repository themes sorted by name.
++// Lists the built-in themes, then valid repository themes sorted by name.
 +// Scans on a thread-pool task (MayBlock); `callback` runs on the calling
 +// sequence. Broken folders are skipped.
 +using ListThemesCallback = base::OnceCallback<void(std::vector<ThemeInfo>)>;
@@ -123,7 +123,7 @@ D3c.
 +enum class InstallResult {
 +  kInstalled,
 +  kInvalid,   // ParseThemeJson failed
-+  kReserved,  // name is default/pixelized
++  kReserved,  // name is a built-in name
 +  kConflict,  // same name (case-insensitive) exists and replace == false
 +  kIoError,
 +};
