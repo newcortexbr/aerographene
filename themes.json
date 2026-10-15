@@ -6,12 +6,11 @@
    "modes": [
     "dark"
    ],
-   "note": "rendered from the site's own preview of the default theme, not a capture of the real browser.",
    "print": {
     "dark": "assets/gallery/default-dark.webp"
    },
    "w": 1280,
-   "h": 694,
+   "h": 800,
    "tokens": {
     "dark": {
      "bg": "#05070c",
@@ -37,11 +36,10 @@
     "light"
    ],
    "print": {
-    "dark": "assets/gallery/metro-v2-dark.webp",
-    "light": "assets/gallery/metro-v2-light.webp"
+    "dark": "assets/gallery/metro-v2-dark.webp"
    },
    "w": 1280,
-   "h": 698,
+   "h": 800,
    "tokens": {
     "dark": {
      "bg": "#1f1f1f",
@@ -81,11 +79,10 @@
     "light"
    ],
    "print": {
-    "dark": "assets/gallery/e-ink-gb-dark.webp",
-    "light": "assets/gallery/e-ink-gb-light.webp"
+    "dark": "assets/gallery/e-ink-gb-dark.webp"
    },
-   "w": 1600,
-   "h": 872,
+   "w": 1280,
+   "h": 800,
    "tokens": {
     "dark": {
      "bg": "#0f380f",
@@ -125,11 +122,10 @@
     "light"
    ],
    "print": {
-    "dark": "assets/gallery/e-ink-dark.webp",
-    "light": "assets/gallery/e-ink-light.webp"
+    "dark": "assets/gallery/e-ink-dark.webp"
    },
    "w": 1280,
-   "h": 698,
+   "h": 800,
    "tokens": {
     "dark": {
      "bg": "#111111",
@@ -169,11 +165,10 @@
     "light"
    ],
    "print": {
-    "dark": "assets/gallery/classical-dark.webp",
-    "light": "assets/gallery/classical-light.webp"
+    "dark": "assets/gallery/classical-dark.webp"
    },
    "w": 1280,
-   "h": 698,
+   "h": 800,
    "tokens": {
     "dark": {
      "bg": "#0e0506",
@@ -213,11 +208,10 @@
     "light"
    ],
    "print": {
-    "dark": "assets/gallery/graphite-dark.webp",
-    "light": "assets/gallery/graphite-light.webp"
+    "dark": "assets/gallery/graphite-dark.webp"
    },
    "w": 1280,
-   "h": 698,
+   "h": 800,
    "tokens": {
     "dark": {
      "bg": "#101010",
@@ -259,7 +253,7 @@
     "dark": "assets/gallery/pixelized-dark.webp"
    },
    "w": 1280,
-   "h": 698,
+   "h": 800,
    "tokens": {
     "dark": {
      "bg": "#111111",
@@ -285,11 +279,10 @@
     "light"
    ],
    "print": {
-    "dark": "assets/gallery/cli-dark.webp",
-    "light": "assets/gallery/cli-light.webp"
+    "dark": "assets/gallery/cli-dark.webp"
    },
    "w": 1280,
-   "h": 683,
+   "h": 800,
    "tokens": {
     "dark": {
      "bg": "#0a0c10",

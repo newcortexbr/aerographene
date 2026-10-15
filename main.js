@@ -43,7 +43,7 @@ $("#copy").onclick = () => { navigator.clipboard?.writeText($("#cmd").textConten
 /* themes: themes.json (built by tools/build-gallery.sh) feeds the site picker and the gallery.
    the picker restyles the whole site (data-theme + data-mode on <html>); the gallery only chooses which print is shown. */
 const KEY = "aero-theme", root = document.documentElement;
-const REAL_PRINTS = false; /* galeria so mostra prints reais do navegador; mockups ficam de fora */
+const REAL_PRINTS = true; /* galeria so mostra prints reais do navegador; mockups ficam de fora */
 let THEMES = [], G = [], gi = 0, gmode = "dark", userPaused = reduce, hover = false, inView = true, timer;
 
 function applyTheme(id, m, save) {
@@ -97,7 +97,7 @@ function galSelect(i, focus) {
   gi = (i + G.length) % G.length;
   const t = G[gi];
   [...$("#galtabs").children].forEach((b, j) => { b.setAttribute("aria-selected", j === gi); b.tabIndex = j === gi ? 0 : -1; if (j === gi && focus) b.focus(); });
-  const m = t.print[gmode] ? gmode : t.modes[0];
+  const m = t.print[gmode] ? gmode : (Object.keys(t.print)[0] || t.modes[0]);
   const img = $("#galimg"), soon = $("#galsoon");
   $("#galaddr").textContent = "aerographene://theme/" + t.id;
   $("#galcap").textContent = t.note || "";
@@ -251,8 +251,8 @@ fetch("themes.json").then(r => r.json()).then(d => {
 /* pixel bar charts, data from docs/BASELINE.md (README charts) */
 const DATA = {
   startup: [["thorium", 435.9], ["aerographene", 476.4], ["helium", 484.9], ["chrome", 496.3], ["ungoogled", 523.4]],
-  tabs: [["thorium", 837.2], ["aerographene", 875.2], ["helium", 898.0], ["chrome", 912.5], ["ungoogled", 1044]],
-  pss: [["thorium", 627.5], ["ungoogled", 634.6], ["aerographene", 635.3], ["helium", 662.0], ["chrome", 686.7]],
+  tabs: [["thorium", 837.2], ["v0.3.3*", 848], ["aerographene", 875.2], ["helium", 898.0], ["chrome", 912.5], ["ungoogled", 1044]],
+  pss: [["thorium", 627.5], ["ungoogled", 634.6], ["aerographene", 635.3], ["helium", 662.0], ["chrome", 686.7], ["v0.3.3*", 687.5]],
 };
 const charts = document.querySelectorAll("canvas.px");
 const drawn = new Set();
@@ -269,7 +269,7 @@ function draw(c, instant) {
     f = Math.min(1, f + (reduce ? 1 : .05));
     x.clearRect(0, 0, c.width, c.height);
     d.forEach(([n, v], r) => {
-      const y = r * rowH, me = n === "aerographene";
+      const y = r * rowH, me = n === "aerographene" || n === "v0.3.3*";
       pxText(x, n, x0, y, 2, me ? cText : cMuted);
       const end = pxText(x, "", 0, 0, 1, "#0000");
       const vs = String(v).replace(/\.0$/, "");

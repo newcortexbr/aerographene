@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """gera assets/gallery/*.webp, assets/fonts/*.woff2, themes.json e themes.css a partir de tools/themes.src.json.
-uso: tools/build-gallery.sh  (env DL=caminho de theming/design-language)"""
+uso: SHOTS=pasta-dos-prints tools/build-gallery.sh  (env DL só para mockups; "!arquivo" = print real em $SHOTS)"""
 import json, os, shutil, sys
 from pathlib import Path
 from PIL import Image
@@ -48,7 +48,10 @@ for t in src["themes"]:
         e["note"] = t["note"]
     e["print"] = {}
     for m, f in t.get("print", {}).items():
-        p = ROOT / "tools/src" / f[1:] if f.startswith("@") else DL / t["src"] / f
+        if f.startswith("!"):  # print real do navegador: SHOTS=pasta com <tema>.png
+            p = Path(os.environ["SHOTS"]) / f[1:]
+        else:
+            p = ROOT / "tools/src" / f[1:] if f.startswith("@") else DL / t["src"] / f
         im = Image.open(p).convert("RGB")
         if t.get("crop"):
             im = im.crop(tuple(t["crop"]))

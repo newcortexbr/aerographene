@@ -51,9 +51,8 @@
    "id": "default",
    "name": "default",
    "src": null,
-   "note": "rendered from the site's own preview of the default theme, not a capture of the real browser.",
    "print": {
-    "dark": "@default-dark.png"
+    "dark": "!default.png"
    },
    "modes": [
     "dark"
@@ -87,8 +86,7 @@
    "name": "metro v2",
    "src": "metro-v2",
    "print": {
-    "dark": "dark.png",
-    "light": "light.png"
+    "dark": "!metro-v2.png"
    },
    "modes": [
     "dark",
@@ -141,10 +139,8 @@
    "id": "e-ink-gb",
    "name": "e-ink gb",
    "src": "e-ink-gb",
-   "lossless": true,
    "print": {
-    "dark": "dark.png",
-    "light": "light.png"
+    "dark": "!e-ink-gb.png"
    },
    "modes": [
     "dark",
@@ -199,8 +195,7 @@
    "name": "e-ink",
    "src": "e-ink",
    "print": {
-    "dark": "dark.png",
-    "light": "light.png"
+    "dark": "!e-ink.png"
    },
    "modes": [
     "dark",
@@ -254,8 +249,7 @@
    "name": "classical",
    "src": "classical",
    "print": {
-    "dark": "dark.png",
-    "light": "light.png"
+    "dark": "!classical.png"
    },
    "modes": [
     "dark",
@@ -309,8 +303,7 @@
    "name": "graphite",
    "src": "graphite",
    "print": {
-    "dark": "dark.png",
-    "light": "light.png"
+    "dark": "!graphite.png"
    },
    "modes": [
     "dark",
@@ -360,15 +353,8 @@
    "name": "pixelized",
    "src": "pixelized",
    "print": {
-    "dark": "R-r01a-home-sidebar.png"
+    "dark": "!pixelized.png"
    },
-   "crop": [
-    0,
-    0,
-    1440,
-    785
-   ],
-   "q": 50,
    "modes": [
     "dark"
    ],
@@ -401,8 +387,7 @@
    "name": "cli / tui",
    "src": "cli",
    "print": {
-    "dark": "dark.png",
-    "light": "light.png"
+    "dark": "!cli.png"
    },
    "modes": [
     "dark",
