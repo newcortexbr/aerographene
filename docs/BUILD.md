@@ -44,25 +44,33 @@ Para forçar do zero: apagar `portablelinux/build/src`.
 
 ## -O3 seletivo (opcional, desligado por padrão; ainda não medido)
 
-Status em 15/10/2026: as builds `o3=hot` e `o3=wide` estão pausadas a pedido do dono e nenhuma foi medida. Um perfil só entra na série se vencer o teste (ganho acima do ruído, sem passar de 2% de piora na linha de base). Referência de comparação: a build normal da v0.3.2.
+Status em 15/10/2026: `wide` foi medido e rejeitado. Bench quick no Comet Lake, n=6, contra a build normal: `all_ms` +2,31% (pareada +1,65%), `first_ms` -0,97%, `pss` +0,19%. Inconclusivo (dentro do ruído, mas na direção errada e perto do limite de 2%); `wide` não entra na série. Próxima medição: n≥12, rodadas intercaladas (normal/-o3 alternadas). Os perfis novos abaixo ainda não foram compilados nem medidos. Um perfil só entra na série se vencer o teste (ganho acima do ruído, sem passar de 2% de piora na linha de base). Referência de comparação: a build normal da v0.3.2.
 
-O quê: `AERO_O3=off|hot|wide` (input `o3` do workflow `build`, padrão `off`). `build/o3.py` troca `optimize_max` (-O2) por `optimize_speed` (-O3) em alvos GN escolhidos, a cada execução do `inner.sh`, e desfaz os originais quando o perfil muda (guarda em `src/.aero-o3/`; antes do revert da domain substitution, porque `base/BUILD.gn` está na lista dela). Nada global.
+O quê: `AERO_O3=off|hot|wide|base|ui|skia|lto3|global` (input `o3` do workflow `build`, choice, padrão `off`). `build/o3.py` edita `BUILD.gn`/`.gni` a cada execução do `inner.sh` e desfaz os originais quando o perfil muda (guarda em `src/.aero-o3/`, um backup por arquivo; antes do revert da domain substitution, porque `base/BUILD.gn` está na lista dela). Valida todas as âncoras antes de escrever (âncora ausente ou duplicada aborta sem editar nada).
 
 - `off`: build normal.
-- `hot`: Blink `platform` e `platform/heap` (`third_party/blink/renderer/platform/BUILD.gn`, `.../heap/BUILD.gn`).
-- `wide`: `hot` + `base` (`base/BUILD.gn`, o alvo `base`).
+- `hot`: Blink `platform` e `platform/heap` (`third_party/blink/renderer/platform/BUILD.gn`, `.../heap/BUILD.gn`): troca `optimize_max` por `optimize_speed`.
+- `wide`: `hot` + `base` (`base/BUILD.gn`, o alvo `base`). Rejeitado (ver status).
+- `base`: só `base`.
+- `ui`: `cc` (`cc/cc.gni`: `cc_add_configs` troca `optimize_max` por `optimize_speed`, vale para todo `cc_component`), mais `ui/gfx` (`component("gfx")`), `ui/views` (`component("views")`) e `chrome/browser/ui` (`static_library("ui")`). Esses três não têm `optimize_max` no Linux (o de `gfx` é só Android), então o `o3.py` insere `configs -= [default_optimization]; configs += [optimize_speed]` logo após a abertura do alvo; o revert devolve o arquivo original. `chrome/browser/ui` é grande: o mais caro em tempo de build.
+- `skia`: componente `skia` em `skia/BUILD.gn` (bloco `if (!is_debug)` com `optimize_max`, troca por `optimize_speed`). Não toca `skcms` nem os `rust_*_ffi_cpp`.
+- `lto3`: nenhum alvo muda de nível de compilação. Em `build/config/compiler/BUILD.gn`, `thinlto_optimize_max` passa de `lto_opt_level = 2` para `3` (`-Wl,--lto-O3`). Só afeta quem usa essa config: `chrome` (`chrome/BUILD.gn`), blink `heap` e `controller`, angle. O resto continua em `--lto-O0` (`thinlto_optimize_default`). Só tem efeito com `thin_lto_enable_optimizations` (= `is_official_build`, ligado no `out/Default`).
+- `global`: em `build/config/compiler/BUILD.gn`, `default_optimization` passa a aplicar `optimize_speed` em vez de `optimize` (-O2 no Linux sem `optimize_for_size`), e `optimize_max` passa de `-O2` para `-O3`. Todo alvo não-V8 em -O3: a maior recompilação (tudo) e o maior risco de tamanho/regressão.
+
+Validação do `o3.py` (15/10/2026, sem compilar): âncoras conferidas por leitura na árvore do Chromium 154 do runner (`~/aerographene-build/portablelinux/build/src`), e execução em cópia em `/tmp` do runner (originais de `base` e Blink vindos de `.aero-o3/`, porque a árvore ativa estava com `wide`). Os 8 perfis acharam todos os alvos, rodar duas vezes dá o mesmo resultado, trocar de perfil e `--restore`/`off` devolvem os arquivos byte a byte, perfil inválido aborta. Isso prova só a edição dos arquivos; que o GN aceita e que o código compila fica para a primeira build de cada perfil.
 
 Por que esses e não o V8: o V8 já compila com -O3 no upstream (`v8/gni/v8.gni:412` aplica `optimize_speed` a todos os alvos do V8 em Linux; confirmado nas linhas de comando do `out/Default`: `-O3` em `v8_compiler`, `v8_base_without_compiler`). O mesmo vale para partition_alloc (`build_overrides/partition_alloc.gni:60`) e para as fontes `core_hot` do Blink (dom, html, layout, css: `core/BUILD.gn:484-506`). O bloco do Thorium em `v8/BUILD.gn` (~1713: `-O3` + `-Wl,-O3` em build oficial) portanto não muda o código do V8 aqui. Sobram, em -O2, os alvos de hot path JS/DOM abaixo: Blink `platform` (strings/fontes/paint/scheduler), `heap` (Oilpan, ligado ao V8 por cppgc) e `base` (task runners, sequence manager). Ficam de fora: `core` inteiro (o upstream já separa o quente em `core_hot`; trocar `core.gni` duplicaria a config em `core_hot` e é o alvo que mais incha), `wtf` e `bindings` (sem `optimize_max`; exigiria inserir config, não só trocar), codecs/mídia (já em `optimize_max`, fora do caminho do Speedometer).
 
 Com PGO: o perfil PGO (`chrome_pgo_phase=2`) marca funções frias, que o clang otimiza para tamanho, e as quentes seguem o nível do alvo. Então -O3 num alvo com PGO só vale de fato para o código quente (inlining e unroll mais agressivos onde há contagem), e o custo em tamanho tende a ser menor que o medido sem PGO. É uma hipótese, não medida. O perfil oficial cobre o Chrome upstream; as partes que os patches do ungoogled/Helium/aerographene mudam não têm contagem.
 
-Artefato: variante com sufixo no nome, `aerographene-<ver>-<tag>-<sha>-o3<perfil>-<cpu>-x86_64_linux.tar.zst` (artifact do Actions `aerographene-linux-x86_64-o3<perfil>`). Convive em `dist/` com o da build normal; o `inner.sh` só apaga tarball do mesmo cpu e mesma variante. `release.yml` não conhece essas variantes (não são para release).
+Artefato (todo perfil diferente de `off`): variante com sufixo no nome, `aerographene-<ver>-<tag>-<sha>-o3<perfil>-<cpu>-x86_64_linux.tar.zst` (artifact do Actions `aerographene-linux-x86_64-o3<perfil>`). Convive em `dist/` com o da build normal; o `inner.sh` só apaga tarball do mesmo cpu e mesma variante. `release.yml` não conhece essas variantes (não são para release).
 
 Como ligar e desligar (não dispara nada sozinho; só o dono, ADR 0004):
 
 ```
 gh workflow run build.yml -R newcortexbr/aerographene --ref <branch> -f o3=hot    # variante hot
-gh workflow run build.yml -R newcortexbr/aerographene --ref <branch> -f o3=wide   # variante wide
+gh workflow run build.yml -R newcortexbr/aerographene --ref <branch> -f o3=wide   # variante wide (rejeitada)
+gh workflow run build.yml -R newcortexbr/aerographene --ref <branch> -f o3=ui     # base | ui | skia | lto3 | global idem
 gh workflow run build.yml -R newcortexbr/aerographene --ref <branch> -f o3=off    # build normal (também é o padrão)
 ```
 

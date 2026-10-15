@@ -11,13 +11,13 @@ setup_paths   # _root=/work/portablelinux, _src_dir=$_root/build/src, _out_dir=$
 _out_dir="${_src_dir}/out/${AERO_OUT}"
 AERO_PATCHES=/aero/patches
 
-# -O3 seletivo (build/o3.py, docs/BUILD.md): off (padrão) | hot | wide. Não entra no hash da série:
+# -O3 seletivo (build/o3.py, docs/BUILD.md): off (padrão) | hot | wide | base | ui | skia | lto3 | global. Não entra no hash da série:
 # é aplicado/desfeito a cada execução, só sobre BUILD.gn/.gni de alvos escolhidos.
 AERO_O3="${AERO_O3:-off}"
 case "${AERO_O3}" in
     ""|0|off|false) AERO_O3=off; O3_TAG="" ;;
-    hot|wide) O3_TAG="-o3${AERO_O3}" ;;
-    *) echo "erro: AERO_O3 inválido: ${AERO_O3} (off|hot|wide)" >&2; exit 1 ;;
+    hot|wide|base|ui|skia|lto3|global) O3_TAG="-o3${AERO_O3}" ;;
+    *) echo "erro: AERO_O3 inválido: ${AERO_O3} (off|hot|wide|base|ui|skia|lto3|global)" >&2; exit 1 ;;
 esac
 AERO_O3_STATE="${_src_dir}/.aero-o3"            # originais dos arquivos que o o3.py alterou
 
