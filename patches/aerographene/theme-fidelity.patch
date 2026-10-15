@@ -1,0 +1,693 @@
+aerographene: temas embutidos fiéis ao desenho (marcador de aba, nova aba, fontes, WebUI).
+
+Origem: aerographene (original). Licença: GPL-3.0. Fontes (fora do patch, em
+branding/fonts/, SIL OFL 1.1 com licença junto): Pixelify Sans, Doto,
+Selawik, Noto Serif e JetBrains Mono.
+Depende de: aerographene/theme-builtin-approved.patch, sidebar-mockup.patch,
+topbar-mockup.patch, newtab-fidelity.patch, theme-font.patch,
+webui-theme-shape.patch (último da série).
+Propósito:
+- ThemeData ganha active_tab_marker (enum ActiveTabMarker) e
+  display_font_family; GetThemeTokenColor lê tokens sem ColorId (novo token
+  "tab_marker"); UsesAccentGradient() = tema com gradiente (só o default).
+- aba ativa (sidebar e barra superior): default mantém gradiente e barra de
+  topo; pixelized mantém o bloco; os demais pintam a cor de seleção e o
+  marcador do tema: metro-v2 barra de 3px à esquerda, graphite contorno e
+  ponto de 6px à direita, classical contorno e losango na borda esquerda,
+  e-ink e e-ink-gb inversão (tab_text na cor inversa), cli só preenchimento.
+  Fundo da sidebar: gradiente só no default, surface nos demais.
+- fontes: metro-v2 Selawik 13px, classical e e-ink Noto Serif 13px,
+  graphite fonte do sistema no texto e Doto só nos títulos. Fonte ausente no
+  fontconfig cai na genérica do tipo (Monospace, Serif ou Sans), não mais
+  sempre em Monospace.
+- nova aba: temas sem variante própria recebem a classe "th" e variáveis CSS
+  (cores dos tokens, raios, fontes) num style no <html> via $i18n{aeroVars};
+  sem wallpaper azul.
+- WebUI (colors.css): raio, raio de chip, checkbox/radio quadrados e fontes
+  vêm do tema ativo (antes só pixelized x default); --aero-display-font vale
+  em h1/h2 e no título do cr-toolbar. Saída do default e do pixelized
+  equivalente à anterior.
+Compilado (os 7 .o tocados e resources_grit da WebUI); runtime não verificado.
+
+--- a/chrome/browser/resources/aero_newtab/aero_newtab.html
++++ b/chrome/browser/resources/aero_newtab/aero_newtab.html
+@@ -1,5 +1,5 @@
+ <!doctype html>
+-<html lang="en" class="$i18n{aeroTheme}" data-wx="$i18n{aeroWeather}">
++<html lang="en" class="$i18n{aeroTheme}" style="$i18n{aeroVars}" data-wx="$i18n{aeroWeather}">
+ <head>
+ <meta charset="utf-8">
+ <title>New Tab</title>
+@@ -42,6 +42,13 @@
+ .pz .go{background:#181818;font-family:var(--mono)}.pz .go:hover{box-shadow:inset 0 0 0 1px #f2f2f2}.pz .go span{font-size:13px}
+ .pz kbd{font-family:var(--mono);font-size:11px}
+ .pz .cz{background:#111;font-family:var(--mono);font-size:12px;text-transform:uppercase;letter-spacing:.08em}
++.th .wp,.th .scrim{display:none}
++.th body{font-family:var(--font)}
++.th h1{font-family:var(--display);font-weight:400;text-shadow:none}
++.th .clock{font-family:var(--clock);color:var(--text2)}
++.th .msg small{color:var(--text2)}
++.th .go,.th .cz{background:var(--panel);box-shadow:inset 0 0 0 1px var(--line)}
++.th .go:hover{box-shadow:inset 0 0 0 1px var(--mark)}
+ </style>
+ </head>
+ <body>
+--- a/chrome/browser/themes/aerographene_theme.cc
++++ b/chrome/browser/themes/aerographene_theme.cc
+@@ -158,7 +158,7 @@
+     {"toolbar", SkColorSetRGB(0x35, 0x64, 0x1A)},
+     {"toolbar_text", SkColorSetRGB(0xCD, 0xE0, 0x8A)},
+     {"toolbar_icon", SkColorSetRGB(0xA3, 0xC1, 0x3A)},
+-    {"tab_text", SkColorSetRGB(0xCD, 0xE0, 0x8A)},
++    {"tab_text", SkColorSetRGB(0x0F, 0x38, 0x0F)},
+     {"tab_background_text", SkColorSetRGB(0xCD, 0xE0, 0x8A)},
+     {"tab_background_text_inactive", SkColorSetRGB(0xA3, 0xC1, 0x3A)},
+     {"tab_background", SkColorSetRGB(0x35, 0x64, 0x1A)},
+@@ -275,6 +275,8 @@
+     {"outline", SkColorSetRGB(0xA8, 0x86, 0x4A)},
+     {"accent", SkColorSetRGB(0x9E, 0x1F, 0x2D)},
+     {"on_accent", SkColorSetRGB(0xF2, 0xE8, 0xD5)},
++    // Active tab lozenge (--mark): the oxblood accent is too dark on the tab.
++    {"tab_marker", SkColorSetRGB(0xE0, 0x52, 0x5F)},
+ };
+ 
+ // e-ink (e-ink.md, dark): 16 greys, no hue. frame #333, panel #222, page/
+@@ -286,7 +288,7 @@
+     {"toolbar", SkColorSetRGB(0x33, 0x33, 0x33)},
+     {"toolbar_text", SkColorSetRGB(0xEE, 0xEE, 0xEE)},
+     {"toolbar_icon", SkColorSetRGB(0xCC, 0xCC, 0xCC)},
+-    {"tab_text", SkColorSetRGB(0xEE, 0xEE, 0xEE)},
++    {"tab_text", SkColorSetRGB(0x11, 0x11, 0x11)},
+     {"tab_background_text", SkColorSetRGB(0xCC, 0xCC, 0xCC)},
+     {"tab_background_text_inactive", SkColorSetRGB(0xBB, 0xBB, 0xBB)},
+     {"tab_background", SkColorSetRGB(0x33, 0x33, 0x33)},
+@@ -380,6 +382,7 @@
+   theme.radius_small = 3;
+   theme.icons_base = kIconPackDefault;
+   theme.style = kStyleDefault;
++  theme.active_tab_marker = ActiveTabMarker::kGradient;
+   theme.tokens = ToTokens(kDefaultTokens);
+   return theme;
+ }
+@@ -396,21 +399,25 @@
+   theme.font_size_px = 12;
+   theme.icons_base = kIconPackPixelized;
+   theme.style = kStylePixelized;
++  theme.active_tab_marker = ActiveTabMarker::kBlock;
+   theme.tokens = ToTokens(kPixelizedTokens);
+   return theme;
+ }
+ 
+ // Approved themes of theming/design-language (2026-10-14). Dark variants:
+ // a theme is dark or light by nature, so each enters with its dark mockup.
+-// Fonts are not bundled (as pixelized): a family missing from fontconfig
+-// falls back to the system monospace (theme-font.patch).
++// Fonts ship with the Linux package (branding/fonts, SIL OFL 1.1); a family
++// missing from fontconfig falls back to a generic family of its kind
++// (theme_service.cc). Each theme has its own active tab marker.
+ ThemeData MakeFlatTheme(const char* name,
+                         std::vector<ThemeToken> tokens,
+                         int radius,
+                         int radius_small,
+                         const char* font_family,
+                         int font_size_px,
+-                        const char* icons_base) {
++                        const char* display_font_family,
++                        const char* icons_base,
++                        ActiveTabMarker active_tab_marker) {
+   ThemeData theme;
+   theme.name = name;
+   theme.scheme = ThemeScheme::kDark;
+@@ -418,8 +425,10 @@
+   theme.radius_small = radius_small;
+   theme.font_family = font_family;
+   theme.font_size_px = font_size_px;
++  theme.display_font_family = display_font_family;
+   theme.icons_base = icons_base;
+   theme.style = kStyleDefault;
++  theme.active_tab_marker = active_tab_marker;
+   theme.tokens = std::move(tokens);
+   return theme;
+ }
+@@ -428,37 +437,44 @@
+   if (name == kThemePixelized) {
+     return MakePixelizedTheme();
+   }
+-  // metro-v2: square corners; Selawik not bundled, system UI font.
++  // metro-v2: square corners, Selawik 13px; active tab: 3px bar on the
++  // left.
+   if (name == kThemeMetroV2) {
+-    return MakeFlatTheme(kThemeMetroV2, ToTokens(kMetroV2Tokens), 0, 0, "",
+-                         0, kIconPackDefault);
++    return MakeFlatTheme(kThemeMetroV2, ToTokens(kMetroV2Tokens), 0, 0,
++                         "Selawik", 13, "", kIconPackDefault,
++                         ActiveTabMarker::kBar);
+   }
+   // e-ink-gb: square corners, Pixelify Sans 11px (native grid size), 1-bit
+   // pixel icons -> compiled pixelized pack.
+   if (name == kThemeEInkGb) {
+     return MakeFlatTheme(kThemeEInkGb, ToTokens(kEInkGbTokens), 0, 0,
+-                         "Pixelify Sans", 11, kIconPackPixelized);
++                         "Pixelify Sans", 11, "", kIconPackPixelized,
++                         ActiveTabMarker::kInvert);
+   }
+-  // graphite: controls 10px, chips 6px; Doto 10px (dot pitch 0.1em stays on
+-  // whole pixels only at multiples of 10px).
++  // graphite: controls 10px, chips 6px; body text in the system UI font,
++  // dot-matrix Doto only in titles; active tab: red dot on the right.
+   if (name == kThemeGraphite) {
+-    return MakeFlatTheme(kThemeGraphite, ToTokens(kGraphiteTokens), 10, 6,
+-                         "Doto", 10, kIconPackDefault);
++    return MakeFlatTheme(kThemeGraphite, ToTokens(kGraphiteTokens), 10, 6, "",
++                         0, "Doto", kIconPackDefault, ActiveTabMarker::kDot);
+   }
+-  // classical: radius 0; Noto Serif not bundled, system UI font.
++  // classical: radius 0, Noto Serif 13px; active tab: lozenge on the left
++  // edge.
+   if (name == kThemeClassical) {
+     return MakeFlatTheme(kThemeClassical, ToTokens(kClassicalTokens), 0, 0,
+-                         "", 0, kIconPackDefault);
++                         "Noto Serif", 13, "", kIconPackDefault,
++                         ActiveTabMarker::kDiamond);
+   }
+-  // e-ink: radius 0; Noto Serif not bundled, system UI font.
++  // e-ink: radius 0, Noto Serif 13px; active tab: inversion.
+   if (name == kThemeEInk) {
+-    return MakeFlatTheme(kThemeEInk, ToTokens(kEInkTokens), 0, 0, "", 0,
+-                         kIconPackDefault);
++    return MakeFlatTheme(kThemeEInk, ToTokens(kEInkTokens), 0, 0,
++                         "Noto Serif", 13, "", kIconPackDefault,
++                         ActiveTabMarker::kInvert);
+   }
+   // cli: radius 0, JetBrains Mono 13px (UI size; 15px is the terminal cell).
+   if (name == kThemeCli) {
+     return MakeFlatTheme(kThemeCli, ToTokens(kCliTokens), 0, 0,
+-                         "JetBrains Mono", 13, kIconPackDefault);
++                         "JetBrains Mono", 13, "", kIconPackDefault,
++                         ActiveTabMarker::kFill);
+   }
+   return MakeDefaultTheme();
+ }
+@@ -508,4 +524,20 @@
+   return GetActiveTheme().style == kStylePixelized;
+ }
+ 
++SkColor GetThemeTokenColor(const ThemeData& theme,
++                           std::string_view name,
++                           SkColor fallback) {
++  SkColor color = fallback;
++  for (const ThemeToken& token : theme.tokens) {
++    if (token.name == name) {
++      color = token.color;
++    }
++  }
++  return color;
++}
++
++bool UsesAccentGradient() {
++  return GetActiveTheme().active_tab_marker == ActiveTabMarker::kGradient;
++}
++
+ }  // namespace aerographene
+--- a/chrome/browser/themes/aerographene_theme.h
++++ b/chrome/browser/themes/aerographene_theme.h
+@@ -44,6 +44,23 @@
+ inline constexpr char kStyleDefault[] = "default";
+ inline constexpr char kStylePixelized[] = "pixelized";
+ 
++// Active tab marker (tab strip and sidebar), a theme property independent of
++// the drawing variant. kGradient: accent gradient and top bar (default theme
++// only); kBlock: the pixelized block (pixelized style); kFill: selection
++// fill; kBar: fill and a 3px bar on the left; kDot: fill, 1px outline and a
++// 6px dot on the right; kDiamond: fill, 1px outline and a lozenge on the left
++// edge; kInvert: selection fill with the tab text in the inverse color (the
++// theme's "tab_text" token).
++enum class ActiveTabMarker {
++  kGradient,
++  kBlock,
++  kFill,
++  kBar,
++  kDot,
++  kDiamond,
++  kInvert,
++};
++
+ // Every theme is dark or light by nature; no light/dark toggle.
+ enum class ThemeScheme { kDark, kLight };
+ 
+@@ -70,10 +87,14 @@
+   // UI font; empty family = system UI font.
+   std::string font_family;
+   int font_size_px = 0;
++  // Title font (WebUI headings, new tab greeting and clock); empty = the UI
++  // font.
++  std::string display_font_family;
+   // Compiled icon pack (kIconPack*).
+   std::string icons_base = kIconPackDefault;
+   // Compiled chrome drawing variant (kStyle*).
+   std::string style = kStyleDefault;
++  ActiveTabMarker active_tab_marker = ActiveTabMarker::kFill;
+   // Applied in order through the theme token -> ColorId mapping.
+   std::vector<ThemeToken> tokens;
+ };
+@@ -90,6 +111,15 @@
+ // Shorthand for GetActiveTheme().style == kStylePixelized.
+ bool UsesPixelizedStyle();
+ 
++// Last value of token `name` in `theme`, `fallback` if absent. Tokens with no
++// ColorId mapping (e.g. "tab_marker") are read through this.
++SkColor GetThemeTokenColor(const ThemeData& theme,
++                           std::string_view name,
++                           SkColor fallback);
++
++// True when the active theme draws the accent gradient (default theme).
++bool UsesAccentGradient();
++
+ }  // namespace aerographene
+ 
+ #endif  // CHROME_BROWSER_THEMES_AEROGRAPHENE_THEME_H_
+--- a/chrome/browser/themes/theme_service.cc
++++ b/chrome/browser/themes/theme_service.cc
+@@ -379,6 +379,21 @@
+ constexpr char kMonospaceFallback[] = "Monospace";
+ #endif
+ 
++// aerographene: generic family of the same kind for a theme font missing
++// from fontconfig (the package installs the bundled fonts; a loose tarball
++// may lack them): mono, serif or sans.
++const char* AerographeneFallbackFamily(const std::string& family) {
++  if (family.find("Mono") != std::string::npos) {
++    return kMonospaceFallback;
++  }
++#if BUILDFLAG(IS_WIN)
++  return family.find("Serif") != std::string::npos ? "Times New Roman"
++                                                   : "Segoe UI";
++#else
++  return family.find("Serif") != std::string::npos ? "Serif" : "Sans";
++#endif
++}
++
+ // aerographene: UI font of the active theme (pixelized: JetBrains Mono 12px,
+ // mono size in the pixelized mockups); system monospace if the family is not
+ // installed. Only called for themes with a font, so the default theme loads
+@@ -394,7 +409,7 @@
+   // description has to be set after it; the cache refills from it.
+   ui::ResourceBundle::GetSharedInstance().ReloadFonts();
+   gfx::FontList::SetDefaultFontDescription(base::StringPrintf(
+-      "%s, %dpx", installed ? family.c_str() : kMonospaceFallback,
++      "%s, %dpx", installed ? family.c_str() : AerographeneFallbackFamily(family),
+       size_px));
+ }
+ 
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -113,7 +113,8 @@
+   }
+   const gfx::Rect bounds = view->GetLocalBounds();
+   cc::PaintFlags flags;
+-  if (aerographene::UsesPixelizedStyle()) {
++  // Accent gradient only in the default theme; the others paint the surface.
++  if (!aerographene::UsesAccentGradient()) {
+     flags.setColor(colors->GetColor(ui::kColorSysSurface));
+   } else {
+     flags.setShader(gfx::CreateGradientShader(
+--- a/chrome/browser/ui/views/tabs/common/tab_view.cc
++++ b/chrome/browser/ui/views/tabs/common/tab_view.cc
+@@ -187,6 +187,72 @@
+   return *ramp;
+ }
+ 
++// Active tab of a theme without the accent gradient or the pixelized block:
++// selection fill plus the theme marker (aerographene::ActiveTabMarker). The
++// marker color is the "tab_marker" token, the accent if absent.
++constexpr int kAeroThemeBarWidth = 3;
++constexpr int kAeroThemeDotSize = 6;
++constexpr int kAeroThemeDotInset = 8;
++constexpr float kAeroThemeLozenge = 4.0f;
++constexpr float kAeroThemeLozengeInset = 5.0f;
++
++void PaintAeroThemedActiveTab(gfx::Canvas* canvas,
++                              const gfx::Rect& bounds,
++                              int radius,
++                              const ui::ColorProvider& colors,
++                              SkColor line,
++                              SkColor accent) {
++  using Marker = aerographene::ActiveTabMarker;
++  const aerographene::ThemeData& theme = aerographene::GetActiveTheme();
++  const Marker kind = theme.active_tab_marker;
++  cc::PaintFlags flags;
++  flags.setAntiAlias(true);
++  flags.setColor(colors.GetColor(ui::kColorTextSelectionBackground));
++  canvas->DrawRoundRect(bounds, radius, flags);
++  if (kind == Marker::kDot || kind == Marker::kDiamond) {
++    cc::PaintFlags stroke;
++    stroke.setAntiAlias(true);
++    stroke.setStyle(cc::PaintFlags::kStroke_Style);
++    stroke.setStrokeWidth(1);
++    stroke.setColor(line);
++    gfx::RectF outline(bounds);
++    outline.Inset(0.5f);
++    canvas->DrawRoundRect(outline, radius, stroke);
++  }
++  flags.setColor(aerographene::GetThemeTokenColor(theme, "tab_marker", accent));
++  const float cy = bounds.y() + bounds.height() / 2.0f;
++  switch (kind) {
++    case Marker::kBar:
++      canvas->DrawRect(gfx::Rect(bounds.x(), bounds.y(), kAeroThemeBarWidth,
++                                 bounds.height()),
++                       flags);
++      break;
++    case Marker::kDot:
++      canvas->DrawCircle(
++          gfx::PointF(bounds.right() - kAeroThemeDotInset -
++                          kAeroThemeDotSize / 2.0f,
++                      cy),
++          kAeroThemeDotSize / 2.0f, flags);
++      break;
++    case Marker::kDiamond: {
++      const float cx = bounds.x() + kAeroThemeLozengeInset;
++      SkPathBuilder lozenge;
++      lozenge.moveTo(cx, cy - kAeroThemeLozenge);
++      lozenge.lineTo(cx + kAeroThemeLozenge, cy);
++      lozenge.lineTo(cx, cy + kAeroThemeLozenge);
++      lozenge.lineTo(cx - kAeroThemeLozenge, cy);
++      lozenge.close();
++      canvas->DrawPath(lozenge.detach(), flags);
++      break;
++    }
++    case Marker::kGradient:
++    case Marker::kBlock:
++    case Marker::kFill:
++    case Marker::kInvert:
++      break;
++  }
++}
++
+ // Draws the background of a vertical (sidebar) tab: default = faint fill
+ // (active: tenuous gradient, 1px outline on top and sides, 2px accent bar on
+ // top; no bottom line), pixelized = black block with white outline, Bayer
+@@ -254,7 +320,7 @@
+       gfx::RectF outline(bounds);
+       outline.Inset(0.5f);
+       canvas->DrawRoundRect(outline, radius, stroke);
+-    } else {
++    } else if (aerographene::UsesAccentGradient()) {
+       flags.setShader(gfx::CreateGradientShader(
+           gfx::Point(0, 0), gfx::Point(0, bounds.height()),
+           SkColorSetARGB(0x24, 0x6C, 0xB6, 0xFF),
+@@ -274,6 +340,8 @@
+                     std::max(0, bounds.width() - 2 * kAeroIndicatorInset),
+                     kAeroIndicatorHeight),
+           flags);
++    } else {
++      PaintAeroThemedActiveTab(canvas, bounds, radius, *colors, line, accent);
+     }
+   } else if (hovered) {
+     flags.setColor(colors->GetColor(
+--- a/chrome/browser/ui/views/tabs/horizontal_tab_style_views.cc
++++ b/chrome/browser/ui/views/tabs/horizontal_tab_style_views.cc
+@@ -370,6 +370,72 @@
+   return *ramp;
+ }
+ 
++// Active tab of a theme without the accent gradient or the pixelized block:
++// selection fill plus the theme marker (aerographene::ActiveTabMarker). The
++// marker color is the "tab_marker" token, the accent if absent.
++constexpr int kAeroThemeBarWidth = 3;
++constexpr int kAeroThemeDotSize = 6;
++constexpr int kAeroThemeDotInset = 8;
++constexpr float kAeroThemeLozenge = 4.0f;
++constexpr float kAeroThemeLozengeInset = 5.0f;
++
++void PaintAeroThemedActiveTab(gfx::Canvas* canvas,
++                              const gfx::Rect& bounds,
++                              int radius,
++                              const ui::ColorProvider& colors,
++                              SkColor line,
++                              SkColor accent) {
++  using Marker = aerographene::ActiveTabMarker;
++  const aerographene::ThemeData& theme = aerographene::GetActiveTheme();
++  const Marker kind = theme.active_tab_marker;
++  cc::PaintFlags flags;
++  flags.setAntiAlias(true);
++  flags.setColor(colors.GetColor(ui::kColorTextSelectionBackground));
++  canvas->DrawRoundRect(bounds, radius, flags);
++  if (kind == Marker::kDot || kind == Marker::kDiamond) {
++    cc::PaintFlags stroke;
++    stroke.setAntiAlias(true);
++    stroke.setStyle(cc::PaintFlags::kStroke_Style);
++    stroke.setStrokeWidth(1);
++    stroke.setColor(line);
++    gfx::RectF outline(bounds);
++    outline.Inset(0.5f);
++    canvas->DrawRoundRect(outline, radius, stroke);
++  }
++  flags.setColor(aerographene::GetThemeTokenColor(theme, "tab_marker", accent));
++  const float cy = bounds.y() + bounds.height() / 2.0f;
++  switch (kind) {
++    case Marker::kBar:
++      canvas->DrawRect(gfx::Rect(bounds.x(), bounds.y(), kAeroThemeBarWidth,
++                                 bounds.height()),
++                       flags);
++      break;
++    case Marker::kDot:
++      canvas->DrawCircle(
++          gfx::PointF(bounds.right() - kAeroThemeDotInset -
++                          kAeroThemeDotSize / 2.0f,
++                      cy),
++          kAeroThemeDotSize / 2.0f, flags);
++      break;
++    case Marker::kDiamond: {
++      const float cx = bounds.x() + kAeroThemeLozengeInset;
++      SkPathBuilder lozenge;
++      lozenge.moveTo(cx, cy - kAeroThemeLozenge);
++      lozenge.lineTo(cx + kAeroThemeLozenge, cy);
++      lozenge.lineTo(cx, cy + kAeroThemeLozenge);
++      lozenge.lineTo(cx - kAeroThemeLozenge, cy);
++      lozenge.close();
++      canvas->DrawPath(lozenge.detach(), flags);
++      break;
++    }
++    case Marker::kGradient:
++    case Marker::kBlock:
++    case Marker::kFill:
++    case Marker::kInvert:
++      break;
++  }
++}
++
+ // Draws a topbar tab: inactive has no fill (hover: theme hover color) and a
+ // 1px separator in the gap after it; active default = tenuous gradient, 1px
+ // outline on top and sides (no bottom line) and a 2px accent bar on top;
+@@ -438,7 +504,7 @@
+       gfx::RectF outline(bounds);
+       outline.Inset(0.5f);
+       canvas->DrawRoundRect(outline, radius, stroke);
+-    } else {
++    } else if (aerographene::UsesAccentGradient()) {
+       flags.setShader(gfx::CreateGradientShader(
+           gfx::Point(0, bounds.y()), gfx::Point(0, bounds.bottom()),
+           SkColorSetARGB(0x24, 0x6C, 0xB6, 0xFF),
+@@ -461,6 +527,8 @@
+                     std::max(0, bounds.width() - 2 * kAeroIndicatorInset),
+                     kAeroIndicatorHeight),
+           flags);
++    } else {
++      PaintAeroThemedActiveTab(canvas, bounds, radius, *colors, line, accent);
+     }
+     return;
+   }
+--- a/chrome/browser/ui/webui/new_tab_page_third_party/new_tab_page_third_party_ui.cc
++++ b/chrome/browser/ui/webui/new_tab_page_third_party/new_tab_page_third_party_ui.cc
+@@ -9,6 +9,10 @@
+ #include <utility>
+ 
+ #include "base/functional/bind.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/string_util.h"
++#include "base/strings/strcat.h"
++#include "base/strings/stringprintf.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/values.h"
+ #include "chrome/browser/browser_features.h"
+@@ -80,6 +84,59 @@
+   }
+ };
+ 
++// CSS color of a theme token (alpha kept).
++std::string AeroCssColor(const aerographene::ThemeData& theme,
++                         const char* name,
++                         SkColor fallback) {
++  const SkColor color = aerographene::GetThemeTokenColor(theme, name, fallback);
++  return base::StringPrintf("rgba(%d,%d,%d,%.3f)", SkColorGetR(color),
++                            SkColorGetG(color), SkColorGetB(color),
++                            SkColorGetA(color) / 255.0);
++}
++
++// Font stack for a theme family: the family (only letters, digits, space,
++// '-' and '_' are kept, so a repository theme cannot break the CSS) and a
++// generic family of its kind; empty family = the page's default stack.
++std::string AeroCssFont(const std::string& family) {
++  std::string clean;
++  for (char c : family) {
++    if (base::IsAsciiAlphaNumeric(c) || c == ' ' || c == '-' || c == '_') {
++      clean.push_back(c);
++    }
++  }
++  if (clean.empty()) {
++    return "'Noto Sans','DejaVu Sans',sans-serif";
++  }
++  const char* generic = clean.find("Mono") != std::string::npos ? "monospace"
++                        : clean.find("Serif") != std::string::npos
++                            ? "serif"
++                            : "sans-serif";
++  return base::StrCat({"'", clean, "',", generic});
++}
++
++// Custom properties read by html.th in aero_newtab.html.
++std::string AeroNewTabVars(const aerographene::ThemeData& theme) {
++  const std::string font = AeroCssFont(theme.font_family);
++  const std::string display = theme.display_font_family.empty()
++                                  ? font
++                                  : AeroCssFont(theme.display_font_family);
++  const SkColor accent =
++      aerographene::GetThemeTokenColor(theme, "accent", SK_ColorWHITE);
++  return base::StrCat(
++      {"--bg:", AeroCssColor(theme, "ntp", SK_ColorBLACK),
++       ";--text:", AeroCssColor(theme, "ntp_text", SK_ColorWHITE),
++       ";--text2:", AeroCssColor(theme, "text_dim", SK_ColorLTGRAY),
++       ";--accent:", AeroCssColor(theme, "accent", accent),
++       ";--mark:", AeroCssColor(theme, "tab_marker", accent),
++       ";--line:", AeroCssColor(theme, "separator", SK_ColorDKGRAY),
++       ";--panel:", AeroCssColor(theme, "surface", SK_ColorBLACK),
++       ";--r:", base::NumberToString(theme.radius),
++       "px;--r2:", base::NumberToString(theme.radius_small),
++       "px;--font:", font, ";--display:", display, ";--clock:",
++       theme.display_font_family.empty() ? base::StrCat({"Seg7,", font})
++                                         : display});
++}
++
+ class AeroNewTabUI : public content::WebUIController {
+  public:
+   explicit AeroNewTabUI(content::WebUI* web_ui)
+@@ -92,8 +149,16 @@
+     // HTML itself (class on <html>, data attribute): no strings.js request,
+     // no loadTimeData, no chrome://theme/colors.css.
+     PrefService* prefs = profile->GetPrefs();
+-    source->AddString("aeroTheme",
+-                      aerographene::UsesPixelizedStyle() ? "pz" : "");
++    // Class "pz" = pixelized variant, "" = default (gradient wallpaper),
++    // "th" = any other theme: flat page painted from its tokens, radii and
++    // fonts (custom properties on <html>, AeroNewTabVars).
++    const bool pixelized = aerographene::UsesPixelizedStyle();
++    const bool gradient = aerographene::UsesAccentGradient();
++    source->AddString("aeroTheme", pixelized ? "pz" : gradient ? "" : "th");
++    source->AddString("aeroVars",
++                      pixelized || gradient
++                          ? std::string()
++                          : AeroNewTabVars(aerographene::GetActiveTheme()));
+     source->AddString("aeroWeather",
+                       prefs->GetBoolean(aerographene::kNtpWeatherPref) ? "1"
+                                                                        : "");
+--- a/chrome/browser/ui/webui/theme_source.cc
++++ b/chrome/browser/ui/webui/theme_source.cc
+@@ -67,32 +67,69 @@
+ }
+ 
+ #if !BUILDFLAG(IS_ANDROID)
+-// aerographene: shape (and, for pixelized, font) of the WebUI pages, appended
+-// to colors.css so it follows the active built-in theme and is refreshed with
+-// the colors. Variables are consumed by cr_elements, chrome://history and
++// aerographene: shape and fonts of the WebUI pages, appended to colors.css
++// so it follows the active theme and is refreshed with the colors. Variables are consumed by cr_elements, chrome://history and
+ // chrome://settings with their upstream value as fallback. `html:not(#z)`
+ // out-ranks the `html {}` defaults of cr_shared_vars.css (same trick as the
+ // colors block).
++// Font stack for a theme family (letters, digits, space, '-' and '_' kept)
++// with a generic family of its kind; empty when the theme has no font.
++std::string AerographeneCssFont(const std::string& family) {
++  std::string clean;
++  for (char c : family) {
++    if (base::IsAsciiAlphaNumeric(c) || c == ' ' || c == '-' || c == '_') {
++      clean.push_back(c);
++    }
++  }
++  if (clean.empty()) {
++    return std::string();
++  }
++  const char* generic = clean.find("Mono") != std::string::npos ? "monospace"
++                        : clean.find("Serif") != std::string::npos
++                            ? "serif"
++                            : "sans-serif";
++  return base::StrCat({"'", clean, "',", generic});
++}
++
++// Radii and fonts of the active theme. Square themes (radius 0) also square
++// checkbox and radio and keep the small radius for chips only (pixelized:
++// 0 and chip 2px); rounded themes use the control radius on chips (default:
++// 4/3px). The display font reaches h1/h2 and the cr-toolbar title.
+ std::string AerographeneThemeCss() {
+-  // Both themes: no pill, no elevation shadow; contour as an inset hairline.
++  // No pill, no elevation shadow; contour as an inset hairline.
+   constexpr char kCommon[] =
+       "--cr-card-shadow:inset 0 0 0 1px var(--color-separator,"
+       "rgba(255,255,255,.14));";
+-  if (aerographene::UsesPixelizedStyle()) {
+-    return base::StrCat(
+-        {"html:not(#z){", kCommon,
+-         "--aero-radius:0;--aero-radius-sm:0;--cr-card-border-radius:0;"
+-         "--cr-dialog-border-radius:0;--cr-menu-border-radius:0;"
+-         "--cr-input-border-radius:0;--cr-chip-border-radius:2px;"
+-         "--aero-radius-check:0;--aero-radius-radio:0;}"
+-         "html:not(#z) body,html:not(#z) button{"
+-         "font-family:\"JetBrains Mono\",monospace;}"});
+-  }
+-  return base::StrCat(
+-      {"html:not(#z){", kCommon,
+-       "--aero-radius:4px;--aero-radius-sm:3px;--cr-card-border-radius:4px;"
+-       "--cr-dialog-border-radius:4px;--cr-menu-border-radius:4px;"
+-       "--cr-input-border-radius:4px;--cr-chip-border-radius:4px;}"});
++  const aerographene::ThemeData& theme = aerographene::GetActiveTheme();
++  const int radius = std::max(0, theme.radius);
++  const bool square = radius == 0;
++  const int radius_sm = square ? 0 : std::max(0, theme.radius_small);
++  const int chip = square ? std::max(0, theme.radius_small) : radius;
++  std::string css = base::StringPrintf(
++      "html:not(#z){%s--aero-radius:%dpx;--aero-radius-sm:%dpx;"
++      "--cr-card-border-radius:%dpx;--cr-dialog-border-radius:%dpx;"
++      "--cr-menu-border-radius:%dpx;--cr-input-border-radius:%dpx;"
++      "--cr-chip-border-radius:%dpx;",
++      kCommon, radius, radius_sm, radius, radius, radius, radius, chip);
++  if (square) {
++    css += "--aero-radius-check:0;--aero-radius-radio:0;";
++  }
++  const std::string display = AerographeneCssFont(theme.display_font_family);
++  if (!display.empty()) {
++    base::StrAppend(&css, {"--aero-display-font:", display, ";"});
++  }
++  css += "}";
++  const std::string font = AerographeneCssFont(theme.font_family);
++  if (!font.empty()) {
++    base::StrAppend(&css, {"html:not(#z) body,html:not(#z) button{"
++                           "font-family:",
++                           font, ";}"});
++  }
++  if (!display.empty()) {
++    css += "html:not(#z) h1,html:not(#z) h2{"
++           "font-family:var(--aero-display-font);}";
++  }
++  return css;
+ }
+ 
+ bool IsNewTabCssPath(const std::string& path) {
+--- a/ui/webui/resources/cr_elements/cr_toolbar/cr_toolbar.css
++++ b/ui/webui/resources/cr_elements/cr_toolbar/cr_toolbar.css
+@@ -27,6 +27,8 @@
+ 
+ h1 {
+   flex: 1;
++  /* aerographene: theme title font; unset (inherited) when not defined. */
++  font-family: var(--aero-display-font);
+   font-size: 170%;
+   font-weight: var(--cr-toolbar-header-font-weight, 500);
+   letter-spacing: .25px;
