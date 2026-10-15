@@ -135,6 +135,7 @@ aerographene/terminal-f1.patch
 aerographene/commandbar-f3.patch
 aerographene/commandbar-centered.patch
 aerographene/defaults-f4.patch
+aerographene/webstore-lazy.patch
 aerographene/notes-f2b.patch
 aerographene/onboarding-setup.patch
 aerographene/first-run-off.patch

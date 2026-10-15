@@ -1,0 +1,95 @@
+# aerographene: chromium-web-store sem service worker permanente.
+# O background.js (v1.5.5.4, arquivo baixado por build/inner.sh antes da série, finais de linha CRLF)
+# registrava onStartup + alarme de 60 min (checagem de updates) e checava updates a cada
+# instalação/remoção de extensão. Isso acordava o service worker em todo perfil. Aqui os
+# listeners onStartup/onUninstalled, o agendamento do alarme e o updateBadge saem; o alarme
+# antigo de perfis existentes se limpa sozinho. Continuam: instalar pela loja (content script,
+# onMessageExternal/onConnectExternal), popup, menu de contexto e "Update all" manual.
+# Depende de: o código da extensão em third_party/chromium_web_store (inner.sh).
+diff --git a/third_party/chromium_web_store/scripts/background.js b/third_party/chromium_web_store/scripts/background.js
+index 893fb1b..a7da2da 100644
+--- a/third_party/chromium_web_store/scripts/background.js
++++ b/third_party/chromium_web_store/scripts/background.js
+@@ -30,43 +30,14 @@ function handleContextClick(info, tab) {
+         });
+ }
+ 
+-function updateBadge(modified_ext_id = null) {
+-    checkForUpdates();
+-}
+-
+-function startupTasks() {
+-    chrome.storage.sync.get(DEFAULT_MANAGEMENT_OPTIONS, function (settings) {
+-        chrome.storage.local.get(
+-            {
+-                badge_display: "",
+-                last_scheduled_update: 0,
+-            },
+-            (localstore) => {
+-                chrome.action.setBadgeText({
+-                    text: localstore.badge_display,
+-                });
+-                chrome.alarms.create("cws_check_extension_updates", {
+-                    delayInMinutes: Math.max(
+-                        1,
+-                        settings.update_period_in_minutes -
+-                            Math.floor(
+-                                (Date.now() -
+-                                    localstore.last_scheduled_update) /
+-                                    1000 /
+-                                    60,
+-                            ),
+-                    ),
+-                    periodInMinutes: settings.update_period_in_minutes,
+-                });
+-            },
+-        );
+-    });
+-}
++// aerographene: sem checagem periódica de updates em segundo plano. Nenhum
++// listener de onStartup/alarms/onUninstalled: o service worker só acorda por
++// uso (páginas da loja, popup, menu de contexto, instalação/download).
++// "Update all" continua disponível no popup e no menu de contexto.
+ chrome.action.setBadgeBackgroundColor({
+     color: "#FE0000",
+ });
+ chrome.management.onInstalled.addListener(function (ext) {
+-    updateBadge(ext.id);
+     for (let tabid of tabsAwaitingInstall) {
+         chrome.tabs.sendMessage(
+             tabid,
+@@ -80,32 +51,12 @@ chrome.management.onInstalled.addListener(function (ext) {
+         );
+     }
+ });
+-chrome.management.onUninstalled.addListener(function (ext) {
+-    updateBadge(ext.id);
+-});
+-chrome.runtime.onStartup.addListener(function () {
+-    startupTasks();
+-});
++// aerographene: remove o alarme que perfis anteriores ainda guardam.
+ chrome.alarms.onAlarm.addListener(function (alarm) {
+     if (alarm.name == "cws_check_extension_updates")
+-        chrome.storage.sync.get(
+-            DEFAULT_MANAGEMENT_OPTIONS,
+-            function (settings) {
+-                if (settings.auto_update) {
+-                    updateBadge();
+-                    chrome.storage.local.set({
+-                        last_scheduled_update: Date.now(),
+-                    });
+-                    chrome.alarms.create("cws_check_extension_updates", {
+-                        delayInMinutes: settings.update_period_in_minutes,
+-                        periodInMinutes: settings.update_period_in_minutes,
+-                    });
+-                }
+-            },
+-        );
++        chrome.alarms.clear(alarm.name);
+ });
+ chrome.runtime.onInstalled.addListener(function () {
+-    startupTasks();
+     chrome.contextMenus.create({
+         title: chrome.i18n.getMessage("contextMenu_updateAll"),
+         id: "updateAll",
