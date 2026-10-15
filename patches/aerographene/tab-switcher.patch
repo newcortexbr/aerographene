@@ -62,7 +62,7 @@ aerographene/commandbar-f3.patch (contexto do browser_command_controller.cc).
          CycleToMruTab(browser_,
 --- /dev/null
 +++ b/chrome/browser/ui/views/frame/aerographene_tab_switcher.cc
-@@ -0,0 +1,740 @@
+@@ -0,0 +1,741 @@
 +// Copyright 2026 The Aerographene Authors
 +// You can use, redistribute, and/or modify this source code under
 +// the terms of the GPL-3.0 license that can be found in the LICENSE file.
@@ -87,6 +87,7 @@ aerographene/commandbar-f3.patch (contexto do browser_command_controller.cc).
 +#include "base/time/time.h"
 +#include "cc/paint/paint_flags.h"
 +#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/color/chrome_color_id.h"
 +#include "chrome/browser/ui/tabs/tab_strip_model.h"
 +#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 +#include "chrome/browser/ui/thumbnails/thumbnail_image.h"
@@ -244,7 +245,7 @@ aerographene/commandbar-f3.patch (contexto do browser_command_controller.cc).
 +  void OnPaint(gfx::Canvas* canvas) override {
 +    const ui::ColorProvider* const colors = GetColorProvider();
 +    const SkColor accent = colors->GetColor(ui::kColorSysPrimary);
-+    const SkColor line = colors->GetColor(ui::kColorToolbarSeparator);
++    const SkColor line = colors->GetColor(kColorToolbarSeparator);
 +    const SkColor text = colors->GetColor(ui::kColorSysOnSurface);
 +    const SkColor subtle = colors->GetColor(ui::kColorSysOnSurfaceSubtle);
 +    const float radius = GetRadius();
@@ -409,7 +410,7 @@ aerographene/commandbar-f3.patch (contexto do browser_command_controller.cc).
 +  void OnPaint(gfx::Canvas* canvas) override {
 +    const ui::ColorProvider* const colors = GetColorProvider();
 +    const SkColor accent = colors->GetColor(ui::kColorSysPrimary);
-+    const SkColor line = colors->GetColor(ui::kColorToolbarSeparator);
++    const SkColor line = colors->GetColor(kColorToolbarSeparator);
 +    const SkColor text = colors->GetColor(ui::kColorSysOnSurface);
 +    const SkColor subtle = colors->GetColor(ui::kColorSysOnSurfaceSubtle);
 +    const float radius = GetRadius();
