@@ -40,11 +40,10 @@ document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
 setCmd("curl");
 $("#copy").onclick = () => { navigator.clipboard?.writeText($("#cmd").textContent); $("#copy").textContent = "copied"; setTimeout(() => $("#copy").textContent = "copy", 1200); };
 
-/* themes: themes.json (built by tools/build-gallery.sh) feeds the site picker and the gallery.
-   the picker restyles the whole site (data-theme + data-mode on <html>); the gallery only chooses which print is shown. */
+/* themes: themes.json (built by tools/build-gallery.sh) feeds the site picker.
+   the picker restyles the whole site (data-theme + data-mode on <html>). */
 const KEY = "aero-theme", root = document.documentElement;
-const REAL_PRINTS = true; /* galeria so mostra prints reais do navegador; mockups ficam de fora */
-let THEMES = [], G = [], gi = 0, gmode = "dark", userPaused = reduce, hover = false, inView = true, timer;
+let THEMES = [];
 
 function applyTheme(id, m, save) {
   const t = THEMES.find(x => x.id === id && x.tokens) || THEMES.find(x => x.id === "default");
@@ -92,64 +91,10 @@ $("#pk").addEventListener("keydown", e => {
 });
 document.querySelectorAll("#pkmode button").forEach(b => b.onclick = () => applyTheme(root.dataset.theme, b.dataset.m, true));
 
-/* gallery: folder-tab stack of browser prints. autoplay only changes the selected print, never the site theme */
-function galSelect(i, focus) {
-  gi = (i + G.length) % G.length;
-  const t = G[gi];
-  [...$("#galtabs").children].forEach((b, j) => { b.setAttribute("aria-selected", j === gi); b.tabIndex = j === gi ? 0 : -1; if (j === gi && focus) b.focus(); });
-  const m = t.print[gmode] ? gmode : (Object.keys(t.print)[0] || t.modes[0]);
-  const img = $("#galimg"), soon = $("#galsoon");
-  $("#galaddr").textContent = "aerographene://theme/" + t.id;
-  $("#galcap").textContent = t.note || "";
-  const p = REAL_PRINTS ? t.print[m] : null;
-  img.hidden = !p; soon.hidden = !!p;
-  if (p) { img.src = p; img.alt = t.name + " theme, " + m + " mode: mockup screenshot of the browser"; }
-  $("#galpanel").setAttribute("aria-labelledby", "gt-" + t.id);
-  document.querySelectorAll("#galmode button").forEach(b => { b.setAttribute("aria-pressed", b.dataset.m === m); b.disabled = !t.print[b.dataset.m]; });
-  const nx = G[(gi + 1) % G.length].print; const f = nx[gmode] || nx[Object.keys(nx)[0]]; if (f) new Image().src = f;
-}
-function galNext() { let n = 0, i = gi; do { i = (i + 1) % G.length; n++; } while (!Object.keys(G[i].print).length && n < G.length); galSelect(i); }
-function galPlay() {
-  clearInterval(timer);
-  const on = !userPaused && !hover && inView && !document.hidden;
-  if (on) timer = setInterval(galNext, 5500);
-  const b = $("#galpause"); b.setAttribute("aria-pressed", userPaused); b.textContent = userPaused ? "▶ play" : "❚❚ pause";
-  b.setAttribute("aria-label", userPaused ? "start gallery autoplay" : "pause gallery autoplay");
-}
-function buildGallery() {
-  G = THEMES;
-  const tabs = $("#galtabs");
-  G.forEach((t, i) => {
-    const b = document.createElement("button");
-    b.type = "button"; b.role = "tab"; b.id = "gt-" + t.id; b.setAttribute("aria-controls", "galpanel");
-    b.style.setProperty("--i", i); b.textContent = t.name;
-    b.onclick = () => galSelect(i);
-    tabs.append(b);
-  });
-  tabs.addEventListener("keydown", e => {
-    const k = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
-    if (k) { e.preventDefault(); galSelect(gi + k, true); }
-    else if (e.key === "Home") { e.preventDefault(); galSelect(0, true); }
-    else if (e.key === "End") { e.preventDefault(); galSelect(G.length - 1, true); }
-  });
-  $("#galprev").onclick = () => galSelect(gi - 1);
-  $("#galnext").onclick = () => galSelect(gi + 1);
-  $("#galpause").onclick = () => { userPaused = !userPaused; galPlay(); };
-  document.querySelectorAll("#galmode button").forEach(b => b.onclick = () => { gmode = b.dataset.m; galSelect(gi); });
-  const g = $("#gal");
-  g.addEventListener("mouseenter", () => { hover = true; galPlay(); });
-  g.addEventListener("mouseleave", () => { hover = g.matches(":focus-within"); galPlay(); });
-  g.addEventListener("focusin", () => { hover = true; galPlay(); });
-  g.addEventListener("focusout", () => { hover = g.matches(":hover"); galPlay(); });
-  new IntersectionObserver(es => { inView = es[0].isIntersecting; galPlay(); }).observe(g);
-  document.addEventListener("visibilitychange", galPlay);
-  galSelect(0); galPlay();
-}
 fetch("themes.json").then(r => r.json()).then(d => {
   THEMES = d.themes;
   applyTheme(root.dataset.theme, root.dataset.mode, false);
-  buildGallery();
-}).catch(() => { $("#galcap").textContent = "themes could not be loaded."; });
+}).catch(() => {});
 
 
 /* t: workspace — two terminals, zoom in/out, drag across and back */
