@@ -251,8 +251,8 @@ fetch("themes.json").then(r => r.json()).then(d => {
 /* pixel bar charts, data from docs/BASELINE.md (README charts) */
 const DATA = {
   startup: [["thorium", 435.9], ["aerographene", 476.4], ["helium", 484.9], ["chrome", 496.3], ["ungoogled", 523.4]],
-  tabs: [["thorium", 837.2], ["v0.3.3*", 848], ["aerographene", 875.2], ["helium", 898.0], ["chrome", 912.5], ["ungoogled", 1044]],
-  pss: [["thorium", 627.5], ["ungoogled", 634.6], ["aerographene", 635.3], ["helium", 662.0], ["chrome", 686.7], ["v0.3.3*", 687.5]],
+  tabs: [["thorium", 837.2], ["aerographene", 875.2], ["helium", 898.0], ["chrome", 912.5], ["ungoogled", 1044]],
+  pss: [["thorium", 627.5], ["ungoogled", 634.6], ["aerographene", 635.3], ["helium", 662.0], ["chrome", 686.7]],
 };
 const charts = document.querySelectorAll("canvas.px");
 const drawn = new Set();
@@ -269,7 +269,7 @@ function draw(c, instant) {
     f = Math.min(1, f + (reduce ? 1 : .05));
     x.clearRect(0, 0, c.width, c.height);
     d.forEach(([n, v], r) => {
-      const y = r * rowH, me = n === "aerographene" || n === "v0.3.3*";
+      const y = r * rowH, me = n === "aerographene";
       pxText(x, n, x0, y, 2, me ? cText : cMuted);
       const end = pxText(x, "", 0, 0, 1, "#0000");
       const vs = String(v).replace(/\.0$/, "");
