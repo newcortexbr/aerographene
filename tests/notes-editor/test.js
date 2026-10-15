@@ -167,6 +167,14 @@ try {
   check('embed de nota vira texto', txt.includes('[nota embutida: outra nota]'));
   check('so um readImage por imagem repetida', window.calls.filter((c) => c[0] === 'readImage' && c[1] === 'pic.png').length === 1, String(window.calls.filter((c) => c[0] === 'readImage' && c[1] === 'pic.png').length));
   check('readImage nunca recebe URL remota', !window.calls.some((c) => c[0] === 'readImage' && /^(https?:|\/)/.test(c[1])));
+  // Ctrl+N: o navegador reserva a tecla e chama o gancho aeroNotesNewNote
+  check('gancho aeroNotesNewNote exposto', typeof window.aeroNotesNewNote === 'function');
+  window.aeroNotesNewNote(); await sleep(60);
+  check('gancho abre o pedido de nome', !!$('#banner input'));
+  $('#banner input').value = 'via-gancho';
+  key($('#banner input'), 'Enter'); await sleep(120);
+  const cg = window.calls.filter((c) => c[0] === 'createNote').at(-1);
+  check('gancho cria nota nova', cg && cg[1] === 'via-gancho.md', JSON.stringify(cg));
   // innerHTML usage
 } catch (e) { results.push('ERRO ' + e.stack); }
 const pre = document.createElement('pre'); pre.id = 'results'; pre.textContent = results.join('\n'); document.body.append(pre);

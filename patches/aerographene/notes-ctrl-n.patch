@@ -1,0 +1,114 @@
+aerographene: Ctrl+N cria nota nova na página de notas (aerographene://notes).
+
+Origem: aerographene (original). Licença: GPL-3.0.
+Propósito: Ctrl+N é acelerador reservado (a página nunca recebe a tecla), então
+o atalho passa a um comando novo, IDC_AERO_NEW_WINDOW_OR_NOTE (34077):
+com a aba ativa em chrome://notes, janela normal, chama pelo WebUI
+(CallJavascriptFunctionUnsafe) a função aeroNotesNewNote() de notes.js, que faz
+a ação do botão "+ nota" (pede o nome e cria); em qualquer outra aba abre nova
+janela (IDC_NEW_WINDOW, respeitando a política de incógnito forçado). Menu
+"Nova janela" segue em IDC_NEW_WINDOW e nunca cria nota. O comando entra na
+lista de reservados de IsReservedCommandOrKey.
+Depende de: aerographene/commandbar-f3.patch (contexto de chrome_command_ids.h,
+accelerator_table.cc e browser_command_controller.cc), aerographene/notes-f2b.patch
+(contexto de notes.js, newNote/btnNew).
+--- a/chrome/app/chrome_command_ids.h
++++ b/chrome/app/chrome_command_ids.h
+@@ -112,6 +112,8 @@
+ #define IDC_WEB_APP_UPGRADE_DIALOG      34075
+ // aerographene (F3): Ctrl+T opens the centered command bar.
+ #define IDC_AERO_COMMAND_BAR            34076
++// aerographene: Ctrl+N creates a note on the notes page, else a new window.
++#define IDC_AERO_NEW_WINDOW_OR_NOTE     34077
+ 
+ // Helium commands
+ #define IDC_BROWSER_LAYOUT_MENU         34081
+--- a/chrome/browser/ui/accelerator_table.cc
++++ b/chrome/browser/ui/accelerator_table.cc
+@@ -221,7 +221,9 @@
+     // aerographene (F3): Ctrl+T opens the centered command bar; the menu
+     // item and the + button keep IDC_NEW_TAB.
+     {ui::VKEY_T, ui::EF_PLATFORM_ACCELERATOR, IDC_AERO_COMMAND_BAR},
+-    {ui::VKEY_N, ui::EF_PLATFORM_ACCELERATOR, IDC_NEW_WINDOW},
++    // aerographene: Ctrl+N creates a note while the active tab is the notes
++    // page; elsewhere it opens a new window. The menu item keeps IDC_NEW_WINDOW.
++    {ui::VKEY_N, ui::EF_PLATFORM_ACCELERATOR, IDC_AERO_NEW_WINDOW_OR_NOTE},
+     {ui::VKEY_T, ui::EF_SHIFT_DOWN | ui::EF_PLATFORM_ACCELERATOR,
+      IDC_RESTORE_TAB},
+ 
+--- a/chrome/browser/ui/browser_command_controller.cc
++++ b/chrome/browser/ui/browser_command_controller.cc
+@@ -137,6 +137,7 @@
+ #include "content/public/browser/render_frame_host.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/browser/web_contents_observer.h"
++#include "content/public/browser/web_ui.h"
+ #include "content/public/common/profiling.h"
+ #include "content/public/common/url_constants.h"
+ #include "extensions/browser/extension_registrar.h"
+@@ -536,7 +537,9 @@
+   return command_id == IDC_CLOSE_TAB || command_id == IDC_CLOSE_WINDOW ||
+          command_id == IDC_NEW_INCOGNITO_WINDOW ||
+          command_id == IDC_NEW_ISOLATED_WINDOW || command_id == IDC_NEW_TAB ||
+-         command_id == IDC_NEW_WINDOW || command_id == IDC_RESTORE_TAB ||
++         command_id == IDC_NEW_WINDOW ||
++         command_id == IDC_AERO_NEW_WINDOW_OR_NOTE ||
++         command_id == IDC_RESTORE_TAB ||
+          command_id == IDC_SELECT_NEXT_TAB ||
+          command_id == IDC_SELECT_PREVIOUS_TAB ||
+          command_id == IDC_CYCLE_TO_NEXT_TAB ||
+@@ -750,6 +753,24 @@
+     case IDC_NEW_WINDOW:
+       NewWindow(browser_);
+       break;
++    case IDC_AERO_NEW_WINDOW_OR_NOTE: {
++      // aerographene: on the notes page (chrome://notes, normal window) Ctrl+N
++      // calls the page's own aeroNotesNewNote() (the "+ nota" button action)
++      // through the WebUI; the key never reaches the page because Ctrl+N is a
++      // reserved accelerator. Anywhere else it is a plain new window.
++      content::WebContents* active =
++          browser_->tab_strip_model()->GetActiveWebContents();
++      if (browser_->is_type_normal() && active && active->GetWebUI() &&
++          active->GetLastCommittedURL().SchemeIs(content::kChromeUIScheme) &&
++          active->GetLastCommittedURL().host_piece() == "notes") {
++        active->GetWebUI()->CallJavascriptFunctionUnsafe("aeroNotesNewNote");
++        break;
++      }
++      if (IsCommandEnabled(IDC_NEW_WINDOW)) {
++        NewWindow(browser_);
++      }
++      break;
++    }
+     case IDC_NEW_INCOGNITO_WINDOW:
+       NewIncognitoWindow(profile());
+       break;
+@@ -1830,6 +1851,7 @@
+   command_updater_->UpdateCommandEnabled(IDC_CLOSE_WINDOW, true);
+   command_updater_->UpdateCommandEnabled(IDC_NEW_TAB, true);
+   command_updater_->UpdateCommandEnabled(IDC_AERO_COMMAND_BAR, true);
++  command_updater_->UpdateCommandEnabled(IDC_AERO_NEW_WINDOW_OR_NOTE, true);
+   command_updater_->UpdateCommandEnabled(IDC_CLOSE_TAB, true);
+   command_updater_->UpdateCommandEnabled(
+       IDC_DUPLICATE_TAB,
+--- a/chrome/browser/resources/aero_notes/notes.js
++++ b/chrome/browser/resources/aero_notes/notes.js
+@@ -1652,8 +1652,17 @@
+ }
+ syncSortButton();
+ 
+-// Ctrl+K / Ctrl+Shift+F: search. Ctrl+N: new note (the browser may reserve
+-// it for a new window; the button works either way).
++// Ctrl+N: the browser reserves it, so the page never sees the key. On this
++// page the browser calls this hook instead (BrowserCommandController,
++// IDC_AERO_NEW_WINDOW_OR_NOTE); same action as the "+ nota" button.
++window.aeroNotesNewNote = () => {
++  if (!btnNew.disabled) {
++    newNote();
++  }
++};
++
++// Ctrl+K / Ctrl+Shift+F: search. Ctrl+N: new note (only reaches the page when
++// the browser does not reserve it, e.g. in the headless test).
+ window.addEventListener('keydown', (e) => {
+   if (!(e.ctrlKey || e.metaKey) || search.disabled) {
+     return;
