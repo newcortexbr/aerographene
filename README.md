@@ -60,51 +60,19 @@ I IMMENSELY thank projects such as Ungoogled-Chromium, Helium, Thorium and Brave
 
 ## roadmap
 
-- ✅ v0.1: Linux x86-64-v3, released as [v0.1.0](https://github.com/newcortexbr/aerographene/releases/tag/v0.1.0)
-  - ✅ sidebar with a pinned grid, folders and drag-to-folder
-  - ✅ topbar mode with a pinned row and folders
-  - ✅ centered command bar with per-type icons
-  - ✅ peek (popups and `target=_blank`) and split view
-  - ✅ spaces as profiles, one window each
-  - ✅ two built-in themes: default and pixelized
-  - ✅ cold data for history, favicons, sessions and downloads (30 days)
-  - ✅ uBlock Origin (MV2) built in and on by default; Arc importer for pinned items
-  - ✅ readable process names, `.tar.zst` release and PKGBUILD
-  - ✅ baseline: faster startup than Helium, same-or-lower memory ([BASELINE](docs/BASELINE.md))
-- ✅ v0.2
-  - ✅ internal pages (history, settings, security) follow the theme
-  - ✅ real-use test of spaces, command bar, peek and split view
-  - ✅ site cache deleted after 30 days, cookies kept ([ADR 0007](docs/adr/0007-dado-frio.md))
-  - ✅ theme picker in settings, local theme folder and `.aerotheme` import (opening the file imports it too) ([temas](docs/wiki/temas.md)); built and smoke-tested, not yet tested by hand
-  - ✅ v0.2 baseline against Helium, Thorium, Chrome and ungoogled: no metric worse than Helium; Thorium still faster at startup ([BASELINE](docs/BASELINE.md#linha-de-base-v02-13102026-aerographene-3bb3c2f-build-38293664167))
-- ✅ v0.2.1
-  - ✅ orphaned `.install-*` folders in the theme folder are removed at startup, off the UI thread
-  - ✅ pixelized: square checkbox and radio on internal pages
-  - ✅ theme folder names read as raw bytes (non-ASCII names now work under a `C` locale); unit tests for the theme repository and `.aerotheme` import ran for the first time: 18 of 18 pass
-  - ✅ built and smoke-tested ([build 38346594627](https://github.com/newcortexbr/aerographene/actions/runs/38346594627)); known gaps: sidebar live tabs are not a drag source and drag has no image; no runtime check of internal pages
-- 🚧 v0.3 ([v0.3.3 release](https://github.com/newcortexbr/aerographene/releases/tag/v0.3.3))
-  - ✅ v0.3.1 (pre-release)
-    - ✅ notes page `aerographene://notes`, Obsidian-style vault, `o:` in the command bar ([notas](docs/wiki/notas.md))
-    - ✅ terminal board `aerographene://terminal`, `t:` in the command bar; security review pending ([terminal](docs/wiki/terminal.md))
-    - ✅ Ctrl+T opens the command bar centered in the window ([command bar](docs/wiki/command-bar.md))
-    - ✅ settings in the One UI look, appearance only ([configurações](docs/wiki/settings.md))
-    - ✅ Google as default search engine and Chrome Web Store extension installs ([padrões e extensões](docs/wiki/padroes-e-extensoes.md))
-    - ✅ Windows 10 and 11 cross-compile on the Linux runner, chrome and mini_installer link ([ADR 0008](docs/adr/0008-windows-11.md), [windows](docs/wiki/windows.md))
-    - ✅ x86-64-v2 + AVX build input `cpu=avx1` ([ADR 0009](docs/adr/0009-build-ivy-bridge.md)) and native package scripts (`.pkg.tar.zst`, `.deb`, `.rpm`) ([pacotes](docs/wiki/pacotes.md))
-  - ✅ v0.3.2 (never published on its own, merged into v0.3.3)
-    - ✅ own first-use page `aerographene://setup`, once per new space ([onboarding](docs/wiki/onboarding.md))
-    - ✅ Ctrl+Tab switcher with thumbnails, in most-recently-used order; Ctrl+N creates a note on the notes page ([tab switcher](docs/wiki/tab-switcher.md))
-    - ✅ spaces look and wording: avatar menu, picker and new-space steps in the mono look; "new space" is partial ([spaces](docs/wiki/spaces.md))
-    - ✅ Helium services, setup page and out-of-scope extras removed; shortcuts in one page ([atalhos](docs/wiki/atalhos.md))
-    - ✅ settings reworked as `settings-oneui` (One UI look, light and dark follow the theme)
-    - 🚧 optional selective `-O3` build input `o3` ([build](docs/BUILD.md))
-  - ✅ v0.3.3 (release)
-    - ✅ published as a normal release: Linux avx2 (Arch pkg, deb, rpm, tarball) and Windows avx2 + avx1 zips (cross-compiled, untested); Linux avx1 not published ([pacotes](docs/wiki/pacotes.md))
-    - ✅ eight built-in themes (six new), dark only; Pixelify Sans and Doto not bundled, a fallback is used ([temas embutidos](docs/wiki/temas-embutidos.md))
-    - ✅ all new v0.3 functions compiled and in the package; the smoke test only checks startup and screenshots, so none was used for real yet
-    - 🚧 selective `-O3`: `wide` tested and rejected (all_ms +2.31%, inconclusive); new profiles base/ui/skia/lto3/global still to measure
-  - ⬜ tintable themes: user picks 2 or 3 colors and the rest is derived ([temas tintáveis](docs/wiki/temas-tintaveis.md))
-  - ⬜ Google Sync with own API keys ([ADR 0006](docs/adr/0006-google-sync-com-chaves-proprias.md))
+what is still open. Everything already delivered is in [CHANGELOG.md](CHANGELOG.md).
+
+- ⬜ tintable themes: pick 2 or 3 colors, the rest is derived ([temas tintáveis](docs/wiki/temas-tintaveis.md))
+- ⬜ Google Sync with own API keys ([ADR 0006](docs/adr/0006-google-sync-com-chaves-proprias.md))
+- ⬜ real-use test of the Windows 10/11 build (cross-compiled, untested)
+- ⬜ publish the Linux avx1 build
+- ⬜ new tab page background follows the theme
+- ⬜ bundle the Pixelify Sans and Doto fonts (a fallback is used today)
+- ⬜ pt-BR string for the reserved theme name error
+- ⬜ finish the "new space" screen (glyph choice, themed picker)
+- ⬜ security review of the terminal board
+- ⬜ real-use test of the v0.3 functions (smoke test only checks startup and screenshots)
+- 🚧 selective `-O3` build profiles: measure base, ui, skia, lto3 and global ([build](docs/BUILD.md))
 
 ## docs
 
@@ -125,7 +93,7 @@ the wiki lives in [`docs/wiki/`](docs/wiki/), in pt-BR.
 
 - [pacotes](docs/wiki/pacotes.md): release assets (`tar.zst`, `pkg.tar.zst`, `deb`, `rpm`, per CPU target), how to install and remove, what gets installed, how the packages are built. Ends with a summary for agents.
 
-- [configurações](docs/wiki/settings.md): the One UI look of `chrome://settings` and Customise profile, how the `--oneui-*` variables work. Ends with a summary for agents.
+- [configurações](docs/wiki/settings.md): the redesigned look of `chrome://settings` and Customise profile (rounded cards, larger toggles) and how its CSS variables work. Ends with a summary for agents.
 - [onboarding](docs/wiki/onboarding.md): the first-use page (`aerographene://setup`), when it opens, what each step changes and what it does not. Ends with a summary for agents.
 
 - [spaces](docs/wiki/spaces.md): avatar menu, space picker and "new space" screen in the mono look, wording "space" instead of "profile", what is still missing. Ends with a summary for agents.
