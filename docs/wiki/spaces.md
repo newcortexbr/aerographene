@@ -9,6 +9,12 @@ como o menu do avatar, o seletor (`chrome://profile-picker`) e a criação de um
 - criação de space ("novo space", mockup `02-criar-perfil` aprovado): o passo `profile_type_choice` mostra o título "New space", o texto "A space keeps its own history, passwords, pinned tabs and notes folder, and opens in its own window. No account, nothing leaves this machine." e um único botão, "Create space →" (o "não agora" do Chromium, que segue para o nome e a cor). O botão de login fica oculto por CSS: space é perfil local, sem conta; o login não é oferecido nessa tela. A página seguinte (nome, cor, Done/Delete) repete o texto sobre o campo de nome (também fora do modo "refreshed") e o seletor de cores tem o rótulo "Colour of the space". O avatar é o glifo da inicial do nome, na cor do tema; o seletor de avatares origami fica oculto; o cursor do campo usa a cor de acento.
 - textos: `build/strings_space.json` lista, por nome IDS, o texto en e pt-BR final (37 mensagens: menu, seletor, criação, remoção, troca). `build/branding_strings.py` troca o corpo da mensagem no `.grd`/`.grdp`, recalcula o id GRIT e grava o texto pt-BR e en-GB no `.xtb`; os outros idiomas só têm o id renomeado e mantêm a tradução antiga ("perfil"). Não se edita `.grd` à mão.
 
+## estado de "novo space" (15/10/2026)
+
+- validado: série compilada na build avx2 verde (run 38671160082 sobre `82a7bf3`), incluindo os recursos WebUI; patch `spaces-picker` aplica com `-F0`.
+- parcial: faltam o indicador de passos, a escolha de glifo, a prévia e a cor tingindo a borda da toolbar; o login por conta fica escondido (space é perfil local).
+- não verificado: nada foi visto no navegador (geometria dos cartões e do diálogo, menu, componentes compartilhados com visual misto, glifo com nomes não latinos, fluxo real de criar e trocar de space).
+
 ## o que não mudou
 
 - o avatar escolhido continua gravado no perfil (índice do avatar do Chromium); só deixou de ser mostrado nessas telas. Escolher glifo ou cor de glifo por space exigiria guardar a escolha no perfil: não existe ainda.
@@ -29,4 +35,4 @@ como o menu do avatar, o seletor (`chrome://profile-picker`) e a criação de um
 - textos: `build/strings_space.json` + `branding_strings.py` (`load_space`, `space_body`, `--space`/`--no-space`); o hash da série em `build/inner.sh` inclui o JSON.
 - glifo: `[\p{L}\p{N}]` do nome, maiúscula; sem match, "A". Menu em C++ usa `u_isalnum`/`u_toupper`.
 - CSS do patch: aspas simples e sem seletores duplicados (stylelint do Chromium); mescladas as duplicatas antigas de `profile_card`, `profile_card_menu`, `profile_switch` e `profile_picker_main_view`.
-- verificado: patch `spaces-picker` reaplica com `-F0` sobre o upstream espelhado (57 hunks conferidos); série aplica com `-F0` numa cópia descartável; `-fsyntax-only` do `.cc` do menu; strings reescritas conferidas nos `.xtb` pt-BR e en-GB num espelho (38 mensagens, 32 nomes). Não verificado: compilação dos recursos WebUI (esbuild/tsc), aparência no navegador (geometria dos cartões, menu), o glifo com nomes não latinos.
+- verificado antes da build completa: patch `spaces-picker` reaplica com `-F0` sobre o upstream espelhado (57 hunks conferidos); série aplica com `-F0` numa cópia descartável; `-fsyntax-only` do `.cc` do menu; strings reescritas conferidas nos `.xtb` pt-BR e en-GB num espelho (38 mensagens, 32 nomes). A compilação dos recursos WebUI entrou na build avx2 verde (run 38671160082). Não verificado: aparência no navegador (geometria dos cartões, menu), o glifo com nomes não latinos.

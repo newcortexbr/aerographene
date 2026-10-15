@@ -10,6 +10,13 @@ Fluxo do item 2 do `SCOPE.md`: ungoogled-chromium `154.0.8037.97-1` (Chromium 15
 - `build/flags.gn`: flags próprias, aplicadas por cima de `ungoogled-chromium/flags.gn` e `flags.linux.gn`; a última definição de cada chave vence.
 - `.github/workflows/build.yml`: gatilhos `workflow_dispatch` e `push` em `main` com mudança em `build/**`, `patches/**` ou no workflow. Nunca `pull_request` (ADR 0004).
 
+## estado das builds da v0.3.2 (15/10/2026)
+
+- avx2: run 38671160082 sobre `82a7bf3` (branch `v0.3`), verde: a série completa compila e liga. Smoke test do pacote ainda não feito; nada foi usado no navegador.
+- avx1: run 38672821734 em andamento.
+- `o3=hot` e `o3=wide`: pausadas (seção -O3 abaixo).
+- pendentes para fechar a v0.3.2: pre-release `v0.3.2` (workflow `release.yml`, gera draft; build não autoriza publicação) e merge da `v0.3` na `main`. Versão do produto ainda `0.3.0` em `config.sh` e no PKGBUILD.
+
 ## cache
 
 Workdir fora do repo: `$AEROGRAPHENE_WORKDIR` (padrão `$HOME/aerographene-build`).
@@ -36,6 +43,8 @@ Para forçar do zero: apagar `portablelinux/build/src`.
 - produto: o pacote se chama `aerographene-<AERO_VERSION>-<tag>-<sha>-x86_64_linux.tar.zst` (versão do produto de `build/config.sh`, tag ungoogled, SHA do repo) e tem um symlink `aerographene` → `chrome`. Ícones e nome do binário ficam para depois; versão e strings: seção "branding" abaixo.
 
 ## -O3 seletivo (opcional, desligado por padrão; ainda não medido)
+
+Status em 15/10/2026: as builds `o3=hot` e `o3=wide` estão pausadas a pedido do dono e nenhuma foi medida. Um perfil só entra na série se vencer o teste (ganho acima do ruído, sem passar de 2% de piora na linha de base). Referência de comparação: a build normal da v0.3.2.
 
 O quê: `AERO_O3=off|hot|wide` (input `o3` do workflow `build`, padrão `off`). `build/o3.py` troca `optimize_max` (-O2) por `optimize_speed` (-O3) em alvos GN escolhidos, a cada execução do `inner.sh`, e desfaz os originais quando o perfil muda (guarda em `src/.aero-o3/`; antes do revert da domain substitution, porque `base/BUILD.gn` está na lista dela). Nada global.
 

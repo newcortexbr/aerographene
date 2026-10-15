@@ -4,6 +4,16 @@ Status: proposto em 13/10/2026; B e C em andamento na branch `v0.3-ui` (ver stat
 
 Status em 13/10/2026, manhã (branch `v0.3`, HEAD `95eafb8`): `v0.3-ui` mergeada na `v0.3` (sem merge na `main`). Build avx2 38392093934 verde; smoke 38399339291 verde; build avx1 38399420162 verde (agora com notas e terminal). Releases para o draft `v0.3.0`: avx2 38402316949 e avx1 38402602679, ambos success; o draft segue não publicado. Smoke CDP headless (contêiner `aerographene-builder:v2`, launcher `aerographene`): `chrome://notes` mostra "Pick a vault folder to start." e o botão "Choose folder"; `chrome://terminal` abre o shell; num contexto anônimo real (`Target.createBrowserContext`) as duas páginas recusam com `ERR_INVALID_URL`. Continua não testado à mão; falta smoke dedicado e verificação de ISA do avx1.
 
+Status em 15/10/2026 (v0.3.2, branch `v0.3`, HEAD `82a7bf3`). Separando validado, em andamento e não verificado:
+
+- validado: build avx2 completa verde sobre `82a7bf3` (run 38671160082), com os patches novos da v0.3.2 na série: `onboarding-setup`, `first-run-off`, `tab-switcher`, `spaces-menu`, `spaces-picker` (inclui "novo space"), `settings-oneui` e `notes-ctrl-n`; textos em `build/strings_space.json` (37 mensagens). Isso prova compilação e link, não funcionamento.
+- em andamento: build avx1 (run 38672821734).
+- pausado a pedido do dono: builds `o3=hot` e `o3=wide` ([BUILD](BUILD.md)); entram na série só se vencerem a medição.
+- pendente para fechar a v0.3.2: resultado da build avx1; smoke test do pacote (ver `TESTE-USO-REAL.md`); release como pre-release `v0.3.2` (workflow próprio, gera draft); merge `v0.3` → `main`. A versão do produto em `build/config.sh` e no PKGBUILD ainda está em `0.3.0` neste estado: subir antes da release (o `inner.sh` aborta se `branding-version.patch` divergir).
+- limitações conhecidas: Ctrl solto antes do painel do tab switcher só mitigado; "novo space" parcial (faltam indicador de passos, escolha de glifo, prévia e cor tingindo a borda da toolbar; login por conta escondido); "+ pasta" nas notas é backend por fazer; o dry-run da série inteira sobre uma árvore real do Chromium nunca rodou isolado; `setup.css` do onboarding tem cerca de 130 violações de stylelint (CI provavelmente não analisa, não confirmado); teste do Windows (D4) nunca executado.
+- correção de status antigo: a build avx1 de 13/10 (run 38399420162) foi verde; "pendentes até o resultado do run avx1" na seção de A/E refere-se à verificação de ISA e ao teste na Ivy Bridge, que continuam não feitos.
+- nada da v0.3.2 foi usado no navegador.
+
 Fontes: `docs/SCOPE.md`, `CONTEXT.md`, ADRs 0004/0008/0009, `docs/BUILD.md`, `build/`, `.github/workflows/{build,release}.yml`, `patches/series`, `theming/1/DECISIONS.md` e mockups C-r02/D-r02/G-r01, nota do vault `agents/projetos/navegador-fork-contexto-e-decisoes`. APIs do upstream conferidas por leitura (ssh, só leitura) na árvore do Chromium 154 do Cezanne (`~/aerographene-build/portablelinux/build/src`); caminhos citados abaixo como `src/...`.
 
 ## regras que valem para todos os itens

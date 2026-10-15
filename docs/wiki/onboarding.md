@@ -33,6 +33,8 @@ Concluir marca a pref e leva a mesma aba à nova aba.
 ## estado e limites
 
 - série aplica com `--fuzz=0` e os `.cc` novos/alterados passam `-fsyntax-only` com as flags de `out/Default` (ver `patches/README.md`); a página passa `tests/onboarding/run.sh` com backend falso no Chrome headless.
+- compilado na build avx2 completa verde (run 38671160082 sobre `82a7bf3`, 15/10/2026); isso cobre o handler C++ e os recursos, não o comportamento.
+- limites conhecidos: `setup.css` tem cerca de 130 violações de stylelint (não confirmado se o CI analisa esse arquivo); sem passo de glifo ou cor do space.
 - não verificado: a página no navegador real (CSP e Trusted Types do WebUI, o handler C++, o seletor de pasta, definir como padrão de verdade, abrir a importação); o disparo no startup num perfil novo criado pela interface de spaces (o código assume que o caminho de abrir janela de um perfil novo passa por `DetermineStartupTabs`); Windows (a chave de navegador padrão e o seletor não foram exercitados).
 - decisão sobre perfil já existente: não mostrar. Se o dono quiser mostrar uma vez para quem atualiza, é trocar `IsNewProfile()` por outra condição.
 

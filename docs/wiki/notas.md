@@ -133,7 +133,9 @@ verificado só no Chrome headless com backend simulado (`tests/notes-editor/run.
 
 - como: comando novo `IDC_AERO_NEW_WINDOW_OR_NOTE` (34077) no lugar de `IDC_NEW_WINDOW` só no `accelerator_table.cc`. `BrowserCommandController` confere `chrome://notes` na URL da aba ativa e chama `WebUI::CallJavascriptFunctionUnsafe("aeroNotesNewNote")`; senão abre nova janela (se `IDC_NEW_WINDOW` estiver habilitado, ex.: sem incógnito forçado). O comando está na lista de reservados de `IsReservedCommandOrKey`, por isso a tecla não passa pela página.
 - página: `window.aeroNotesNewNote` em `notes.js` chama `newNote()` se a vault estiver escolhida (botão habilitado).
-- verificado: `patch --dry-run -F0` sobre o fonte upstream 154.0.8037.97 com a série aplicada nos 3 arquivos C++; gancho no headless (`tests/notes-editor/test.js`, 3 verificações). Não compilado e não testado no navegador (sem árvore do Chromium local).
+- verificado: `patch --dry-run -F0` sobre o fonte upstream 154.0.8037.97 com a série aplicada nos 3 arquivos C++; gancho no headless (`tests/notes-editor/test.js`, 3 verificações); compila na build avx2 completa verde (run 38671160082 sobre `82a7bf3`, 15/10/2026). Não testado no navegador.
+- o item "Nova janela" do menu perde o rótulo "Ctrl+N" (o atalho passou a outro comando). Todos os atalhos: [atalhos](atalhos.md).
+- "+ pasta" segue desabilitado: o backend só cria notas.
 
 ## arquivos
 

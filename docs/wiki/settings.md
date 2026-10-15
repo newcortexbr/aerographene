@@ -28,7 +28,8 @@ o One UI de settings ignora o raio do tema (`--aero-radius`): no `pixelized` os 
 
 - avatares do perfil continuam as imagens upstream (PNG), só com cantos arredondados; glifos geométricos exigiriam assets novos.
 - o divisor entre linhas vai de borda a borda do card (sem recuo), pelo CSS atual das linhas.
-- verificado até o build dos recursos e screenshot headless; não testado no navegador completo.
+- validado: aplica com `--fuzz=0`, os recursos entraram na build avx2 completa verde (run 38671160082 sobre `82a7bf3`, 15/10/2026) e screenshot headless; não testado no navegador completo.
+- o visual substitui o do `settings-f5` (quadrado, raio do tema): ver [temas](temas.md).
 
 ## resumo para agentes
 
