@@ -63,6 +63,19 @@ open(tmp, 'w').write(s)
 os.replace(tmp, path)
 PY
     echo "march=$MARCH ($cpu) em compiler_cpu_abi (is_win)"
+    # /clang:-march global anula o /arch:AVX512 do skia (skcms_TransformSkx); repete /clang:-march=x86-64-v4 depois
+    # dele (mesmo -march do ramo não-Windows do skia). Idempotente.
+    python3 - "$src/skia/BUILD.gn" <<'PY'
+import os, sys
+path = sys.argv[1]
+s = open(path).read()
+old = '    cflags = [ "/arch:AVX512" ]\n'
+new = '    cflags = [ "/arch:AVX512", "/clang:-march=x86-64-v4" ]\n'
+if new not in s:
+    assert s.count(old) == 1, "skia_avx512_flags mudou"
+    open(path + '.aero-new', 'w').write(s.replace(old, new))
+    os.replace(path + '.aero-new', path)
+PY
 }
 
 do_gen() {
