@@ -956,7 +956,7 @@ Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-them
 +#endif  // CHROME_BROWSER_UI_WEBUI_AERO_SETUP_AERO_SETUP_UI_H_
 --- /dev/null
 +++ b/chrome/browser/ui/webui/aero_setup/setup_handler.cc
-@@ -0,0 +1,428 @@
+@@ -0,0 +1,445 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -999,11 +999,6 @@ Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-them
 +bool IsListable(TemplateURLService* service, const TemplateURL* url) {
 +  return url->GetType() == TemplateURL::NORMAL && url->prepopulate_id() != 0 &&
 +         service->CanMakeDefault(url);
-+}
-+
-+// args = [callback_id]
-+bool OnlyCallbackId(const base::ListValue& args) {
-+  return args.size() == 1;
 +}
 +
 +}  // namespace
@@ -1065,9 +1060,28 @@ Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-them
 +
 +bool SetupHandler::FromSetupPage() {
 +  content::RenderFrameHost* rfh = web_ui()->GetRenderFrameHost();
-+  static const char kSetupUrl[] = "chrome://setup/";
 +  return rfh && rfh->IsInPrimaryMainFrame() &&
-+         rfh->GetLastCommittedOrigin().IsSameOriginWith(GURL(kSetupUrl));
++         rfh->GetLastCommittedOrigin().IsSameOriginWith(
++             GURL(chrome::kChromeUISetupURL));
++}
++
++bool SetupHandler::CheckArgs(const base::ListValue& args,
++                             base::Value::Type arg_type) {
++  if (!FromSetupPage()) {
++    return false;
++  }
++  const bool has_arg = arg_type != base::Value::Type::NONE;
++  if (args.size() == (has_arg ? 2u : 1u) && args[0].is_string() &&
++      (!has_arg || args[1].type() == arg_type)) {
++    return true;
++  }
++  // Malformed message from the setup page itself: settle the promise (when
++  // there is a callback id) instead of leaving it pending forever.
++  if (!args.empty() && args[0].is_string()) {
++    AllowJavascript();
++    RejectJavascriptCallback(args[0], base::Value("bad_request"));
++  }
++  return false;
 +}
 +
 +base::Value SetupHandler::VaultInfo() const {
@@ -1079,7 +1093,7 @@ Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-them
 +}
 +
 +void SetupHandler::HandleGetInfo(const base::ListValue& args) {
-+  if (!OnlyCallbackId(args) || !FromSetupPage()) {
++  if (!CheckArgs(args, base::Value::Type::NONE)) {
 +    return;
 +  }
 +  AllowJavascript();
@@ -1097,7 +1111,7 @@ Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-them
 +// --- theme: the same pref and the same validation as settings > appearance ---
 +
 +void SetupHandler::HandleGetThemes(const base::ListValue& args) {
-+  if (!OnlyCallbackId(args) || !FromSetupPage()) {
++  if (!CheckArgs(args, base::Value::Type::NONE)) {
 +    return;
 +  }
 +  AllowJavascript();
@@ -1133,7 +1147,7 @@ Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-them
 +}
 +
 +void SetupHandler::HandleSetTheme(const base::ListValue& args) {
-+  if (args.size() != 2 || !args[1].is_string() || !FromSetupPage()) {
++  if (!CheckArgs(args, base::Value::Type::STRING)) {
 +    return;
 +  }
 +  AllowJavascript();
@@ -1167,7 +1181,7 @@ Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-them
 +// --- search engine: TemplateURLService; suggestions: the existing pref ---
 +
 +void SetupHandler::HandleGetSearch(const base::ListValue& args) {
-+  if (!OnlyCallbackId(args) || !FromSetupPage()) {
++  if (!CheckArgs(args, base::Value::Type::NONE)) {
 +    return;
 +  }
 +  AllowJavascript();
@@ -1226,7 +1240,7 @@ Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-them
 +}
 +
 +void SetupHandler::HandleSetSearchEngine(const base::ListValue& args) {
-+  if (args.size() != 2 || !args[1].is_string() || !FromSetupPage()) {
++  if (!CheckArgs(args, base::Value::Type::STRING)) {
 +    return;
 +  }
 +  AllowJavascript();
@@ -1236,7 +1250,10 @@ Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-them
 +  if (service && service->loaded()) {
 +    TemplateURL* url = service->GetTemplateURLForKeyword(
 +        base::UTF8ToUTF16(args[1].GetString()));
-+    if (url && IsListable(service, url)) {
++    if (url && url == service->GetDefaultSearchProvider()) {
++      // The engine getSearch listed as current: already selected (no-op).
++      ok = true;
++    } else if (url && IsListable(service, url)) {
 +      service->SetUserSelectedDefaultSearchProvider(url);
 +      ok = true;
 +    }
@@ -1245,7 +1262,7 @@ Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-them
 +}
 +
 +void SetupHandler::HandleSetSuggest(const base::ListValue& args) {
-+  if (args.size() != 2 || !args[1].is_bool() || !FromSetupPage()) {
++  if (!CheckArgs(args, base::Value::Type::BOOLEAN)) {
 +    return;
 +  }
 +  AllowJavascript();
@@ -1257,7 +1274,7 @@ Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-them
 +// --- notes folder: the pref of chrome://notes, picked the same way ---
 +
 +void SetupHandler::HandlePickVault(const base::ListValue& args) {
-+  if (!OnlyCallbackId(args) || !FromSetupPage()) {
++  if (!CheckArgs(args, base::Value::Type::NONE)) {
 +    return;
 +  }
 +  AllowJavascript();
@@ -1310,7 +1327,7 @@ Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-them
 +}
 +
 +void SetupHandler::HandleGetDefaultBrowser(const base::ListValue& args) {
-+  if (!OnlyCallbackId(args) || !FromSetupPage()) {
++  if (!CheckArgs(args, base::Value::Type::NONE)) {
 +    return;
 +  }
 +  AllowJavascript();
@@ -1321,7 +1338,7 @@ Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-them
 +}
 +
 +void SetupHandler::HandleSetDefaultBrowser(const base::ListValue& args) {
-+  if (!OnlyCallbackId(args) || !FromSetupPage()) {
++  if (!CheckArgs(args, base::Value::Type::NONE)) {
 +    return;
 +  }
 +  AllowJavascript();
@@ -1353,7 +1370,7 @@ Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-them
 +// --- import and finish ---
 +
 +void SetupHandler::HandleOpenImport(const base::ListValue& args) {
-+  if (!OnlyCallbackId(args) || !FromSetupPage()) {
++  if (!CheckArgs(args, base::Value::Type::NONE)) {
 +    return;
 +  }
 +  AllowJavascript();
@@ -1371,7 +1388,7 @@ Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-them
 +}
 +
 +void SetupHandler::HandleComplete(const base::ListValue& args) {
-+  if (!OnlyCallbackId(args) || !FromSetupPage()) {
++  if (!CheckArgs(args, base::Value::Type::NONE)) {
 +    return;
 +  }
 +  AllowJavascript();
@@ -1387,7 +1404,7 @@ Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-them
 +}  // namespace aerographene::setup
 --- /dev/null
 +++ b/chrome/browser/ui/webui/aero_setup/setup_handler.h
-@@ -0,0 +1,94 @@
+@@ -0,0 +1,98 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -1445,6 +1462,10 @@ Depende de notes-render/notes-editor (kVaultPathPref, aero_notes), settings-them
 + private:
 +  // Sender is the primary main frame committed at chrome://setup.
 +  bool FromSetupPage();
++  // FromSetupPage() plus argument shape: [callback_id] or [callback_id, arg]
++  // with |arg_type| (NONE = no extra argument). Rejects the callback when
++  // the shape is wrong.
++  bool CheckArgs(const base::ListValue& args, base::Value::Type arg_type);
 +
 +  void HandleGetInfo(const base::ListValue& args);
 +  void HandleGetThemes(const base::ListValue& args);

@@ -30,7 +30,8 @@ Painel centrado na janela para trocar de aba por uso recente, no estilo do Arc. 
 ## limites conhecidos
 
 - textos do painel em inglês, fixos no código (sem `IDS_*`/tradução).
-- Esc também chega à página (o monitor de eventos observa, não consome); em página carregando pode parar o carregamento.
+- Esc é consumido por um `ui::EventHandler` pré-alvo na janela do browser: cancela só o seletor e não chega à página nem sai de tela cheia.
+- se o Ctrl já foi solto quando o comando chega (o monitor só nasce depois), não há API portátil para ler o estado do modificador; a primeira tecla sem Ctrl cancela (não confirma).
 - só a janela atual: abas de outros spaces (outra janela/perfil) não entram.
 - qualquer aba aberta, fechada ou movida enquanto o painel está aberto cancela o painel.
 - não testado no navegador; Wayland e Windows não verificados (ver resumo).
@@ -41,6 +42,6 @@ Painel centrado na janela para trocar de aba por uso recente, no estilo do Arc. 
 - entrada: `BrowserCommandController` nos casos `IDC_CYCLE_TO_NEXT_TAB` / `IDC_CYCLE_TO_PREV_TAB` (upstream já liga Ctrl+Tab a eles em `accelerator_table.cc` e os reserva contra páginas). Chama `aerographene::ShowOrAdvanceTabSwitcher(browser, forward)`; se devolver `false` (1 aba, sem `BrowserView`) segue o caminho original. `IDC_SELECT_NEXT/PREVIOUS_TAB` (PgDn/PgUp) intocados. Os patches `tab-cycling-mru` não estão na série e não devem voltar.
 - estado: um `TabSwitcher` global por vez (`g_switcher`), dono de um `views::Widget` `TYPE_BUBBLE`, `CLIENT_OWNS_WIDGET`, `Activatable::kNo`, filho do widget do browser, centrado na janela. Fecha com `Finish(commit)` e `DeleteSoon`.
 - MRU: aba ativa primeiro, demais por `WebContents::GetLastActiveTimeTicks()` (stable sort). Seleção inicial índice 1 (Ctrl+Tab) ou último (Ctrl+Shift+Tab).
-- eventos: `views::EventMonitor::CreateWindowMonitor` na janela do browser (`kKeyPressed`, `kKeyReleased`, `kMousePressed`): soltar `VKEY_CONTROL` confirma; Esc ou clique no browser cancelam; tecla sem `EF_CONTROL_DOWN` confirma (soltura perdida). `WidgetObserver` no browser cancela em perda de ativação, ocultação ou destruição; `TabStripModelObserver` cancela em qualquer mudança que não seja só seleção.
+- eventos: `views::EventMonitor::CreateWindowMonitor` na janela do browser (`kKeyPressed`, `kKeyReleased`, `kMousePressed`): soltar `VKEY_CONTROL` confirma; clique no browser cancela; Esc é tratado por `EscFilter` (pré-alvo, consome o evento); tecla sem `EF_CONTROL_DOWN` cancela (soltura perdida; tecla alheia nunca confirma). `WidgetObserver` no browser cancela em perda de ativação, ocultação ou destruição; na destruição da janela o widget do seletor é solto sem `Hide()`; `TabStripModelObserver` cancela em qualquer mudança que não seja só seleção.
 - miniaturas: `ThumbnailTabHelper::thumbnail()`; só assina se `has_data()` e a aba não foi descartada (`SetSizeHint` + `RequestThumbnailImage`). O Helium não desliga a captura (`lazy-session-restore.patch` só impede recarregar aba restaurada pendente ao observar a miniatura).
 - validação feita: série aplica com `-F0` numa cópia de `tree3` no Cezanne. Pendente: `-fsyntax-only` do `.cc` novo (flags de `aerographene_topbar_row.cc`) e de `browser_command_controller.cc` (o host ficou inacessível durante a checagem; script em `/tmp/aero-c4/nohelium/syn-ts.sh`). Não feito: link, build completa, teste no navegador, Wayland, Windows, medição de memória.

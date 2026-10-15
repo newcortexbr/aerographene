@@ -27,7 +27,7 @@ Concluir marca a pref e leva a mesma aba à nova aba.
 
 - nada de rede: CSP `default-src 'none'`, `script-src`/`style-src`/`img-src 'self'`, `connect-src 'none'`. Sem fonte nem imagem externas; o wordmark (`wordmark.svg`, só texto, sem ícone) vem do pacote. A tipografia é `JetBrains Mono` se estiver instalada no sistema, senão `DejaVu Sans Mono`/monospace (a fonte não é empacotada no Linux).
 - sem `innerHTML` (Trusted Types do WebUI).
-- as mensagens do `SetupHandler` só valem se vierem do frame principal comitado em `chrome://setup/`; tema e buscador são validados contra as listas do navegador (a página nunca manda caminho nem URL); o seletor de pasta exige gesto do usuário.
+- as mensagens do `SetupHandler` só valem se vierem do frame principal comitado em `chrome://setup/`; tema e buscador são validados contra as listas do navegador (a página nunca manda caminho nem URL); mensagem malformada vinda da própria página rejeita o callback (`bad_request`) em vez de deixar a promessa pendente; `setSearchEngine` aceita o buscador atual (no-op); o seletor de pasta exige gesto do usuário.
 - recursos: `chrome/browser/resources/aero_setup/{setup.html,setup.css,setup.js,wordmark.svg}`, ids `IDR_AERO_SETUP_*` no `browser_resources.grd`.
 
 ## estado e limites

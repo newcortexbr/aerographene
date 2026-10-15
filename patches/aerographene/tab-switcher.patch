@@ -62,7 +62,7 @@ aerographene/commandbar-f3.patch (contexto do browser_command_controller.cc).
          CycleToMruTab(browser_,
 --- /dev/null
 +++ b/chrome/browser/ui/views/frame/aerographene_tab_switcher.cc
-@@ -0,0 +1,693 @@
+@@ -0,0 +1,737 @@
 +// Copyright 2026 The Aerographene Authors
 +// You can use, redistribute, and/or modify this source code under
 +// the terms of the GPL-3.0 license that can be found in the LICENSE file.
@@ -99,8 +99,10 @@ aerographene/commandbar-f3.patch (contexto do browser_command_controller.cc).
 +#include "ui/base/metadata/metadata_header_macros.h"
 +#include "ui/base/metadata/metadata_impl_macros.h"
 +#include "ui/color/color_id.h"
++#include "ui/aura/window.h"
 +#include "ui/color/color_provider.h"
 +#include "ui/events/event.h"
++#include "ui/events/event_handler.h"
 +#include "ui/events/event_observer.h"
 +#include "ui/events/keycodes/keyboard_codes.h"
 +#include "ui/gfx/canvas.h"
@@ -583,6 +585,10 @@ aerographene/commandbar-f3.patch (contexto do browser_command_controller.cc).
 +        this, browser_widget->GetNativeWindow(),
 +        {ui::EventType::kKeyPressed, ui::EventType::kKeyReleased,
 +         ui::EventType::kMousePressed});
++    // The monitor only observes: Esc is consumed by a pre-target handler so
++    // it does not also reach the page or exit fullscreen.
++    esc_window_ = browser_widget->GetNativeWindow();
++    esc_window_->AddPreTargetHandler(&esc_filter_);
 +    browser_widget_observation_.Observe(browser_widget);
 +    model_->AddObserver(this);
 +  }
@@ -591,6 +597,7 @@ aerographene/commandbar-f3.patch (contexto do browser_command_controller.cc).
 +
 +  ~TabSwitcher() override {
 +    StopObserving();
++    RemoveEscFilter();
 +    event_monitor_.reset();
 +    cards_.clear();
 +    panel_ = nullptr;
@@ -606,7 +613,7 @@ aerographene/commandbar-f3.patch (contexto do browser_command_controller.cc).
 +  }
 +
 +  // Ends the switcher; activates the selected tab when |commit|.
-+  void Finish(bool commit) {
++  void Finish(bool commit, bool widget_going_away = false) {
 +    if (finished_) {
 +      return;
 +    }
@@ -621,7 +628,13 @@ aerographene/commandbar-f3.patch (contexto do browser_command_controller.cc).
 +      }
 +    }
 +    StopObserving();
-+    if (widget_) {
++    if (widget_going_away) {
++      // The parent is being destroyed and the child widget may have no
++      // native window left: do not Hide(), just drop it.
++      cards_.clear();
++      panel_ = nullptr;
++      widget_.reset();
++    } else if (widget_) {
 +      widget_->Hide();
 +    }
 +    if (g_switcher == this) {
@@ -653,15 +666,17 @@ aerographene/commandbar-f3.patch (contexto do browser_command_controller.cc).
 +      }
 +      return;
 +    }
++    // Esc is handled (and consumed) by EscFilter.
 +    if (key == ui::VKEY_ESCAPE) {
-+      Finish(/*commit=*/false);
 +      return;
 +    }
-+    // A key without Ctrl means its release was missed (e.g. the Ctrl+Tab
-+    // was quicker than the widget): commit like a release.
-+    if (!is_ctrl && key != ui::VKEY_SHIFT && key != ui::VKEY_TAB &&
++    // A key press without Ctrl held means Ctrl was released before this
++    // monitor existed (the Ctrl+Tab command is dispatched before the
++    // widget is up and there is no portable way to query the modifier
++    // state): an unrelated key must not confirm the switch, so cancel.
++    if (!is_ctrl && key != ui::VKEY_SHIFT &&
 +        !(event.flags() & ui::EF_CONTROL_DOWN)) {
-+      Finish(/*commit=*/true);
++      Finish(/*commit=*/false);
 +    }
 +  }
 +
@@ -679,7 +694,8 @@ aerographene/commandbar-f3.patch (contexto do browser_command_controller.cc).
 +  void OnWidgetDestroying(views::Widget* widget) override {
 +    // The browser window goes away before our deferred deletion runs.
 +    event_monitor_.reset();
-+    Finish(/*commit=*/false);
++    RemoveEscFilter();
++    Finish(/*commit=*/false, /*widget_going_away=*/true);
 +  }
 +
 +  // TabStripModelObserver:
@@ -699,6 +715,32 @@ aerographene/commandbar-f3.patch (contexto do browser_command_controller.cc).
 +  }
 +
 + private:
++  // Consumes Esc while the switcher is open so it cancels only the switcher.
++  class EscFilter : public ui::EventHandler {
++   public:
++    explicit EscFilter(TabSwitcher* owner) : owner_(owner) {}
++    void OnKeyEvent(ui::KeyEvent* event) override {
++      if (owner_->finished_ || event->key_code() != ui::VKEY_ESCAPE) {
++        return;
++      }
++      if (event->type() == ui::EventType::kKeyPressed) {
++        owner_->Finish(/*commit=*/false);
++      }
++      event->SetHandled();
++      event->StopPropagation();
++    }
++
++   private:
++    const raw_ptr<TabSwitcher> owner_;
++  };
++
++  void RemoveEscFilter() {
++    if (esc_window_) {
++      esc_window_->RemovePreTargetHandler(&esc_filter_);
++      esc_window_ = nullptr;
++    }
++  }
++
 +  void StopObserving() {
 +    browser_widget_observation_.Reset();
 +    if (model_) {
@@ -729,6 +771,8 @@ aerographene/commandbar-f3.patch (contexto do browser_command_controller.cc).
 +  raw_ptr<SwitcherPanel> panel_ = nullptr;
 +  std::vector<raw_ptr<SwitcherCard>> cards_;
 +  std::unique_ptr<views::EventMonitor> event_monitor_;
++  EscFilter esc_filter_{this};
++  raw_ptr<aura::Window> esc_window_ = nullptr;
 +  base::ScopedObservation<views::Widget, views::WidgetObserver>
 +      browser_widget_observation_{this};
 +  int selected_ = 0;
