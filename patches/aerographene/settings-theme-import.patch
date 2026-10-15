@@ -69,7 +69,7 @@ diff --git a/chrome/app/settings_strings.grdp b/chrome/app/settings_strings.grdp
 +      The theme in this file is not valid.
 +    </message>
 +    <message name="IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_ERROR_RESERVED" desc="Error shown in the Appearance settings when the imported theme uses the name of a built-in theme.">
-+      The names "default" and "pixelized" belong to the built-in themes.
++      The names "default", "pixelized", "metro-v2", "e-ink-gb", "graphite", "classical", "e-ink" and "cli" belong to the built-in themes.
 +    </message>
 +    <message name="IDS_SETTINGS_AEROGRAPHENE_THEME_IMPORT_ERROR_IO" desc="Error shown in the Appearance settings when the imported theme could not be written to disk.">
 +      The theme could not be saved.
