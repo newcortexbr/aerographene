@@ -43,7 +43,7 @@ for t in src["themes"]:
 
 out = []
 for t in src["themes"]:
-    e = {k: t[k] for k in ("id", "name", "status", "modes") if k in t}
+    e = {k: t[k] for k in ("id", "name", "modes") if k in t}
     if t.get("note"):
         e["note"] = t["note"]
     e["print"] = {}

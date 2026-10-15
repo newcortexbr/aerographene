@@ -43,7 +43,7 @@ $("#copy").onclick = () => { navigator.clipboard?.writeText($("#cmd").textConten
 /* themes: themes.json (built by tools/build-gallery.sh) feeds the site picker and the gallery.
    the picker restyles the whole site (data-theme + data-mode on <html>); the gallery only chooses which print is shown. */
 const KEY = "aero-theme", root = document.documentElement;
-const STATUS = { approved: "approved", proposal: "proposal", soon: "coming soon" };
+const REAL_PRINTS = false; /* galeria so mostra prints reais do navegador; mockups ficam de fora */
 let THEMES = [], G = [], gi = 0, gmode = "dark", userPaused = reduce, hover = false, inView = true, timer;
 
 function applyTheme(id, m, save) {
@@ -64,8 +64,8 @@ function renderPicker() {
   if (!box.children.length) list.forEach(t => {
     const b = document.createElement("button");
     b.type = "button"; b.setAttribute("role", "radio"); b.dataset.id = t.id;
-    b.title = t.name + " · " + STATUS[t.status];
-    b.innerHTML = '<i class="sw"><u></u><u></u><u></u></i><span></span>' + (t.status === "proposal" ? "<small>proposal</small>" : "");
+    b.title = t.name;
+    b.innerHTML = '<i class="sw"><u></u><u></u><u></u></i><span></span>';
     b.children[1].textContent = t.name;
     b.onclick = () => applyTheme(t.id, root.dataset.mode, true);
     box.append(b);
@@ -100,9 +100,8 @@ function galSelect(i, focus) {
   const m = t.print[gmode] ? gmode : t.modes[0];
   const img = $("#galimg"), soon = $("#galsoon");
   $("#galaddr").textContent = "aerographene://theme/" + t.id;
-  $("#galstat").textContent = STATUS[t.status]; $("#galstat").dataset.s = t.status;
-  $("#galcap").textContent = [t.note, t.status === "proposal" ? "proposal: still being refined, not final." : "", t.status === "approved" ? "approved design." : "", t.print && Object.keys(t.print).length ? "mockup, made-up content." : ""].filter(Boolean).join(" ");
-  const p = t.print[m];
+  $("#galcap").textContent = t.note || "";
+  const p = REAL_PRINTS ? t.print[m] : null;
   img.hidden = !p; soon.hidden = !!p;
   if (p) { img.src = p; img.alt = t.name + " theme, " + m + " mode: mockup screenshot of the browser"; }
   $("#galpanel").setAttribute("aria-labelledby", "gt-" + t.id);
@@ -123,7 +122,7 @@ function buildGallery() {
   G.forEach((t, i) => {
     const b = document.createElement("button");
     b.type = "button"; b.role = "tab"; b.id = "gt-" + t.id; b.setAttribute("aria-controls", "galpanel");
-    b.style.setProperty("--i", i); b.textContent = t.name; b.dataset.s = t.status;
+    b.style.setProperty("--i", i); b.textContent = t.name;
     b.onclick = () => galSelect(i);
     tabs.append(b);
   });

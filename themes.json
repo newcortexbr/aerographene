@@ -3,7 +3,6 @@
   {
    "id": "default",
    "name": "default",
-   "status": "approved",
    "modes": [
     "dark"
    ],
@@ -33,7 +32,6 @@
   {
    "id": "metro-v2",
    "name": "metro v2",
-   "status": "approved",
    "modes": [
     "dark",
     "light"
@@ -78,7 +76,6 @@
   {
    "id": "e-ink-gb",
    "name": "e-ink gb",
-   "status": "approved",
    "modes": [
     "dark",
     "light"
@@ -123,7 +120,6 @@
   {
    "id": "e-ink",
    "name": "e-ink",
-   "status": "approved",
    "modes": [
     "dark",
     "light"
@@ -168,7 +164,6 @@
   {
    "id": "classical",
    "name": "classical",
-   "status": "approved",
    "modes": [
     "dark",
     "light"
@@ -213,7 +208,6 @@
   {
    "id": "graphite",
    "name": "graphite",
-   "status": "approved",
    "modes": [
     "dark",
     "light"
@@ -256,60 +250,8 @@
    }
   },
   {
-   "id": "neobrutalism",
-   "name": "neobrutalism v4",
-   "status": "proposal",
-   "modes": [
-    "dark",
-    "light"
-   ],
-   "print": {
-    "dark": "assets/gallery/neobrutalism-dark.webp",
-    "light": "assets/gallery/neobrutalism-light.webp"
-   },
-   "w": 1280,
-   "h": 698,
-   "tokens": {
-    "dark": {
-     "bg": "#0e0f10",
-     "panel": "#161718",
-     "line": "#6b7279",
-     "edge": "#6b7279",
-     "text": "#eceeef",
-     "text2": "#a3a9af",
-     "muted": "#8b9197",
-     "accent": "#ffc400",
-     "inv": "#0e0f10",
-     "notes": "#ffc400",
-     "term": "#ff6a13",
-     "sel": "#2a2d30",
-     "hl": "#ffc400",
-     "on-hl": "#0b0c0d",
-     "shadow-c": "#3a3f44"
-    },
-    "light": {
-     "bg": "#cfd2d4",
-     "panel": "#d8dbdd",
-     "line": "#0e0f10",
-     "edge": "#0e0f10",
-     "text": "#0e0f10",
-     "text2": "#3f464c",
-     "muted": "#3f464c",
-     "accent": "#0e0f10",
-     "inv": "#cfd2d4",
-     "notes": "#0e0f10",
-     "term": "#3f464c",
-     "sel": "#e4e6e7",
-     "hl": "#ffc400",
-     "on-hl": "#0b0c0d",
-     "shadow-c": "#0e0f10"
-    }
-   }
-  },
-  {
    "id": "pixelized",
    "name": "pixelized",
-   "status": "proposal",
    "modes": [
     "dark"
    ],
@@ -338,7 +280,6 @@
   {
    "id": "cli",
    "name": "cli / tui",
-   "status": "approved",
    "modes": [
     "dark",
     "light"
