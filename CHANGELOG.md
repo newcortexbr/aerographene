@@ -8,6 +8,7 @@ Newest first. Releases: https://github.com/newcortexbr/aerographene/releases
 - new tab page follows the colors, radii and fonts of the active theme
 - Pixelify Sans, Doto, Selawik and Noto Serif (SIL OFL 1.1) bundled in the Linux packages; Doto only in graphite titles
 - internal pages (settings, history, downloads, extensions, bookmarks) take colors, radius, font and toggles from the active theme
+- settings menu icons, buttons and toggles follow the theme palette outside the default theme
 - settings cards and pill buttons take the theme radius outside the default theme
 - classical lozenge and graphite dot get their own room in the tab; mono themes end long tab titles with an ellipsis
 - pixelized new tab greeting in Pixelify Sans

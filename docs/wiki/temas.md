@@ -208,6 +208,7 @@ o que mudou no navegador (patch `theme-fidelity`, compilado, não visto em runti
 - espaço do marcador: o `classical` reserva 6px antes do favicon (o losango não encosta nele) e o `graphite` reserva 12px depois do botão de fechar (o ponto não cobre o X).
 - `pixelized`: a saudação da nova aba usa Pixelify Sans.
 - temas com fonte mono (`cli`, `pixelized`): título longo da aba termina em reticências em vez de esmaecer, na barra superior e na sidebar. A aba tem largura fixa; com a mono de 13px títulos longos não cabem.
+- configurações fora do `default`: discos dos ícones do menu lateral no accent do tema (quadrados nos temas de raio 0), texto dos botões na cor do texto, toggle desligado vazado e ligado no accent.
 - configurações fora do `default`: cards, pílulas, seletores e busca usam o raio do tema em vez do raio fixo do visual One UI (28px nos cards, 20px nas pílulas).
 - tema de repositório (`theme.json`) usa o marcador `kFill` (fundo de seleção); não há chave para escolher outro marcador.
 - smoke (`build/smoke-themes.sh`): abre as páginas por `session.startup_urls` (URLs `chrome://` da linha de comando são descartadas), instala as fontes do tarball e gera `<tema>-sidebar.png` com sidebar e abas extras.

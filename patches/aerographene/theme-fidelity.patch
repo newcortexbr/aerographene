@@ -37,6 +37,10 @@ Propósito:
   em vez de esmaecer, na barra superior (Tab) e na sidebar (TabView).
 - settings fora do default: o raio fixo do settings-oneui (cards 28px,
   pílulas 20px) segue o raio do tema.
+  Também fora do default: discos do menu lateral (settings_menu.html) no
+  accent do tema, quadrados em temas de raio 0; texto de botão na cor do
+  texto; toggle desligado vazado com knob na cor secundária e ligado no
+  accent com knob on_accent.
 
 --- a/chrome/browser/resources/aero_newtab/aero_newtab.html
 +++ b/chrome/browser/resources/aero_newtab/aero_newtab.html
@@ -122,6 +126,24 @@ Propósito:
      if (enableWebuiRefresh2026) {
        this.addThemedColors_();
        ColorChangeUpdater.forDocument().start();
+--- a/chrome/browser/resources/settings/settings_menu/settings_menu.html
++++ b/chrome/browser/resources/settings/settings_menu/settings_menu.html
+@@ -81,11 +81,12 @@
+       }
+ 
+       .cr-nav-menu-item cr-icon {
+-        --iron-icon-fill-color: #fff;
++        /* aerographene: --aero-disc* come from the theme (colors.css). */
++        --iron-icon-fill-color: var(--aero-disc-fg, #fff);
+         --iron-icon-height: 16px;
+         --iron-icon-width: 16px;
+-        background: var(--oneui-disc, #6a7a92);
+-        border-radius: 50%;
++        background: var(--aero-disc, var(--oneui-disc, #6a7a92));
++        border-radius: var(--aero-disc-radius, 50%);
+         box-sizing: content-box;
+         margin-inline-end: 14px;
+         padding: 7px;
 --- a/chrome/browser/resources/settings/settings_ui/settings_ui.ts
 +++ b/chrome/browser/resources/settings/settings_ui/settings_ui.ts
 @@ -156,9 +156,12 @@
@@ -763,7 +785,7 @@ Propósito:
                                                                         : "");
 --- a/chrome/browser/ui/webui/theme_source.cc
 +++ b/chrome/browser/ui/webui/theme_source.cc
-@@ -67,32 +67,81 @@
+@@ -67,32 +67,96 @@
  }
  
  #if !BUILDFLAG(IS_ANDROID)
@@ -858,7 +880,22 @@ Propósito:
 +               base::NumberToString(radius), "px;--oneui-pill-radius:",
 +               base::NumberToString(radius), "px;--oneui-swatch-radius:",
 +               base::NumberToString(radius), "px;--oneui-avatar-radius:",
-+               base::NumberToString(radius), "px;}"});
++               base::NumberToString(radius), "px;"
++               // Menu discs in the theme accent (no per-page palette).
++               "--aero-disc:var(--color-sys-primary);"
++               "--aero-disc-fg:var(--color-sys-on-primary);--aero-disc-radius:",
++               square ? "0" : "50%",
++               ";"
++               // Button text in the text color: the accent on the button
++               // surface has too little contrast in dark themes.
++               "--color-button-foreground:var(--cr-primary-text-color);"
++               // Toggle off = hollow track with an outline-colored knob,
++               // on = accent track with an on-accent knob: always apart,
++               // also in one-hue palettes (e-ink-gb).
++               "--color-toggle-button-track-off:transparent;"
++               "--color-toggle-button-thumb-off:var(--cr-secondary-text-color);"
++               "--color-toggle-button-track-on:var(--color-sys-primary);"
++               "--color-toggle-button-thumb-on:var(--color-sys-on-primary);}"});
 +  }
 +  return css;
  }
