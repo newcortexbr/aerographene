@@ -24,6 +24,7 @@
 - comando canônico no runner: `bash build/build.sh`; jobs e PGO vêm dos inputs de `.github/workflows/build.yml`.
 - compilação completa fica no runner Cezanne (Ubuntu 24.04 bare metal desde 10/10/2026; antes WSL2), labels `self-hosted`, `linux`, `intense`; não iniciar Chromium na máquina local Comet Lake.
 - os três runners compartilham host e cache, confirmado pelo diagnóstico `cache-sharing-check`. Preserve `out/Default`; symlinks entre runners não são necessários.
+- toda build (Linux ou Windows) roda como job de workflow no runner, nunca por `nohup`/ssh solto no host; se não houver workflow para o alvo, crie um antes de compilar.
 - mantenha exclusão mútua pelo grupo de concurrency `build`: builds simultâneas nesse cache não foram validadas.
 - dispatch de build e publicação exigem pedido explícito; pushes em `main` que tocam build/patches/workflow também disparam compilação.
 
