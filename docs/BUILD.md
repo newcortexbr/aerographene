@@ -112,6 +112,16 @@ Item 12 do `SCOPE.md`. A versão `vX.Y.Z` do aerographene (v0.x.x enquanto não 
 
 `makepkg`, `namcap`, nfpm e instalação em containers testados em 13/10/2026 (`docs/PACKAGING.md`). O release.yml completo (dispatch) não foi executado.
 
+## windows (cross-compile)
+
+Builds Windows rodam como job do workflow `build-windows.yml` no runner (nunca `nohup`/ssh solto no host), no mesmo grupo de concurrency `build` do Linux:
+
+```bash
+gh workflow run build-windows.yml -R newcortexbr/aerographene --ref <branch> -f cpu=avx2
+```
+
+Inputs: `cpu` (`avx2` padrão, `avx1`, `both` = avx2 e depois avx1 no mesmo `out/Win`), `step` (`all`/`gen`/`ninja`/`pack` do `build/win/build.sh`), `src` (`AERO_WIN_SRC`, padrão `~/aerographene-win/src5`) e `jobs` (`AERO_WIN_JOBS`, padrão 10). O job usa o `build/win/build.sh` do próprio checkout e passa `AERO_WIN_FORCE=1`, porque a exclusão com a build Linux já vem do grupo `build` (sem isso o script veria a própria run em andamento). Timeout 12 h (~3 h por alvo). Com `step` `all` ou `pack`, o artifact `aerographene-windows-x64-<cpu>-vX.Y.Z` traz `<cpu>-windows--aerographene-vX.Y.Z.zip` (portátil), `<cpu>-windows--aerographene-vX.Y.Z.exe` (mini_installer) e `SHA256SUMS`; em `dist/<cpu>/` no host os nomes continuam os do script (`aerographene-win-<cpu>.zip`, `mini_installer-<cpu>.exe`). Uso manual (`build/win/build.sh <cpu> all`) segue igual. Detalhes em `docs/wiki/windows.md`.
+
 ## branding: versão e strings da UI
 
 Versão: `patches/aerographene/branding-version.patch` cria `chrome/common/aero_version.h` (`aero::kVersion = "0.3.0"`, header estático em `non_code_constants`, incluído só por `chrome_main_delegate.cc` e `version_ui.cc`; não toca BRANDING nem `base/version_info`, que são incluídos em toda a árvore e forçariam recompilação total a cada bump), e usa em `--version` (`aerographene 0.1.0 (Chromium 154.0.8037.97)`), `--product-version`, chrome://version e Sobre (`0.1.0 (Chromium 154.0.8037.97)` no campo de versão). Não altera mensagens GRIT nem HTML (diferente do `add-helium-versioning.patch`, que muda a mensagem `IDS_SETTINGS_ABOUT_PAGE_BROWSER_VERSION` e perderia as traduções). `GetVersionNumber()`, UA e extensões continuam em 154.0.8037.97.

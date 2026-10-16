@@ -1,0 +1,85 @@
+name: build-windows
+
+# ADR 0004: só o dono dispara. Nunca adicionar pull_request/pull_request_target.
+# Cross-compile Windows x64 no host (build/win/build.sh, docs/wiki/windows.md).
+on:
+  workflow_dispatch:
+    inputs:
+      cpu:
+        description: "alvo de CPU: avx2 = x86-64-v3; avx1 = ivybridge; both = avx2 e depois avx1 (mesmo out/Win, recompila tudo)"
+        type: choice
+        options: [avx2, avx1, both]
+        default: avx2
+      step:
+        description: "passo do build/win/build.sh: all = gen + ninja + pack; gen; ninja; pack"
+        type: choice
+        options: [all, gen, ninja, pack]
+        default: all
+      src:
+        description: "árvore Windows no host (AERO_WIN_SRC)"
+        default: "~/aerographene-win/src5"
+      jobs:
+        description: "-j do ninja (AERO_WIN_JOBS)"
+        default: "10"
+
+# mesmo grupo do build.yml: host, RAM e disco compartilhados
+concurrency:
+  group: build
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: [self-hosted, linux, intense]
+    # ~3 h por alvo; both ≈ 6–7 h; margem para recompilação do zero
+    timeout-minutes: 720
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: build
+        env:
+          CPU: ${{ inputs.cpu }}
+          STEP: ${{ inputs.step }}
+          SRC: ${{ inputs.src }}
+          AERO_WIN_JOBS: ${{ inputs.jobs }}
+          # exclusão com a build Linux já vem do grupo de concurrency; sem isto o
+          # linux_busy do script veria esta própria run em andamento
+          AERO_WIN_FORCE: "1"
+        run: |
+          set -euo pipefail
+          export AERO_WIN_SRC="${SRC/#\~/$HOME}"
+          if [ "$CPU" = both ]; then cpus="avx2 avx1"; else cpus="$CPU"; fi
+          for c in $cpus; do bash build/win/build.sh "$c" "$STEP"; done
+
+      - name: renomear artefatos (formato de release)
+        if: ${{ inputs.step == 'all' || inputs.step == 'pack' }}
+        id: art
+        env:
+          CPU: ${{ inputs.cpu }}
+          SRC: ${{ inputs.src }}
+        run: |
+          set -euo pipefail
+          src="${SRC/#\~/$HOME}"
+          dist="${AERO_WIN_DIST:-$(dirname "$(cd "$src" && pwd)")/dist}"
+          ver="$(sed -nE 's/^AERO_VERSION="([^"]+)".*/\1/p' build/config.sh)"
+          stage="$RUNNER_TEMP/win-art"; rm -rf "$stage"; mkdir -p "$stage"
+          if [ "$CPU" = both ]; then cpus="avx2 avx1"; else cpus="$CPU"; fi
+          for c in $cpus; do
+            cp "$dist/$c/aerographene-win-$c.zip" "$stage/$c-windows--aerographene-v$ver.zip"
+            cp "$dist/$c/mini_installer-$c.exe" "$stage/$c-windows--aerographene-v$ver.exe"
+          done
+          (cd "$stage" && sha256sum * > SHA256SUMS && ls -l --block-size=M .)
+          echo "path=$stage" >> "$GITHUB_OUTPUT"
+          echo "name=aerographene-windows-x64-${CPU}-v$ver" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ inputs.step == 'all' || inputs.step == 'pack' }}
+        # cota cheia não invalida a build; os pacotes ficam em dist/ no host
+        continue-on-error: true
+        with:
+          name: ${{ steps.art.outputs.name }}
+          path: ${{ steps.art.outputs.path }}
+          compression-level: 0
+          retention-days: 14
