@@ -47,7 +47,7 @@ terminal_session_unittest.cc (alvo aero_terminal:unit_tests).
 +}
 --- /dev/null
 +++ b/chrome/browser/ui/webui/aero_terminal/terminal_session.cc
-@@ -0,0 +1,224 @@
+@@ -0,0 +1,230 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -190,12 +190,19 @@ terminal_session_unittest.cc (alvo aero_terminal:unit_tests).
 +  launch.environment["HOME"] = home.value();
 +  launch.environment["SHELL"] = shell;
 +  launch.environment["PATH"] = env->GetVar("PATH").value_or(kDefaultPath);
-+  for (const std::string name_var : {"USER", "LOGNAME", "LANG", "LC_ALL"}) {
++  // Display/session variables let clipboard tools (wl-copy, xclip) and
++  // TUI apps inside the terminal reach the user's desktop session.
++  for (const std::string name_var :
++       {"USER", "LOGNAME", "LANG", "LC_ALL", "WAYLAND_DISPLAY", "DISPLAY",
++        "XDG_RUNTIME_DIR", "XAUTHORITY", "XDG_SESSION_TYPE",
++        "DBUS_SESSION_BUS_ADDRESS"}) {
 +    if (std::optional<std::string> v = env->GetVar(name_var)) {
 +      launch.environment[name_var] = *v;
 +    }
 +  }
 +  launch.current_directory = options.cwd.empty() ? home : options.cwd;
++  // sudo and other setuid tools need this; the terminal is the user's shell.
++  launch.allow_new_privs = true;
 +  // Only the slave goes to the child; LaunchProcess closes every other fd.
 +  launch.fds_to_remap.emplace_back(slave.get(), STDIN_FILENO);
 +  launch.fds_to_remap.emplace_back(slave.get(), STDOUT_FILENO);
@@ -369,7 +376,7 @@ terminal_session_unittest.cc (alvo aero_terminal:unit_tests).
 +#endif  // CHROME_BROWSER_UI_WEBUI_AERO_TERMINAL_TERMINAL_SESSION_H_
 --- /dev/null
 +++ b/chrome/browser/ui/webui/aero_terminal/terminal_session_unittest.cc
-@@ -0,0 +1,153 @@
+@@ -0,0 +1,158 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -468,12 +475,17 @@ terminal_session_unittest.cc (alvo aero_terminal:unit_tests).
 +
 +TEST(TerminalSessionTest, CleanEnvironment) {
 +  setenv("AERO_SECRET_SHOULD_NOT_LEAK", "1", 1);
-+  auto s = StartSh("echo T=$TERM; echo L=${AERO_SECRET_SHOULD_NOT_LEAK-none}");
++  setenv("WAYLAND_DISPLAY", "aero-test-wl", 1);
++  auto s = StartSh(
++      "echo T=$TERM; echo W=$WAYLAND_DISPLAY;"
++      " echo L=${AERO_SECRET_SHOULD_NOT_LEAK-none}");
 +  unsetenv("AERO_SECRET_SHOULD_NOT_LEAK");
++  unsetenv("WAYLAND_DISPLAY");
 +  ASSERT_TRUE(s);
 +  std::string out = ReadUntil(s->master_fd(), "L=");
 +  out += ReadUntil(s->master_fd(), "\n", base::Seconds(2));
 +  EXPECT_NE(out.find("T=xterm-256color"), std::string::npos) << out;
++  EXPECT_NE(out.find("W=aero-test-wl"), std::string::npos) << out;
 +  EXPECT_NE(out.find("L=none"), std::string::npos) << out;
 +  s->Terminate();
 +}

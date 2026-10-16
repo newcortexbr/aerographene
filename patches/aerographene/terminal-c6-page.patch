@@ -289,7 +289,7 @@ simulado).
      const l = raw && raw.length < 65536 ? JSON.parse(raw) : null;
      if (!l || l.v !== 1 || !Array.isArray(l.wins)) {
        return null;
-@@ -191,6 +199,84 @@
+@@ -191,6 +199,106 @@
    }
    win.classList.add('focused');
    win.style.zIndex = String(++topZ);
@@ -346,6 +346,28 @@ simulado).
 +  renderSide();
 +});
 +
++// OSC 52 (apps such as TUI agents setting the clipboard): write-only; a
++// "?" query is ignored so programs can never read the clipboard. Payloads
++// over kOsc52Max decoded bytes or with malformed base64 are dropped.
++const kOsc52Max = 1024 * 1024;
++function osc52Handler(data) {
++  const sep = data.indexOf(';');
++  const payload = sep < 0 ? '' : data.slice(sep + 1);
++  if (!payload || payload === '?' || payload.length > kOsc52Max * 4 / 3 + 4) {
++    return true;
++  }
++  let text;
++  try {
++    const bin = atob(payload);
++    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
++    text = new TextDecoder().decode(bytes);
++  } catch (e) {
++    return true;
++  }
++  navigator.clipboard.writeText(text).catch(() => {});
++  return true;
++}
++
 +// Keys while a terminal has focus: everything goes to it (xterm.js sends
 +// Ctrl+C as ^C, i.e. SIGINT). Ctrl+Shift+C copies the selection and
 +// Ctrl+Shift+V pastes (the browser's paste event, handled by xterm.js);
@@ -374,7 +396,7 @@ simulado).
  }
  
  // Calls onMove(dx, dy) while the pointer is captured by `handle`; onEnd runs
-@@ -269,7 +355,7 @@
+@@ -269,7 +377,7 @@
        h,
      };
    }
@@ -383,7 +405,7 @@ simulado).
    wins.add(entry);
    const apply = () => {
      win.style.left = `${box.x}px`;
-@@ -279,12 +365,14 @@
+@@ -279,12 +387,14 @@
    };
    apply();
  
@@ -400,7 +422,7 @@ simulado).
    };
    // Foreground process: asked on hover/focus, shown only as the tooltip.
    const refreshProcess = () => {
-@@ -293,8 +381,7 @@
+@@ -293,8 +403,7 @@
      }
      call('foreground', sessionId).then((name) => {
        procName = typeof name === 'string' ? name : '';
@@ -410,16 +432,17 @@ simulado).
      });
    };
    headEl.addEventListener('pointerenter', refreshProcess);
-@@ -310,6 +397,8 @@
+@@ -310,6 +419,9 @@
      scrollback: 5000,
      theme: {background: '#0b0d14'},
    });
 +  entry.term = term;
 +  term.attachCustomKeyEventHandler(keyHandler(term));
++  term.parser.registerOscHandler(52, osc52Handler);
    let sessionId = null;
    term.onTitleChange((t) => setTitle(t || `terminal ${id}`));
    term.onData((data) => {
-@@ -360,6 +449,7 @@
+@@ -360,6 +472,7 @@
      term.dispose();
      win.remove();
      wins.delete(entry);
@@ -427,7 +450,7 @@ simulado).
      scheduleSave();
    });
  
-@@ -369,7 +459,10 @@
+@@ -369,7 +482,10 @@
    term.open(body);
    refit();
    term.focus();
@@ -439,7 +462,7 @@ simulado).
      if (sid === null) {
        term.write('não foi possível abrir o terminal (limite de sessões?)\r\n');
        return;
-@@ -380,6 +473,7 @@
+@@ -380,6 +496,7 @@
      }
      sessionId = sid;
      sessions.set(sid, {term, setTitle});
@@ -447,7 +470,7 @@ simulado).
    });
  }
  
-@@ -391,6 +485,7 @@
+@@ -391,6 +508,7 @@
    if ((e.button !== 0 && e.button !== 1) || !onBackground(e)) {
      return;
    }
@@ -455,7 +478,7 @@ simulado).
    pan = {x: e.clientX, y: e.clientY, vx: view.x, vy: view.y};
    board.setPointerCapture(e.pointerId);
    board.classList.add('panning');
-@@ -430,28 +525,65 @@
+@@ -430,28 +548,65 @@
    }
  }, {passive: false});
  
