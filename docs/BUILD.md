@@ -45,7 +45,11 @@ Para forçar do zero: apagar `portablelinux/build/src`.
 
 ## -O3 seletivo (opcional, desligado por padrão; ainda não medido)
 
-Status em 15/10/2026: `wide` foi medido e rejeitado. Bench quick no Comet Lake, n=6, contra a build normal: `all_ms` +2,31% (pareada +1,65%), `first_ms` -0,97%, `pss` +0,19%. Inconclusivo (dentro do ruído, mas na direção errada e perto do limite de 2%); `wide` não entra na série. Próxima medição: n≥12, rodadas intercaladas (normal/-o3 alternadas). Os perfis novos abaixo ainda não foram compilados nem medidos. Um perfil só entra na série se vencer o teste (ganho acima do ruído, sem passar de 2% de piora na linha de base). Referência de comparação: a build normal da v0.3.2.
+Status em 15/10/2026: `wide` foi medido e rejeitado. Bench quick no Comet Lake, n=6, contra a build normal: `all_ms` +2,31% (pareada +1,65%), `first_ms` -0,97%, `pss` +0,19%. Inconclusivo (dentro do ruído, mas na direção errada e perto do limite de 2%); `wide` não entra na série. Próxima medição: n≥12, rodadas intercaladas (normal/-o3 alternadas). Os perfis novos abaixo ainda não foram compilados nem medidos.
+
+Medições de 16/10/2026 (v0.3.4 `2e3c099`, Comet Lake, `bench/ab.py --block tabs`, rodadas alternadas; atenção: `ab.py` usa `--repeat 2` sem `--quick`, e o governor registrado era `powersave` com EPP `performance`):
+
+- `lto3`: inconclusivo. n=11 voltas pareadas. `first_ms` -3,05% (pareada; IC95 -7,86% a -0,93%), `all_ms` -1,43% (IC95 -4,77% a +3,46%), `pss_mib` +2,36% (IC95 +0,22% a +18,23%). Ganho de abertura, mas a memória sobe perto do limite de 2%; precisa de mais voltas antes de decidir. Bloco `warm` não rodou. Um perfil só entra na série se vencer o teste (ganho acima do ruído, sem passar de 2% de piora na linha de base). Referência de comparação: a build normal da v0.3.2.
 
 O quê: `AERO_O3=off|hot|wide|base|ui|skia|lto3|global` (input `o3` do workflow `build`, choice, padrão `off`). `build/o3.py` edita `BUILD.gn`/`.gni` a cada execução do `inner.sh` e desfaz os originais quando o perfil muda (guarda em `src/.aero-o3/`, um backup por arquivo; antes do revert da domain substitution, porque `base/BUILD.gn` está na lista dela). Valida todas as âncoras antes de escrever (âncora ausente ou duplicada aborta sem editar nada).
 
