@@ -1,0 +1,20 @@
+# aerographene: restaura a URL base do Google (www.google.com) para o buscador padrão.
+# Com a entrada "google" de volta (defaults-f4.patch), {google:baseURL} resolve para
+# google_util::kGoogleHomepageURL. A domain substitution do ungoogled-chromium (domain_regex.list +
+# domain_substitution.list, que inclui este arquivo) reescreve o literal para www.9oo91e.qjz9zk, que o
+# block-trk-and-subdomains.patch bloqueia (ERR_BLOCKED_BY_CLIENT). O literal é dividido em dois para
+# a regex "google([A-Za-z\-]*?\\*?)\.com" não casar; o compilador concatena as strings.
+# Ordem: depois de defaults-f4.patch. Origem: aerographene (GPL-3.0); contexto do Chromium (BSD-3).
+--- a/components/google/core/common/google_util.cc
++++ b/components/google/core/common/google_util.cc
+@@ -40,7 +40,9 @@ BASE_FEATURE(kIsViewerGoogleSearchUrl, b
+ 
+ // Global functions -----------------------------------------------------------
+ 
+-const char kGoogleHomepageURL[] = "https://www.google.com/";
++// Literal dividido de propósito: ver patches/aerographene/google-base-url.patch.
++const char kGoogleHomepageURL[] =
++    "https://www.goo" "gle.com/";
+ const char kGoogleSearchPrewarmPath[] = "/search/warmup.html";
+ 
+ bool HasGoogleSearchQueryParam(std::string_view str) {
