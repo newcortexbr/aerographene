@@ -47,7 +47,7 @@ terminal_session_unittest.cc (alvo aero_terminal:unit_tests).
 +}
 --- /dev/null
 +++ b/chrome/browser/ui/webui/aero_terminal/terminal_session.cc
-@@ -0,0 +1,230 @@
+@@ -0,0 +1,231 @@
 +// Copyright 2026 The aerographene Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
