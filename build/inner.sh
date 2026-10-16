@@ -158,8 +158,10 @@ if [ -f "${_src_dir}/.downloaded.stamp" ]; then
     elif [ -z "${have_hash}" ]; then
         # sem hash = aplicação anterior interrompida (árvore parcialmente patcheada)
         echo "== árvore parcial (sem hash)"; full_recreate
-    elif [ "${want_hash}" != "${have_hash}" ]; then
-        echo "== série de patches mudou: re-patch incremental"
+    elif [ "${want_hash}" != "${have_hash}" ] || [ -f "${_src_dir}/.domsub.stamp" ]; then
+        # domain substitution desligada (15/10/2026): árvore ainda substituída também força o re-patch,
+        # que reverte a domsub pelo cache e reaplica a série sobre a árvore limpa
+        echo "== série de patches mudou ou domsub pendente de revert: re-patch incremental"
         if ! incremental_repatch; then echo "== incremental falhou"; full_recreate; fi
     fi
 fi
@@ -285,17 +287,12 @@ fi
 grep -q "kVersion = \"${AERO_VERSION}\";" "${_src_dir}/chrome/common/aero_version.h" \
     || { echo "erro: AERO_VERSION=${AERO_VERSION} (build/config.sh) != chrome/common/aero_version.h; atualize patches/aerographene/branding-version.patch" >&2; exit 1; }
 
-echo "== domain substitution (com cache para revert)"
-if [ ! -f "${_src_dir}/.domsub.stamp" ]; then
-    rm -f "${DOMSUB_CACHE}"
-    "${_main_repo}/utils/domain_substitution.py" apply -r "${_main_repo}/domain_regex.list" \
-        -f "${_main_repo}/domain_substitution.list" -c "${DOMSUB_CACHE}" "${_src_dir}"
-    touch "${_src_dir}/.domsub.stamp"
-    # o revert da domsub regrava arquivos sem o bit de execução (ex.: tools/clang/scripts/update.py)
-    if [ -f "${MTIME_SNAP}.exec" ]; then
-        while read -r f; do [ -f "${_src_dir}/${f}" ] && chmod +x "${_src_dir}/${f}"; done < "${MTIME_SNAP}.exec"
-        rm -f "${MTIME_SNAP}.exec"
-    fi
+# domain substitution do ungoogled DESLIGADA (decisão do dono, 15/10/2026: não censurar Google;
+# google.com etc. ficam reais). Árvores antigas com .domsub.stamp são revertidas em incremental_repatch.
+# o revert da domsub regrava arquivos sem o bit de execução (ex.: tools/clang/scripts/update.py)
+if [ -f "${MTIME_SNAP}.exec" ]; then
+    while read -r f; do [ -f "${_src_dir}/${f}" ] && chmod +x "${_src_dir}/${f}"; done < "${MTIME_SNAP}.exec"
+    rm -f "${MTIME_SNAP}.exec"
 fi
 fix_tool_downloading
 restore_mtimes
