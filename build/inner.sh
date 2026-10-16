@@ -296,6 +296,19 @@ if [ -f "${MTIME_SNAP}.exec" ]; then
 fi
 fix_tool_downloading
 restore_mtimes
+# o revert da domsub devolve aos arquivos o mtime anterior (_update_timestamp set_new=False), mais antigo
+# que os .o: o ninja não recompila e o binário fica misto (qjz9zk + googleapis.com), o que dispara CHECK
+# no optimization_guide (type_url do metadata fora da allowlist; SIGTRAP no smoke de 16/10/2026).
+# Toque único em toda a lista para forçar a recompilação; marcador evita repetir.
+if [ ! -f "${_src_dir}/.domsub.stamp" ] && [ ! -f "${_src_dir}/.domsub-reverted.touched" ]; then
+    echo "== toca arquivos da lista de domain substitution (força recompilação pós-revert)"
+    n=0
+    while read -r f; do
+        [ -n "${f}" ] && [ -f "${_src_dir}/${f}" ] && [ ! -L "${_src_dir}/${f}" ] && touch "${_src_dir}/${f}" && n=$((n + 1))
+    done < "${_main_repo}/domain_substitution.list"
+    echo "tocados: ${n}"
+    touch "${_src_dir}/.domsub-reverted.touched"
+fi
 
 echo "== -O3 seletivo: ${AERO_O3}"
 python3 /aero/build/o3.py --src "${_src_dir}" --state "${AERO_O3_STATE}" --profile "${AERO_O3}"
