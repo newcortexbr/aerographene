@@ -7,4 +7,3 @@ Type=Application
 Icon=aerographene
 NoDisplay=true
 MimeType=application/x-aerotheme;
-StartupWMClass=aerographene

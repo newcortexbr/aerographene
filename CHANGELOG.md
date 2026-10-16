@@ -15,6 +15,7 @@ Newest first. Releases: https://github.com/newcortexbr/aerographene/releases
 - version 0.3.4 in the binary and package names
 - chromium-web-store without a permanent service worker
 - theme smoke test opens the pages for real and adds sidebar shots
+- theme importer desktop entry no longer declares `StartupWMClass`; KDE Plasma pinned the browser window to it and the pinned icon ran the importer
 
 ## v0.3.3 (2026-10-15)
 
